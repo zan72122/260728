@@ -33,7 +33,8 @@ KKM.Chamber = class Chamber {
      筒に貼りついて回り、くさびが写真の大きな連続領域を映すので、
      世界全体が写真でできた曼荼羅になる */
   setPhotoLayer(srcCanvas) {
-    const MAX = 480;
+    // 表示用は高解像度のまま保持（写真ダイレクト層が原寸でサンプリングする）
+    const MAX = 1400;
     const s = Math.min(1, MAX / Math.max(srcCanvas.width, srcCanvas.height));
     const c = document.createElement("canvas");
     c.width = Math.round(srcCanvas.width * s);
@@ -41,8 +42,17 @@ KKM.Chamber = class Chamber {
     const g = c.getContext("2d");
     g.imageSmoothingQuality = "high";
     g.drawImage(srcCanvas, 0, 0, c.width, c.height);
+    // 保存用は 800px に落として localStorage にやさしく
     let url = null;
-    try { url = c.toDataURL("image/jpeg", 0.72); } catch (e) {}
+    try {
+      const SAVE = 800;
+      const ss = Math.min(1, SAVE / Math.max(c.width, c.height));
+      const sc = document.createElement("canvas");
+      sc.width = Math.round(c.width * ss);
+      sc.height = Math.round(c.height * ss);
+      sc.getContext("2d").drawImage(c, 0, 0, sc.width, sc.height);
+      url = sc.toDataURL("image/jpeg", 0.72);
+    } catch (e) {}
     this.photoLayer = { canvas: c, url, ready: true };
   }
 
@@ -524,11 +534,15 @@ KKM.Chamber = class Chamber {
     const light = opts.light || "asa";
     const lightDir = opts.lightDir || null;
     const night = light === "yoru";
+    // 写真ダイレクト層モード：背景は透明のまま（写真は下の層が原寸で描く）
+    const photoDirect = !!opts.photoDirect && this.photoLayer;
 
-    this._drawLight(ctx, pixR, full, light, lightDir, t);
+    if (!photoDirect) {
+      this._drawLight(ctx, pixR, full, light, lightDir, t);
+    }
 
     // ── ゆっくり動く光斑（コースティック） ──
-    if (light !== "yoko") {
+    if (light !== "yoko" && !photoDirect) {
       ctx.globalCompositeOperation = "screen";
       const warm = light === "yuyake";
       const blobs = night ? [

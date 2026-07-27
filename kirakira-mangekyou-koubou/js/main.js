@@ -102,8 +102,14 @@
     const viewR = Math.min(w, h) / 2 * (dockOpen ? 0.85 : 0.94);
     kaleido.drawSurround(ctx, w, h, cx, cy, viewR, contentRot(), S.hole);
     const chPix = Math.min(560, Math.max(220, viewR | 0));
-    kaleido.renderChamber(chamber, chPix, S.tubeAngle, chamberOpts());
-    kaleido.draw(ctx, cx, cy, viewR, sectorOpts(1));
+    const cOpts = chamberOpts();
+    // 写真ダイレクト層：原寸写真にひかりを焼き込み、セクターが直接サンプリング
+    const photoSrc = kaleido.preparePhoto(chamber, S.light, cOpts.lightDir, chamber.time);
+    kaleido.renderChamber(chamber, chPix, S.tubeAngle, { ...cOpts, photoDirect: !!photoSrc });
+    kaleido.draw(ctx, cx, cy, viewR, {
+      ...sectorOpts(1),
+      photo: photoSrc ? { canvas: photoSrc, zoom: S.photoZoom } : null,
+    });
   }
 
   /* ── ドックの「なかみのまど」（生のなかみ） ── */

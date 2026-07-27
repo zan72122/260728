@@ -99,6 +99,55 @@ KKM.Kaleido = class Kaleido {
     g.drawImage(imgCanvas, -dw / 2, -dh / 2, dw, dh);
   }
 
+  /* ── 写真ダイレクト層の下ごしらえ ──
+     ひかりのフタの色味を、原寸写真に1回だけ乗算で焼き込む。
+     セクターは中間バッファを通さず、この原寸キャンバスを
+     直接サンプリングするので、写真は画面ネイティブ解像度で映る */
+  preparePhoto(chamber, light, lightDir, t) {
+    const layer = chamber.photoLayer;
+    if (!layer || !layer.ready) return null;
+    const src = layer.canvas;
+    if (light === "asa") return src;          // 素通し：ティント不要
+    if (!this.photoTintCanvas ||
+        this.photoTintCanvas.width !== src.width ||
+        this.photoTintCanvas.height !== src.height) {
+      this.photoTintCanvas = document.createElement("canvas");
+      this.photoTintCanvas.width = src.width;
+      this.photoTintCanvas.height = src.height;
+      this.photoTintCtx = this.photoTintCanvas.getContext("2d");
+    }
+    const g = this.photoTintCtx;
+    const w = src.width, h = src.height;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = "source-over";
+    g.globalAlpha = 1;
+    g.drawImage(src, 0, 0);
+    g.save();
+    g.translate(w / 2, h / 2);
+    g.globalCompositeOperation = "multiply";
+    g.globalAlpha = 0.72;
+    // 写真のmin寸法がセル(2×pixM)を覆う前提でセル座標に合わせる
+    const pixRp = Math.min(w, h) / 2 / 1.45;
+    chamber._lightGradientFill(g, pixRp, Math.max(w, h) / 2, light, lightDir, t);
+    g.restore();
+    return this.photoTintCanvas;
+  }
+
+  /* セクター変換の中で写真を原寸から直接描く */
+  _drawPhotoInSector(ctx, photo, s, apexShift, tubeAngle) {
+    const img = photo.canvas;
+    const pixM = this.chamberFull;
+    const cover = (2 * pixM) / Math.min(img.width, img.height) * (photo.zoom || 1);
+    const dw = img.width * cover, dh = img.height * cover;
+    ctx.save();
+    ctx.scale(s, s);
+    ctx.translate(0, -apexShift);
+    ctx.rotate(tubeAngle);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+  }
+
   /* 鏡の性格による下ごしらえ（波打ち・ぼかし）→ 描画ソースを返す */
   _prepareSource(skin, t) {
     const skinDef = KKM.SKINS[skin] || {};
@@ -161,6 +210,7 @@ KKM.Kaleido = class Kaleido {
       quality = 1,
       time = 0,
       apexFrac = 0.42,     // くさびの頂点がセル中心からずれる量（0 で中心固定）
+      photo = null,        // 写真ダイレクト層 { canvas, zoom }
     } = opts;
     this.apexFrac = apexFrac;
     this.time = time;
@@ -186,10 +236,10 @@ KKM.Kaleido = class Kaleido {
     const zoom = lens === "mushi" ? 1.5 : 1.0;
 
     if (mirrors === "p") {
-      this._drawParallel(tctx, tcx, tcy, viewR, source, skin, skew, tubeAngle, zoom, hole);
+      this._drawParallel(tctx, tcx, tcy, viewR, source, skin, skew, tubeAngle, zoom, hole, photo);
     } else {
       this._drawRadial(tctx, tcx, tcy, viewR, source, skin, skew, tubeAngle, zoom, hole,
-                       KKM.MIRRORS[mirrors].sector, quality);
+                       KKM.MIRRORS[mirrors].sector, quality, photo);
     }
 
     // ── レンズ変形して本画面へ ──
@@ -225,7 +275,7 @@ KKM.Kaleido = class Kaleido {
   }
 
   /* ── 放射モード（2/3/4まい鏡） ── */
-  _drawRadial(ctx, cx, cy, viewR, source, skin, skew, tubeAngle, zoom, hole, sectorAngle, quality) {
+  _drawRadial(ctx, cx, cy, viewR, source, skin, skew, tubeAngle, zoom, hole, sectorAngle, quality, photo) {
     const TAU = Math.PI * 2;
     const a = Math.max(0.06, sectorAngle + skew);
     const overlap = 0.012;
@@ -259,6 +309,14 @@ KKM.Kaleido = class Kaleido {
       ctx.arc(0, 0, viewR * 1.5, E - overlap, E + span);
       ctx.closePath();
       ctx.clip();
+
+      // 写真ダイレクト層：中間バッファを通さず原寸から直接
+      if (photo) {
+        ctx.save();
+        ctx.transform(m0, m1, m2, m3, 0, 0);
+        this._drawPhotoInSector(ctx, photo, s, APEX_SHIFT, tubeAngle);
+        ctx.restore();
+      }
 
       // 内容: 鏡映の積み重ね → たまりへのオフセット → 回転
       const drawContent = (extraRot, alpha) => {
@@ -335,7 +393,7 @@ KKM.Kaleido = class Kaleido {
   }
 
   /* ── ずーっと鏡（平行 2 枚鏡の無限廊下） ── */
-  _drawParallel(ctx, cx, cy, viewR, source, skin, skew, tubeAngle, zoom, hole) {
+  _drawParallel(ctx, cx, cy, viewR, source, skin, skew, tubeAngle, zoom, hole, photo) {
     const pix = this.chamberPix;
     const pixM = this.chamberFull;
     const skinDef = KKM.SKINS[skin] || {};
@@ -361,6 +419,7 @@ KKM.Kaleido = class Kaleido {
       ctx.translate(0, kBand * H);
       if (kBand % 2 !== 0) ctx.scale(1, -1);
       ctx.rotate(kBand * skew * 5);
+      if (photo) this._drawPhotoInSector(ctx, photo, s, APEX, tubeAngle);
       ctx.scale(s, s);
       ctx.translate(0, -APEX);
       ctx.rotate(tubeAngle);

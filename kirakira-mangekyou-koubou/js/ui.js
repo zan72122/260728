@@ -24,6 +24,7 @@ KKM.state = {
   tubeAngle: 0,
   tubeOmega: 0,
   titleAngle: 0,
+  photoZoom: 1,          // ピンチで写真を拡大・縮小
   dragging: false,
   tilt: { x: 0, y: 1, active: false },
   coachDone: false,
@@ -504,20 +505,47 @@ KKM.UI = (() => {
 
     const cv = els.peekCanvas;
     let lastA = 0, lastT = 0, activeId = null;
+    const pointers = new Map();     // ゆび2本のピンチも見る
+    let pinch = null;               // { d0, z0 }
     const center = () => ({ x: cv.clientWidth / 2, y: cv.clientHeight / 2 });
 
-    cv.addEventListener("pointerdown", e => {
+    const pinchDist = () => {
+      const [a, b] = [...pointers.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+    const startRotation = (x, y, id) => {
       const c = center();
-      activeId = e.pointerId;
-      cv.setPointerCapture(e.pointerId);
-      lastA = Math.atan2(e.clientY - c.y, e.clientX - c.x);
+      activeId = id;
+      lastA = Math.atan2(y - c.y, x - c.x);
       lastT = performance.now();
       S.dragging = true;
       S.tubeOmega = 0;
+    };
+
+    cv.addEventListener("pointerdown", e => {
+      try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        // ピンチ開始：回転をやめて、写真の拡大・縮小へ
+        S.dragging = false;
+        activeId = null;
+        pinch = { d0: Math.max(20, pinchDist()), z0: S.photoZoom };
+      } else if (pointers.size === 1) {
+        startRotation(e.clientX, e.clientY, e.pointerId);
+      }
       dismissCoach();
       Sound.ensure();
     });
     cv.addEventListener("pointermove", e => {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && pointers.size >= 2) {
+        if (chamber.photoLayer) {
+          S.photoZoom = Math.max(0.45, Math.min(3, pinch.z0 * pinchDist() / pinch.d0));
+          markDirty();
+        }
+        return;
+      }
       if (!S.dragging || e.pointerId !== activeId) return;
       const c = center();
       const dx = e.clientX - c.x, dy = e.clientY - c.y;
@@ -534,9 +562,16 @@ KKM.UI = (() => {
       lastA = a; lastT = now;
     });
     const release = e => {
-      if (e.pointerId !== activeId) return;
-      S.dragging = false;
-      activeId = null;
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+      if (pointers.size === 1) {
+        // のこった1本で回転をつづける
+        const [[id, p]] = [...pointers.entries()];
+        startRotation(p.x, p.y, id);
+      } else if (pointers.size === 0) {
+        S.dragging = false;
+        activeId = null;
+      }
     };
     cv.addEventListener("pointerup", release);
     cv.addEventListener("pointercancel", release);
@@ -627,8 +662,11 @@ KKM.UI = (() => {
     g.fillRect(0, 0, size, size);
     const photoKal = window.KKM_kaleido;
     if (photoKal && window.KKM_chamberOpts) {
-      photoKal.renderChamber(chamber, 520, S.tubeAngle, window.KKM_chamberOpts());
+      const cOpts = window.KKM_chamberOpts();
+      const photoSrc = photoKal.preparePhoto(chamber, S.light, cOpts.lightDir, chamber.time);
+      photoKal.renderChamber(chamber, 520, S.tubeAngle, { ...cOpts, photoDirect: !!photoSrc });
       photoKal.draw(g, size / 2, size / 2 - 20, size * 0.4, {
+        photo: photoSrc ? { canvas: photoSrc, zoom: S.photoZoom } : null,
         mirrors: S.mirrors,
         skew: S.skew01 * KKM.SKEW_MAX,
         tubeAngle: Math.PI / 2 - chamber.focusAngle(),
@@ -665,6 +703,7 @@ KKM.UI = (() => {
       localStorage.setItem(KKM.SAVE_KEY, JSON.stringify({
         tube: S.tube, mirrors: S.mirrors, skew01: S.skew01,
         skin: S.skin, light: S.light, hole: S.hole, lens: S.lens,
+        photoZoom: S.photoZoom,
         stamps: KKM.Stampify.Store.serialize(),
         chamber: chamber.serialize(),
       }));
@@ -686,6 +725,9 @@ KKM.UI = (() => {
       if (KKM.LIGHTS[data.light]) S.light = data.light;
       if (KKM.HOLES[data.hole]) S.hole = data.hole;
       if (KKM.LENSES[data.lens]) S.lens = data.lens;
+      if (typeof data.photoZoom === "number") {
+        S.photoZoom = Math.max(0.45, Math.min(3, data.photoZoom));
+      }
       KKM.Stampify.Store.restore(data.stamps);
       const ok = chamber.restore(data.chamber);
       els.water.classList.toggle("on", chamber.liquid);

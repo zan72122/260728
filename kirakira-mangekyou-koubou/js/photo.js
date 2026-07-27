@@ -109,6 +109,7 @@ KKM.Photo = (() => {
     chamber.clearNow();
     if (chamber.liquid) chamber.setLiquid(true);
     chamber.setPhotoLayer(pending.base);
+    KKM.state.photoZoom = 1;
     // キャンディーチップは飾りの粒として上を転がる
     const Store = KKM.Stampify.Store;
     for (const chip of pending.chips.slice(0, 4)) {
