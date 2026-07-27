@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
-   main.js — 起動・リサイズ・メインループ
+   main.js — 起動・リサイズ・メインループ（ワンワールド）
    ═══════════════════════════════════════════════════════════ */
 "use strict";
 
@@ -9,7 +9,7 @@
 
   const chamber = new KKM.Chamber();
   const kaleido = new KKM.Kaleido();
-  window.KKM_kaleido = kaleido;   // しゃしん用に共有
+  window.KKM_kaleido = kaleido;
 
   const canvases = {};
   let lastT = 0;
@@ -35,16 +35,13 @@
     return entry;
   }
 
-  /* 内容の回転（なかみの重心を追う） */
   function contentRot() {
     return Math.PI / 2 - chamber.focusAngle();
   }
 
-  /* チャンバー描画オプション（ひかりのフタ） */
   function chamberOpts() {
     const opts = { light: S.light };
     if (S.light === "yoko") {
-      // 画面の左上から差す光 → チャンバー（筒）座標へ
       const rot = contentRot();
       const sx = -0.72, sy = -0.7;
       const cos = Math.cos(rot), sin = Math.sin(rot);
@@ -70,8 +67,7 @@
     };
   }
 
-  /* ── 各画面の描画 ─────────────────────────── */
-
+  /* ── タイトル ── */
   function drawTitle() {
     const e = resizeCanvas(canvases["title-canvas"]);
     const { ctx, w, h } = e;
@@ -81,7 +77,6 @@
     ctx.fillStyle = "#17102a";
     ctx.fillRect(0, 0, w, h);
     kaleido.renderChamber(chamber, Math.min(420, viewR | 0), S.titleAngle, chamberOpts());
-    // タイトルはいつも まるいあな・ふつうレンズで大きく
     kaleido.draw(ctx, cx, cy, viewR, { ...sectorOpts(0.5), hole: "maru", lens: "futsu" });
     let veil = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.7);
     veil.addColorStop(0, "rgba(23, 16, 42, .58)");
@@ -91,19 +86,27 @@
     ctx.fillRect(0, 0, w, h);
   }
 
-  function drawBenchPreview() {
-    const e = resizeCanvas(canvases["bench-preview"]);
+  /* ── せかい（全画面万華鏡） ── */
+  function drawWorld() {
+    const e = resizeCanvas(canvases["peek-canvas"]);
     const { ctx, w, h } = e;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = "#17102a";
-    ctx.fillRect(0, 0, w, h);
-    const viewR = Math.min(w, h) / 2 * 0.96;
-    kaleido.renderChamber(chamber, Math.min(340, viewR | 0), S.titleAngle, chamberOpts());
-    kaleido.draw(ctx, w / 2, h / 2, viewR, sectorOpts(1));
+    const dockOpen = KKM.UI.dockInfo().open;
+    const landscape = w > h;
+    // ドックが開いているときは、円をドックの反対側へ少し寄せる
+    const cx = dockOpen && landscape ? w * 0.40 : w / 2;
+    const cy = dockOpen && !landscape ? h * 0.40 : h / 2;
+    const viewR = Math.min(w, h) / 2 * (dockOpen ? 0.85 : 0.94);
+    kaleido.drawSurround(ctx, w, h, cx, cy, viewR, contentRot(), S.hole);
+    const chPix = Math.min(560, Math.max(220, viewR | 0));
+    kaleido.renderChamber(chamber, chPix, S.tubeAngle, chamberOpts());
+    kaleido.draw(ctx, cx, cy, viewR, sectorOpts(1));
   }
 
-  /* 断面図の「なかみのまど」：生のなかみが見える小窓 */
+  /* ── ドックの「なかみのまど」（生のなかみ） ── */
   function drawChamberWindow() {
+    const info = KKM.UI.dockInfo();
+    if (!info.open || info.cat !== "fill") return;
     const e = resizeCanvas(canvases["chamber-view"]);
     const { ctx, w, h } = e;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -115,7 +118,7 @@
     ctx.arc(w / 2, h / 2, viewR, 0, Math.PI * 2);
     ctx.clip();
     ctx.translate(w / 2, h / 2);
-    chamber.draw(ctx, pixR, 0, { margin: 1.18, ...chamberOpts() });
+    chamber.draw(ctx, pixR, S.tubeAngle, { margin: 1.18, ...chamberOpts() });
     const shine = ctx.createLinearGradient(-viewR, -viewR, viewR * 0.4, viewR * 0.6);
     shine.addColorStop(0, "rgba(255,255,255,.3)");
     shine.addColorStop(0.3, "rgba(255,255,255,.04)");
@@ -125,20 +128,7 @@
     ctx.restore();
   }
 
-  function drawPeek() {
-    const e = resizeCanvas(canvases["peek-canvas"]);
-    const { ctx, w, h } = e;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const cx = w / 2, cy = h / 2;
-    const viewR = Math.min(w, h) / 2 * 0.9;
-    kaleido.drawSurround(ctx, w, h, cx, cy, viewR, contentRot(), S.hole);
-    const chPix = Math.min(560, Math.max(220, viewR | 0));
-    kaleido.renderChamber(chamber, chPix, S.tubeAngle, chamberOpts());
-    kaleido.draw(ctx, cx, cy, viewR, sectorOpts(1));
-  }
-
-  /* ── メインループ ─────────────────────────── */
-
+  /* ── メインループ ── */
   function frame(t) {
     requestAnimationFrame(frame);
     if (!lastT) { lastT = t; return; }
@@ -147,15 +137,12 @@
     if (dt > 0.1) dt = 0.1;
 
     S.titleAngle += dt * 0.11;
-    if (S.screen === "peek") {
-      if (!S.dragging) {
-        S.tubeAngle += S.tubeOmega * dt;
-        S.tubeOmega *= Math.exp(-dt * 1.5);
-        if (Math.abs(S.tubeOmega) < 0.004) S.tubeOmega = 0;
-      }
+    if (S.screen === "peek" && !S.dragging) {
+      S.tubeAngle += S.tubeOmega * dt;
+      S.tubeOmega *= Math.exp(-dt * 1.5);
+      if (Math.abs(S.tubeOmega) < 0.004) S.tubeOmega = 0;
     }
 
-    // ── 重力（かたむき対応） ──
     const G = KKM.PHYSICS.GRAVITY;
     let gx = 0, gy = G;
     if (S.screen === "peek" && S.tilt.active) {
@@ -165,22 +152,17 @@
       if (mag < 0.18) { gx *= 0.4; gy *= 0.4; }
     }
 
-    const angleForPhysics =
-      S.screen === "peek" ? S.tubeAngle :
-      S.screen === "title" ? S.titleAngle : 0;
-    const omegaForPhysics =
-      S.screen === "peek" ? S.tubeOmega :
-      S.screen === "title" ? 0.11 : 0;
+    const angleForPhysics = S.screen === "peek" ? S.tubeAngle : S.titleAngle;
+    const omegaForPhysics = S.screen === "peek" ? S.tubeOmega : 0.11;
     chamber.step(dt, { x: gx, y: gy }, angleForPhysics, omegaForPhysics);
 
     if (S.screen === "title") {
       drawTitle();
-    } else if (S.screen === "workshop") {
-      drawBenchPreview();
+    } else {
+      drawWorld();
       drawChamberWindow();
+      KKM.UI.renderCatalog();
       updateGauge();
-    } else if (S.screen === "peek") {
-      drawPeek();
       if (chamber._sparkles.length > 0) {
         sparkleGlow += dt;
         if (sparkleGlow > 0.4) { KKM.Sound.shimmer(); sparkleGlow = 0; }
@@ -190,20 +172,18 @@
 
   function updateGauge() {
     const bar = document.getElementById("fill-gauge-bar");
-    const ratio = chamber.fillRatio();
-    bar.style.width = (ratio * 100).toFixed(0) + "%";
+    if (!bar) return;
+    bar.style.width = (chamber.fillRatio() * 100).toFixed(0) + "%";
   }
 
-  /* ── 起動 ─────────────────────────────── */
-
+  /* ── 起動 ── */
   function boot() {
     setupCanvas("title-canvas");
-    setupCanvas("bench-preview");
     setupCanvas("chamber-view");
     setupCanvas("peek-canvas");
 
     chamber.onClack = (size, strength) => {
-      if (S.screen === "peek" || S.screen === "workshop") {
+      if (S.screen === "peek") {
         KKM.Sound.clack(size, 0.25 + strength * 0.6);
       }
     };

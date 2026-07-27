@@ -62,7 +62,7 @@ KKM.Photo = (() => {
         }
         els.card.classList.remove("shaking");
         if (!pending || !pending.tile) {
-          els.stage.innerHTML = `<p class="machine-error">うまく よみこめなかったよ</p>`;
+          els.stage.innerHTML = `<p class="machine-error"></p>`;
           return;
         }
         showResult();
@@ -71,7 +71,7 @@ KKM.Photo = (() => {
     img.onerror = () => {
       URL.revokeObjectURL(url);
       els.card.classList.remove("shaking");
-      els.stage.innerHTML = `<p class="machine-error">うまく よみこめなかったよ</p>`;
+      els.stage.innerHTML = `<p class="machine-error"></p>`;
     };
     img.src = url;
   }

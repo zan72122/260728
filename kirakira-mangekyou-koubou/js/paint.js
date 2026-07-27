@@ -279,7 +279,7 @@ KKM.Paint = (() => {
 
   /* ステッカーが筒のまどへ飛んでいく演出 */
   function flyToChamber(stampCanvas) {
-    const win = document.querySelector(".slot-window");
+    const win = document.querySelector(".dock-window");
     if (!win) return;
     const wr = win.getBoundingClientRect();
     const br = els.board.getBoundingClientRect();
