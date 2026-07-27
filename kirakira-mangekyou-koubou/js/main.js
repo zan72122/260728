@@ -35,31 +35,54 @@
     return entry;
   }
 
-  /* ── 各画面の描画 ─────────────────────────── */
+  /* 内容の回転（なかみの重心を追う） */
+  function contentRot() {
+    return Math.PI / 2 - chamber.focusAngle();
+  }
+
+  /* チャンバー描画オプション（ひかりのフタ） */
+  function chamberOpts() {
+    const opts = { light: S.light };
+    if (S.light === "yoko") {
+      // 画面の左上から差す光 → チャンバー（筒）座標へ
+      const rot = contentRot();
+      const sx = -0.72, sy = -0.7;
+      const cos = Math.cos(rot), sin = Math.sin(rot);
+      opts.lightDir = {
+        x: sx * cos + sy * sin,
+        y: -sx * sin + sy * cos,
+      };
+    }
+    return opts;
+  }
+  window.KKM_chamberOpts = chamberOpts;
 
   function sectorOpts(quality) {
-    // くさびの視線は「なかみの重心」を追う。
-    // 落ち着いているときは筒の回転と 1:1 で一致し、
-    // 速く回すと中身が遅れてついてくる、あの感じになる。
     return {
-      sectorAngle: KKM.MIRROR_SECTOR[S.mirrors],
+      mirrors: S.mirrors,
       skew: S.skew01 * KKM.SKEW_MAX,
-      tubeAngle: Math.PI / 2 - chamber.focusAngle(),
+      tubeAngle: contentRot(),
+      skin: S.skin,
+      hole: S.hole,
+      lens: S.lens,
       quality,
+      time: chamber.time,
     };
   }
+
+  /* ── 各画面の描画 ─────────────────────────── */
 
   function drawTitle() {
     const e = resizeCanvas(canvases["title-canvas"]);
     const { ctx, w, h } = e;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const cx = w / 2, cy = h * 0.46;
-    const viewR = Math.hypot(w, h) * 0.5 + 8;   // 画面全体を覆う
+    const viewR = Math.hypot(w, h) * 0.5 + 8;
     ctx.fillStyle = "#17102a";
     ctx.fillRect(0, 0, w, h);
-    kaleido.renderChamber(chamber, Math.min(420, viewR | 0), S.titleAngle);
-    kaleido.draw(ctx, cx, cy, viewR, sectorOpts(0.5));
-    // 文字が読めるように、しっとりした紫のベール
+    kaleido.renderChamber(chamber, Math.min(420, viewR | 0), S.titleAngle, chamberOpts());
+    // タイトルはいつも まるいあな・ふつうレンズで大きく
+    kaleido.draw(ctx, cx, cy, viewR, { ...sectorOpts(0.5), hole: "maru", lens: "futsu" });
     let veil = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h) * 0.7);
     veil.addColorStop(0, "rgba(23, 16, 42, .58)");
     veil.addColorStop(0.6, "rgba(23, 16, 42, .42)");
@@ -68,48 +91,49 @@
     ctx.fillRect(0, 0, w, h);
   }
 
-  function drawMirrorPreview() {
-    const e = resizeCanvas(canvases["mirror-preview"]);
+  function drawBenchPreview() {
+    const e = resizeCanvas(canvases["bench-preview"]);
     const { ctx, w, h } = e;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = "#17102a";
     ctx.fillRect(0, 0, w, h);
-    const viewR = Math.min(w, h) / 2;
-    kaleido.renderChamber(chamber, Math.min(360, viewR | 0), S.titleAngle);
+    const viewR = Math.min(w, h) / 2 * 0.96;
+    kaleido.renderChamber(chamber, Math.min(340, viewR | 0), S.titleAngle, chamberOpts());
     kaleido.draw(ctx, w / 2, h / 2, viewR, sectorOpts(1));
   }
 
-  function drawChamberView() {
+  /* 断面図の「なかみのまど」：生のなかみが見える小窓 */
+  function drawChamberWindow() {
     const e = resizeCanvas(canvases["chamber-view"]);
     const { ctx, w, h } = e;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const viewR = Math.min(w, h) / 2;
+    const pixR = viewR / 1.18;
     ctx.save();
     ctx.beginPath();
     ctx.arc(w / 2, h / 2, viewR, 0, Math.PI * 2);
     ctx.clip();
     ctx.translate(w / 2, h / 2);
-    chamber.draw(ctx, viewR, 0);
-    // ガラスのてかり
+    chamber.draw(ctx, pixR, 0, { margin: 1.18, ...chamberOpts() });
     const shine = ctx.createLinearGradient(-viewR, -viewR, viewR * 0.4, viewR * 0.6);
-    shine.addColorStop(0, "rgba(255,255,255,.28)");
-    shine.addColorStop(0.24, "rgba(255,255,255,.05)");
-    shine.addColorStop(0.5, "rgba(255,255,255,0)");
+    shine.addColorStop(0, "rgba(255,255,255,.3)");
+    shine.addColorStop(0.3, "rgba(255,255,255,.04)");
+    shine.addColorStop(0.55, "rgba(255,255,255,0)");
     ctx.fillStyle = shine;
     ctx.fillRect(-viewR, -viewR, viewR * 2, viewR * 2);
     ctx.restore();
   }
 
-  function drawPeek(dt) {
+  function drawPeek() {
     const e = resizeCanvas(canvases["peek-canvas"]);
     const { ctx, w, h } = e;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const cx = w / 2, cy = h / 2;
-    const viewR = Math.min(w, h) / 2 * 0.92;
-    kaleido.drawSurround(ctx, w, h, cx, cy, viewR, S.tubeAngle);
+    const viewR = Math.min(w, h) / 2 * 0.9;
+    kaleido.drawSurround(ctx, w, h, cx, cy, viewR, contentRot(), S.hole);
     const chPix = Math.min(560, Math.max(220, viewR | 0));
-    kaleido.renderChamber(chamber, chPix, S.tubeAngle);
+    kaleido.renderChamber(chamber, chPix, S.tubeAngle, chamberOpts());
     kaleido.draw(ctx, cx, cy, viewR, sectorOpts(1));
   }
 
@@ -120,14 +144,13 @@
     if (!lastT) { lastT = t; return; }
     let dt = (t - lastT) / 1000;
     lastT = t;
-    if (dt > 0.1) dt = 0.1;    // タブ復帰などの巨大ステップを防ぐ
+    if (dt > 0.1) dt = 0.1;
 
-    // ── 回転の更新 ──
     S.titleAngle += dt * 0.11;
     if (S.screen === "peek") {
       if (!S.dragging) {
         S.tubeAngle += S.tubeOmega * dt;
-        S.tubeOmega *= Math.exp(-dt * 1.5);    // ゆっくり惰性が抜ける
+        S.tubeOmega *= Math.exp(-dt * 1.5);
         if (Math.abs(S.tubeOmega) < 0.004) S.tubeOmega = 0;
       }
     }
@@ -139,31 +162,25 @@
       const mag = Math.max(0.25, Math.hypot(S.tilt.x, S.tilt.y));
       gx = S.tilt.x * G;
       gy = S.tilt.y * G;
-      // まっ平らに持つと重力がほぼ消えて、ふわふわ漂う（それも楽しい）
       if (mag < 0.18) { gx *= 0.4; gy *= 0.4; }
     }
 
-    // ── 物理 ──
     const angleForPhysics =
       S.screen === "peek" ? S.tubeAngle :
       S.screen === "title" ? S.titleAngle : 0;
     const omegaForPhysics =
-      S.screen === "peek" ? (S.dragging ? S.tubeOmega : S.tubeOmega) :
+      S.screen === "peek" ? S.tubeOmega :
       S.screen === "title" ? 0.11 : 0;
     chamber.step(dt, { x: gx, y: gy }, angleForPhysics, omegaForPhysics);
 
-    // ── 描画（見えている画面だけ） ──
     if (S.screen === "title") {
       drawTitle();
     } else if (S.screen === "workshop") {
-      if (S.step === 0) drawMirrorPreview();
-      else {
-        drawChamberView();
-        updateGauge();
-      }
+      drawBenchPreview();
+      drawChamberWindow();
+      updateGauge();
     } else if (S.screen === "peek") {
-      drawPeek(dt);
-      // 強いきらめき → ごくたまに音
+      drawPeek();
       if (chamber._sparkles.length > 0) {
         sparkleGlow += dt;
         if (sparkleGlow > 0.4) { KKM.Sound.shimmer(); sparkleGlow = 0; }
@@ -181,39 +198,32 @@
 
   function boot() {
     setupCanvas("title-canvas");
-    setupCanvas("mirror-preview");
+    setupCanvas("bench-preview");
     setupCanvas("chamber-view");
     setupCanvas("peek-canvas");
 
-    // びーずのカチカチ音
     chamber.onClack = (size, strength) => {
-      if (S.screen === "peek" || (S.screen === "workshop" && S.step === 1)) {
+      if (S.screen === "peek" || S.screen === "workshop") {
         KKM.Sound.clack(size, 0.25 + strength * 0.6);
       }
     };
 
     KKM.UI.init(chamber);
 
-    // 前回のレシピ or はじめてのおためしセット
     if (!KKM.UI.loadRecipe()) {
       for (const [mat, scoops] of KKM.STARTER) {
         for (let i = 0; i < scoops; i++) chamber.addScoop(mat, 0);
       }
-      // 最初は落ち着いた状態から
       for (let i = 0; i < 90; i++) {
         chamber.step(1 / 60, { x: 0, y: KKM.PHYSICS.GRAVITY }, 0, 0);
       }
     }
 
-    // ときどきレシピを保存
     setInterval(KKM.UI.saveRecipe, 2500);
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) { S.dirty = true; KKM.UI.saveRecipe(); }
     });
 
-    window.addEventListener("resize", () => { /* 各 draw が rect を見て追従 */ });
-
-    // ダブルタップズームなどをふせぐ
     document.addEventListener("gesturestart", e => e.preventDefault());
     document.addEventListener("dblclick", e => e.preventDefault());
 

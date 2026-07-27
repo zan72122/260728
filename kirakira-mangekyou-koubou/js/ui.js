@@ -1,21 +1,25 @@
 /* ═══════════════════════════════════════════════════════════
-   ui.js — 画面遷移・こうぼうの操作・のぞき画面の入力
+   ui.js — 組み立て台・画面遷移・のぞき画面の入力
+   部品カードは config の定義から自動生成する
    ═══════════════════════════════════════════════════════════ */
 "use strict";
 
 KKM.state = {
   screen: "title",       // title | workshop | peek
-  step: 0,               // 0: かがみ / 1: なかみ
-  mirrors: 3,
-  skew01: 0,             // -1 .. 1
+  tube: "round",
+  mirrors: "3",          // "2" | "3" | "4" | "p"
+  skew01: 0,
+  skin: "pika",
+  light: "asa",
+  hole: "maru",
+  lens: "futsu",
   tubeAngle: 0,
   tubeOmega: 0,
   titleAngle: 0,
   dragging: false,
   tilt: { x: 0, y: 1, active: false },
-  needMotionPermission: false,
   coachDone: false,
-  dirty: false,          // レシピ保存待ち
+  dirty: false,
 };
 
 KKM.UI = (() => {
@@ -26,6 +30,161 @@ KKM.UI = (() => {
   let chamber, els = {};
   let holdTimer = null;
   let lastShake = 0;
+  const guide = { active: false, idx: 0 };
+
+  /* ── かがみのまい数アイコン（インラインSVG） ── */
+  function mirrorIconSVG(m) {
+    const rect = (tf) =>
+      `<rect x="31" y="8" width="10" height="30" rx="3" fill="#bfe3f2" stroke="#6aaacc" stroke-width="2"${tf ? ` transform="${tf}"` : ""}/>`;
+    switch (m) {
+      case "2":
+        return `<svg viewBox="0 0 72 72">
+          <rect x="20" y="12" width="10" height="48" rx="3" fill="#bfe3f2" stroke="#6aaacc" stroke-width="2" transform="rotate(14 25 36)"/>
+          <rect x="42" y="12" width="10" height="48" rx="3" fill="#bfe3f2" stroke="#6aaacc" stroke-width="2" transform="rotate(-14 47 36)"/></svg>`;
+      case "3":
+        return `<svg viewBox="0 0 72 72"><g>
+          ${rect("")}${rect("rotate(120 36 40)")}${rect("rotate(-120 36 40)")}</g></svg>`;
+      case "4":
+        return `<svg viewBox="0 0 72 72"><g>
+          <rect x="31" y="6" width="10" height="26" rx="3" fill="#bfe3f2" stroke="#6aaacc" stroke-width="2"/>
+          <rect x="31" y="6" width="10" height="26" rx="3" fill="#bfe3f2" stroke="#6aaacc" stroke-width="2" transform="rotate(90 36 36)"/>
+          <rect x="31" y="6" width="10" height="26" rx="3" fill="#bfe3f2" stroke="#6aaacc" stroke-width="2" transform="rotate(180 36 36)"/>
+          <rect x="31" y="6" width="10" height="26" rx="3" fill="#bfe3f2" stroke="#6aaacc" stroke-width="2" transform="rotate(270 36 36)"/></svg>`;
+      default: // "p" 平行鏡
+        return `<svg viewBox="0 0 72 72">
+          <rect x="14" y="8" width="10" height="56" rx="3" fill="#bfe3f2" stroke="#6aaacc" stroke-width="2"/>
+          <rect x="48" y="8" width="10" height="56" rx="3" fill="#bfe3f2" stroke="#6aaacc" stroke-width="2"/>
+          <circle cx="36" cy="36" r="6" fill="#ffd166"/>
+          <circle cx="36" cy="20" r="4" fill="#ffd166" opacity=".55"/>
+          <circle cx="36" cy="52" r="4" fill="#ffd166" opacity=".55"/>
+          <circle cx="36" cy="10" r="2.6" fill="#ffd166" opacity=".3"/>
+          <circle cx="36" cy="62" r="2.6" fill="#ffd166" opacity=".3"/></svg>`;
+    }
+  }
+
+  /* ── 部品カードの生成 ── */
+  function makeCard(cat, val, def, iconHTML) {
+    const b = document.createElement("button");
+    b.className = "part-card";
+    b.dataset.cat = cat;
+    b.dataset.val = val;
+    b.innerHTML =
+      `<i class="pc-icon ${iconHTML ? "" : `pci-${cat}-${val}`}">${iconHTML || ""}</i>` +
+      `<span class="pc-name">${def.label}</span>` +
+      `<span class="pc-desc">${def.desc}</span>`;
+    b.addEventListener("click", () => selectPart(cat, val));
+    return b;
+  }
+
+  function buildCards() {
+    const rows = {
+      tube: $("cards-tube"), mirror: $("cards-mirror"), skin: $("cards-skin"),
+      light: $("cards-light"), hole: $("cards-hole"), lens: $("cards-lens"),
+    };
+    for (const [val, def] of Object.entries(KKM.TUBES)) rows.tube.appendChild(makeCard("tube", val, def));
+    for (const val of KKM.MIRROR_ORDER) rows.mirror.appendChild(makeCard("mirror", val, KKM.MIRRORS[val], mirrorIconSVG(val)));
+    for (const val of KKM.SKIN_ORDER) rows.skin.appendChild(makeCard("skin", val, KKM.SKINS[val]));
+    for (const val of KKM.LIGHT_ORDER) rows.light.appendChild(makeCard("light", val, KKM.LIGHTS[val]));
+    for (const [val, def] of Object.entries(KKM.HOLES)) rows.hole.appendChild(makeCard("hole", val, def));
+    for (const [val, def] of Object.entries(KKM.LENSES)) rows.lens.appendChild(makeCard("lens", val, def));
+  }
+
+  const CAT_KEY = { tube: "tube", mirror: "mirrors", skin: "skin", light: "light", hole: "hole", lens: "lens" };
+
+  function selectPart(cat, val, silent) {
+    const key = CAT_KEY[cat];
+    if (S[key] === val) { if (!silent) Sound.uiTap(); return; }
+    S[key] = val;
+    if (cat === "tube") chamber.setTube(val);
+    refreshSelection(cat);
+    if (!silent) {
+      Sound.snap();
+      markDirty();
+      guideAdvance(cat === "lens" ? "hole" : cat);
+    }
+  }
+
+  function refreshSelection(cat) {
+    const key = CAT_KEY[cat];
+    document.querySelectorAll(`.part-card[data-cat="${cat}"]`)
+      .forEach(c => c.classList.toggle("selected", c.dataset.val === S[key]));
+    updateSlotIcons();
+    updateTrayIcons();
+  }
+
+  function refreshAllSelections() {
+    for (const cat of Object.keys(CAT_KEY)) refreshSelection(cat);
+  }
+
+  function updateSlotIcons() {
+    $("slot-icon-tube").className = `slot-icon pci-tube-${S.tube}`;
+    $("slot-icon-tube").innerHTML = "";
+    $("slot-icon-mirror").className = "slot-icon";
+    $("slot-icon-mirror").innerHTML = mirrorIconSVG(S.mirrors);
+    $("slot-icon-skin").className = `slot-icon pci-skin-${S.skin}`;
+    $("slot-icon-light").className = `slot-icon pci-light-${S.light}`;
+    $("slot-icon-hole").className = `slot-icon pci-hole-${S.hole}`;
+  }
+
+  function updateTrayIcons() {
+    const mLabel = $("tray-mirror-label");
+    if (mLabel) mLabel.innerHTML = `かがみ<b>${S.mirrors === "p" ? "∥" : S.mirrors}</b>`;
+    const si = $("tray-skin-icon");
+    if (si) si.className = `tj-icon pci-skin-${S.skin}`;
+    const sl = $("tray-skin-label");
+    if (sl) sl.textContent = KKM.SKINS[S.skin].label.replace("鏡", "");
+    const li = $("tray-light-icon");
+    if (li) li.className = `tj-icon pci-light-${S.light}`;
+    const ll = $("tray-light-label");
+    if (ll) ll.textContent = KKM.LIGHTS[S.light].label.replace("のひかり", "").replace("からのひかり", "から");
+  }
+
+  /* ── タブ・スロット ── */
+
+  function setCat(cat) {
+    document.querySelectorAll(".dtab").forEach(t => t.classList.toggle("active", t.dataset.cat === cat));
+    document.querySelectorAll(".drawer-panel").forEach(p => p.classList.toggle("active", p.id === `panel-${cat}`));
+    document.querySelectorAll(".slot").forEach(s => s.classList.toggle("active", s.dataset.cat === cat));
+  }
+
+  /* ── はじめてガイド ── */
+
+  function startGuideIfNeeded() {
+    let done = false;
+    try { done = localStorage.getItem(KKM.GUIDE_KEY) === "1"; } catch (e) {}
+    if (done) { setCat("tube"); return; }
+    guide.active = true;
+    guide.idx = 0;
+    guideStep();
+  }
+
+  function guideStep() {
+    const cat = KKM.GUIDE_ORDER[guide.idx];
+    setCat(cat);
+    document.querySelectorAll(".guide-glow").forEach(e => e.classList.remove("guide-glow"));
+    const tab = document.querySelector(`.dtab[data-cat="${cat}"]`);
+    const slot = document.querySelector(`.slot[data-cat="${cat}"]`);
+    if (tab) { tab.classList.add("guide-glow"); tab.scrollIntoView({ inline: "center", block: "nearest" }); }
+    if (slot) slot.classList.add("guide-glow");
+  }
+
+  function guideAdvance(cat) {
+    if (!guide.active) return;
+    if (KKM.GUIDE_ORDER[guide.idx] !== cat) return;
+    guide.idx++;
+    if (guide.idx >= KKM.GUIDE_ORDER.length) {
+      guide.active = false;
+      document.querySelectorAll(".guide-glow").forEach(e => e.classList.remove("guide-glow"));
+      const peek = $("btn-peek");
+      peek.classList.add("guide-glow");
+      setTimeout(() => peek.classList.remove("guide-glow"), 4000);
+      try { localStorage.setItem(KKM.GUIDE_KEY, "1"); } catch (e) {}
+    } else {
+      guideStep();
+    }
+  }
+
+  /* ── 初期化 ─────────────────────────────── */
 
   function init(ch) {
     chamber = ch;
@@ -33,13 +192,6 @@ KKM.UI = (() => {
       title: $("screen-title"),
       workshop: $("screen-workshop"),
       peek: $("screen-peek"),
-      stepMirror: $("step-mirror"),
-      stepFill: $("step-fill"),
-      stepTitle: $("ws-step-title"),
-      dots: document.querySelectorAll(".ws-dots .dot"),
-      btnNext: $("btn-next"),
-      btnPrev: $("btn-prev"),
-      btnPeek: $("btn-peek"),
       gauge: $("fill-gauge-bar"),
       fullBubble: $("full-bubble"),
       pourLayer: $("pour-layer"),
@@ -49,7 +201,6 @@ KKM.UI = (() => {
       trayWater: $("tray-water"),
       tray: $("peek-tray"),
       btnTray: $("btn-tray"),
-      trayMirrorN: $("tray-mirror-n"),
       coach: $("coach"),
       btnTilt: $("btn-tilt"),
       peekCanvas: $("peek-canvas"),
@@ -59,10 +210,12 @@ KKM.UI = (() => {
       flash: $("photo-flash"),
     };
 
+    buildCards();
     bindTitle();
     bindWorkshop();
     bindPeek();
     bindTiltSensors();
+    refreshAllSelections();
 
     try { S.coachDone = localStorage.getItem(KKM.COACH_KEY) === "1"; } catch (e) {}
   }
@@ -71,12 +224,7 @@ KKM.UI = (() => {
 
   function showScreen(name) {
     for (const key of ["title", "workshop", "peek"]) {
-      const el = els[key];
-      if (key === name) {
-        el.classList.add("visible");
-      } else {
-        el.classList.remove("visible");
-      }
+      els[key].classList.toggle("visible", key === name);
     }
     S.screen = name;
     Sound.duckMusic(name === "peek");
@@ -91,9 +239,8 @@ KKM.UI = (() => {
       Sound.startMusic();
       Sound.uiSelect();
       showScreen("workshop");
-      setStep(0);
+      startGuideIfNeeded();
     });
-    // 画面のどこを押しても始まる（4さい向け）
     els.title.addEventListener("pointerdown", e => {
       if (e.target.closest("#btn-start")) return;
       Sound.ensure();
@@ -102,40 +249,18 @@ KKM.UI = (() => {
 
   /* ── こうぼう ─────────────────────────────── */
 
-  function setStep(n, backwards = false) {
-    S.step = n;
-    els.stepMirror.classList.toggle("hidden", n !== 0);
-    els.stepFill.classList.toggle("hidden", n !== 1);
-    const active = n === 0 ? els.stepMirror : els.stepFill;
-    active.classList.toggle("slide-back", backwards);
-    els.stepTitle.textContent = n === 0 ? "かがみを えらぼう" : "なかみを いれよう";
-    els.dots.forEach((d, i) => d.classList.toggle("active", i === n));
-    els.btnPrev.classList.toggle("hidden", n === 0);
-    els.btnNext.classList.toggle("hidden", n === 1);
-    els.btnPeek.classList.toggle("hidden", n === 0);
-  }
-
   function bindWorkshop() {
     $("btn-home").addEventListener("click", () => { Sound.uiTap(); showScreen("title"); });
     $("btn-sound").addEventListener("click", () => Sound.setMuted(!Sound.isMuted()));
     $("btn-sound2").addEventListener("click", () => Sound.setMuted(!Sound.isMuted()));
+    $("btn-peek").addEventListener("click", enterPeek);
 
-    els.btnNext.addEventListener("click", () => { Sound.uiSelect(); setStep(1); });
-    els.btnPrev.addEventListener("click", () => { Sound.uiTap(); setStep(0, true); });
-    els.btnPeek.addEventListener("click", enterPeek);
-
-    // かがみカード
-    document.querySelectorAll("#mirror-cards .mirror-card").forEach(card => {
-      card.addEventListener("click", () => {
-        const m = +card.dataset.mirrors;
-        if (m === S.mirrors) return;
-        S.mirrors = m;
-        document.querySelectorAll("#mirror-cards .mirror-card")
-          .forEach(c => c.classList.toggle("selected", +c.dataset.mirrors === m));
-        els.trayMirrorN.textContent = m;
-        Sound.uiSelect();
-        markDirty();
-      });
+    // タブとスロット
+    document.querySelectorAll(".dtab").forEach(t => {
+      t.addEventListener("click", () => { Sound.uiTap(); setCat(t.dataset.cat); });
+    });
+    document.querySelectorAll(".slot").forEach(s => {
+      s.addEventListener("click", () => { Sound.uiTap(); setCat(s.dataset.cat); });
     });
 
     // ずらしスライダー
@@ -161,10 +286,8 @@ KKM.UI = (() => {
       jar.addEventListener("pointerleave", stop);
     });
 
-    // おみず
     els.water.addEventListener("click", () => toggleWater());
 
-    // からっぽ
     $("btn-empty").addEventListener("click", () => {
       const n = chamber.empty();
       if (n > 0) { Sound.popSeq(n); markDirty(); }
@@ -188,7 +311,7 @@ KKM.UI = (() => {
     markDirty();
   }
 
-  /* びんから注ぐ（落下アニメーション → 実際に粒が降ってくる） */
+  /* びんから注ぐ */
   function pour(material, jarEl) {
     if (chamber.isFull()) {
       showFullBubble();
@@ -197,13 +320,13 @@ KKM.UI = (() => {
     Sound.pour(material);
     if (jarEl) {
       jarEl.classList.remove("pouring");
-      void jarEl.offsetWidth;   // アニメーション再始動
+      void jarEl.offsetWidth;
       jarEl.classList.add("pouring");
       spawnPourDrops(material, jarEl);
     }
     setTimeout(() => {
       const added = chamber.addScoop(material, 0);
-      if (added > 0) markDirty();
+      if (added > 0) { markDirty(); guideAdvance("fill"); }
     }, jarEl ? 240 : 0);
   }
 
@@ -241,11 +364,12 @@ KKM.UI = (() => {
     const layer = els.pourLayer;
     const layerRect = layer.getBoundingClientRect();
     const jarRect = jarEl.getBoundingClientRect();
-    const ringRect = layer.parentElement.getBoundingClientRect();
+    const win = document.querySelector(".slot-window");
+    const winRect = win.getBoundingClientRect();
     const sx = jarRect.left + jarRect.width / 2 - layerRect.left;
     const sy = jarRect.top + jarRect.height * 0.2 - layerRect.top;
-    const exBase = ringRect.left + ringRect.width / 2 - layerRect.left;
-    const ey = ringRect.top + ringRect.height * 0.16 - layerRect.top;
+    const exBase = winRect.left + winRect.width / 2 - layerRect.left;
+    const ey = winRect.top + winRect.height * 0.35 - layerRect.top;
     const n = material === "glitter" ? 10 : 6;
     for (let i = 0; i < n; i++) {
       const spec = DROP_STYLE[material](i + ((Math.random() * 6) | 0));
@@ -256,13 +380,14 @@ KKM.UI = (() => {
         left: "0px", top: "0px",
       });
       layer.appendChild(d);
-      const ex = exBase + (Math.random() - 0.5) * ringRect.width * 0.3;
-      const mx = (sx + ex) / 2, my = Math.min(sy, ey) - 36 - Math.random() * 30;
+      const ex = exBase + (Math.random() - 0.5) * winRect.width * 0.5;
+      const my = Math.min(sy, ey) - 40 - Math.random() * 34;
+      const mx = (sx + ex) / 2;
       const anim = d.animate([
         { transform: `translate(${sx}px, ${sy}px) scale(.4)`, opacity: 0 },
         { transform: `translate(${mx}px, ${my}px) scale(1)`, opacity: 1, offset: 0.45 },
-        { transform: `translate(${ex}px, ${ey}px) scale(.85)`, opacity: 1 },
-      ], { duration: 330 + Math.random() * 160, delay: i * 34, easing: "ease-in", fill: "backwards" });
+        { transform: `translate(${ex}px, ${ey}px) scale(.55)`, opacity: 1 },
+      ], { duration: 360 + Math.random() * 160, delay: i * 34, easing: "ease-in", fill: "backwards" });
       anim.onfinish = () => d.remove();
     }
   }
@@ -271,15 +396,13 @@ KKM.UI = (() => {
 
   function enterPeek() {
     if (chamber.particles.length === 0) {
-      // 何も入っていなければ、まずひとすくい入れてあげる
       chamber.addScoop("beads", 0);
       chamber.addScoop("glitter", 0);
     }
     Sound.reveal();
     S.tubeAngle = 0;
-    S.tubeOmega = 0.35;      // ほんの少し回っていて、絵が生きて見える
+    S.tubeOmega = 0.35;
     showScreen("peek");
-    // かたむきボタン（iOS は許可が必要）
     const D = window.DeviceOrientationEvent;
     if (D && typeof D.requestPermission === "function" && !S.tilt.active) {
       els.btnTilt.classList.remove("hidden");
@@ -303,7 +426,6 @@ KKM.UI = (() => {
       Sound.uiTap();
       S.tubeAngle = 0; S.tubeOmega = 0;
       showScreen("workshop");
-      setStep(1, true);
     });
 
     // ドラッグで回す
@@ -346,7 +468,7 @@ KKM.UI = (() => {
     cv.addEventListener("pointerup", release);
     cv.addEventListener("pointercancel", release);
 
-    // どうぐトレイ
+    // ちょうりつトレイ
     els.btnTray.addEventListener("click", () => {
       const open = els.tray.classList.toggle("hidden");
       els.btnTray.classList.toggle("open", !open);
@@ -363,18 +485,23 @@ KKM.UI = (() => {
     });
     els.trayWater.addEventListener("click", () => toggleWater());
     $("tray-mirror").addEventListener("click", () => {
-      S.mirrors = S.mirrors >= 4 ? 2 : S.mirrors + 1;
-      els.trayMirrorN.textContent = S.mirrors;
-      document.querySelectorAll("#mirror-cards .mirror-card")
-        .forEach(c => c.classList.toggle("selected", +c.dataset.mirrors === S.mirrors));
-      Sound.uiSelect();
+      const i = KKM.MIRROR_ORDER.indexOf(S.mirrors);
+      selectPart("mirror", KKM.MIRROR_ORDER[(i + 1) % KKM.MIRROR_ORDER.length]);
+      markDirty();
+    });
+    $("tray-skin").addEventListener("click", () => {
+      const i = KKM.SKIN_ORDER.indexOf(S.skin);
+      selectPart("skin", KKM.SKIN_ORDER[(i + 1) % KKM.SKIN_ORDER.length]);
+      markDirty();
+    });
+    $("tray-light").addEventListener("click", () => {
+      const i = KKM.LIGHT_ORDER.indexOf(S.light);
+      selectPart("light", KKM.LIGHT_ORDER[(i + 1) % KKM.LIGHT_ORDER.length]);
       markDirty();
     });
 
-    // かたむき許可
     els.btnTilt.addEventListener("click", requestMotionPermission);
 
-    // しゃしん
     $("btn-photo").addEventListener("click", takePhoto);
     $("photo-close").addEventListener("click", () => {
       els.photoModal.classList.add("hidden");
@@ -387,7 +514,6 @@ KKM.UI = (() => {
   function bindTiltSensors() {
     const D = window.DeviceOrientationEvent;
     if (D && typeof D.requestPermission !== "function") {
-      // Android などは許可なしで聞ける
       window.addEventListener("deviceorientation", onOrient);
     }
     const M = window.DeviceMotionEvent;
@@ -415,9 +541,8 @@ KKM.UI = (() => {
 
   function onOrient(e) {
     if (e.beta === null || e.gamma === null) return;
-    const beta = e.beta * Math.PI / 180;    // 前後
-    const gamma = e.gamma * Math.PI / 180;  // 左右
-    // 端末座標 → 画面座標（画面の回転を打ち消す）
+    const beta = e.beta * Math.PI / 180;
+    const gamma = e.gamma * Math.PI / 180;
     let gx = Math.sin(gamma);
     let gy = Math.sin(beta);
     const angle = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
@@ -455,24 +580,25 @@ KKM.UI = (() => {
     const out = document.createElement("canvas");
     out.width = size; out.height = size;
     const g = out.getContext("2d");
-    // 背景
     const bgGrad = g.createRadialGradient(size / 2, size / 2, size * 0.2, size / 2, size / 2, size * 0.75);
     bgGrad.addColorStop(0, "#241536");
     bgGrad.addColorStop(1, "#0b0612");
     g.fillStyle = bgGrad;
     g.fillRect(0, 0, size, size);
-    // 万華鏡を大きく
     const photoKal = window.KKM_kaleido;
-    if (photoKal) {
-      photoKal.renderChamber(chamber, 520, S.tubeAngle);
-      photoKal.draw(g, size / 2, size / 2 - 20, size * 0.42, {
-        sectorAngle: KKM.MIRROR_SECTOR[S.mirrors],
+    if (photoKal && window.KKM_chamberOpts) {
+      photoKal.renderChamber(chamber, 520, S.tubeAngle, window.KKM_chamberOpts());
+      photoKal.draw(g, size / 2, size / 2 - 20, size * 0.4, {
+        mirrors: S.mirrors,
         skew: S.skew01 * KKM.SKEW_MAX,
         tubeAngle: Math.PI / 2 - chamber.focusAngle(),
+        skin: S.skin,
+        hole: S.hole,
+        lens: S.lens,
         quality: 1,
+        time: chamber.time,
       });
     }
-    // キャプション
     g.fillStyle = "#ffd166";
     g.font = "700 44px 'Hiragino Maru Gothic ProN', sans-serif";
     g.textAlign = "center";
@@ -496,8 +622,8 @@ KKM.UI = (() => {
     S.dirty = false;
     try {
       localStorage.setItem(KKM.SAVE_KEY, JSON.stringify({
-        mirrors: S.mirrors,
-        skew01: S.skew01,
+        tube: S.tube, mirrors: S.mirrors, skew01: S.skew01,
+        skin: S.skin, light: S.light, hole: S.hole, lens: S.lens,
         chamber: chamber.serialize(),
       }));
     } catch (e) {}
@@ -508,23 +634,24 @@ KKM.UI = (() => {
       const raw = localStorage.getItem(KKM.SAVE_KEY);
       if (!raw) return false;
       const data = JSON.parse(raw);
-      if (data.mirrors) {
-        S.mirrors = data.mirrors;
-        document.querySelectorAll("#mirror-cards .mirror-card")
-          .forEach(c => c.classList.toggle("selected", +c.dataset.mirrors === S.mirrors));
-        els.trayMirrorN.textContent = S.mirrors;
-      }
+      if (KKM.TUBES[data.tube]) { S.tube = data.tube; chamber.setTube(data.tube); }
+      if (KKM.MIRRORS[data.mirrors]) S.mirrors = String(data.mirrors);
       if (typeof data.skew01 === "number") {
         S.skew01 = data.skew01;
         els.skewSlider.value = Math.round(S.skew01 * 100);
         updateSkewLabel();
       }
+      if (KKM.SKINS[data.skin]) S.skin = data.skin;
+      if (KKM.LIGHTS[data.light]) S.light = data.light;
+      if (KKM.HOLES[data.hole]) S.hole = data.hole;
+      if (KKM.LENSES[data.lens]) S.lens = data.lens;
       const ok = chamber.restore(data.chamber);
       els.water.classList.toggle("on", chamber.liquid);
       els.trayWater.classList.toggle("on", chamber.liquid);
+      refreshAllSelections();
       return ok;
     } catch (e) { return false; }
   }
 
-  return { init, showScreen, setStep, saveRecipe, loadRecipe, showFullBubble };
+  return { init, showScreen, saveRecipe, loadRecipe, showFullBubble, selectPart };
 })();

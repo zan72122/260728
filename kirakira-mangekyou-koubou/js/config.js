@@ -1,5 +1,7 @@
 /* ═══════════════════════════════════════════════════════════
-   config.js — 素材・鏡・物理のチューニング定数
+   config.js — 部品・素材・物理のチューニング定数
+   「対称性・光・物体運動・不完全さを調整する」ための約40変数を
+   すべてここに集約する。UI にはひらがなカードとしてだけ見せる。
    ═══════════════════════════════════════════════════════════ */
 "use strict";
 
@@ -8,12 +10,64 @@ const KKM = window.KKM = {};
 /* 論理チャンバー半径（物理はこの単位系で動く） */
 KKM.CHAMBER_R = 100;
 
-/* 鏡の枚数 → 基本セクター角（ラジアン）
-   2まい: 6分割のおおらかな模様 / 3まい: 10分割の花 / 4まい: 16分割のレース */
-KKM.MIRROR_SECTOR = {
-  2: Math.PI / 3,
-  3: Math.PI / 5,
-  4: Math.PI / 8,
+/* ── つつ（＝オブジェクト室の断面形。なかみの動きが変わる） ── */
+KKM.TUBES = {
+  round:  { label: "まるつつ",   desc: "ころころ" },
+  square: { label: "しかくつつ", desc: "かどで カタン" },
+  flat:   { label: "ぺちゃんこ", desc: "ぎゅっと つまる" },
+  star:   { label: "ほしつつ",   desc: "くぼみに たまる" },
+};
+
+/* ── かがみのまい数 → 基本セクター角
+   "p" は平行鏡（ずーっと鏡）：放射ではなく無限廊下モード ── */
+KKM.MIRRORS = {
+  2:   { label: "おほしさま鏡", desc: "おおきな もよう", sector: Math.PI / 3 },
+  3:   { label: "いっぱい鏡",   desc: "おはな いっぱい", sector: Math.PI / 5 },
+  4:   { label: "おへや鏡",     desc: "こまかい レース",  sector: Math.PI / 8 },
+  p:   { label: "ずーっと鏡",   desc: "むげんの ろうか",  sector: null },
+};
+KKM.MIRROR_ORDER = ["2", "3", "4", "p"];
+
+/* ── かがみのせいかく（光学特性）
+   keep: 1回反射するごとに残る明るさ（減衰）
+   tint: 反射のたびに寄っていく色
+   ghost: 二重像 / blur: ぼかし / wave: 波打ち曲面 /
+   scratch: キズの光線 / seethrough: 半透明ゴースト ── */
+KKM.SKINS = {
+  pika:   { label: "ぴかぴか鏡",   desc: "くっきり",  keep: 0.985, tint: null },
+  fuwa:   { label: "ふわふわ鏡",   desc: "だぶって みえる",    keep: 0.93,  tint: [255, 234, 244], ghost: true },
+  koori:  { label: "こおり鏡",     desc: "こおりの せかい",    keep: 0.90,  tint: [118, 168, 235] },
+  oukan:  { label: "おうかん鏡",   desc: "きんの せかい",  keep: 0.90,  tint: [238, 182, 82] },
+  yume:   { label: "ゆめ鏡",       desc: "ふんわり ゆめ",  keep: 0.94,  tint: [242, 222, 242], blur: true },
+  kirari: { label: "きらり鏡",   desc: "ひかりの せん", keep: 0.95, tint: null, scratch: true },
+  gunya:  { label: "ぐにゃ鏡",   desc: "ゆらゆら ゆれる", keep: 0.95, tint: null, wave: true },
+  obake:  { label: "おばけ鏡",     desc: "すけて かさなる",    keep: 0.84,  tint: [188, 198, 226], seethrough: true },
+};
+KKM.SKIN_ORDER = ["pika", "fuwa", "koori", "oukan", "yume", "kirari", "gunya", "obake"];
+
+/* ── ひかりのフタ ── */
+KKM.LIGHTS = {
+  asa:    { label: "あさのひかり", desc: "しろい ひかり" },
+  yuyake: { label: "ゆうやけ",     desc: "きんいろの そら" },
+  yoru:   { label: "よるのひかり", desc: "ラメが ひかる" },
+  niji:   { label: "にじのひかり", desc: "にじが まわる" },
+  yoko:   { label: "よこのひかり", desc: "かげが のびる" },
+};
+KKM.LIGHT_ORDER = ["asa", "yuyake", "yoru", "niji", "yoko"];
+
+/* ── のぞきあな（視野の枠） ── */
+KKM.HOLES = {
+  maru:  { label: "まるいあな",  desc: "まんまる" },
+  hoshi: { label: "ほしのあな",  desc: "ほしの まど" },
+  heart: { label: "はーとのあな", desc: "はーとの まど" },
+};
+
+/* ── レンズ ── */
+KKM.LENSES = {
+  futsu:   { label: "ふつうレンズ", desc: "そのまま" },
+  mushi:   { label: "むしめがね",   desc: "おおきく みえる" },
+  sakana:  { label: "さかなめ",     desc: "まんなか ぷくっ" },
+  pinboke: { label: "ぴんぼけ",     desc: "ゆめみたい" },
 };
 
 /* ずらしスライダー(-1..1) → 1セクターあたりの角度誤差（ラジアン）
@@ -24,17 +78,17 @@ KKM.SKEW_MAX = 3.2 * Math.PI / 180;
 KKM.MATERIALS = {
   beads: {
     label: "びーず",
-    scoop: 5,             // ひとすくいの個数
-    weight: 3,            // 満杯ゲージへの寄与
+    scoop: 5,
+    weight: 3,
     rMin: 6.2, rMax: 10.8,
     restitution: 0.46,
-    drag: 0.25,           // 空気中の抵抗（1/s）
-    liquidDrag: 3.1,      // 液体中の抵抗
+    drag: 0.25,
+    liquidDrag: 3.1,
     gravScale: 1.0,
     liquidGravScale: 0.34,
     collides: true,
     colors: [
-      ["#ffb7cf", "#ff8fb3", "#d95c8a"],   // [明, 中, 暗] ガラスの層
+      ["#ffb7cf", "#ff8fb3", "#d95c8a"],
       ["#ffe3a1", "#ffd166", "#d9a53a"],
       ["#a8ecd8", "#7be0c4", "#43b394"],
       ["#b3ddff", "#7cc8ff", "#4a95d9"],
@@ -51,11 +105,11 @@ KKM.MATERIALS = {
     drag: 1.35,
     liquidDrag: 5.2,
     gravScale: 0.82,
-    liquidGravScale: 0.10,   // 液中ではほぼ漂う
+    liquidGravScale: 0.10,
     collides: false,
     colors: [
       ["#fff3c9", "#ffd75e", "#e0a92e"],
-      ["#ffffff", "#e8f4ff", "#9fc4e8"],   // シルバー
+      ["#ffffff", "#e8f4ff", "#9fc4e8"],
       ["#ffd4ea", "#ff9ec9", "#e06aa8"],
       ["#c9f4ff", "#8fd8ff", "#4aa8e0"],
       ["#e3d4ff", "#c9adff", "#9b78e8"],
@@ -67,7 +121,7 @@ KKM.MATERIALS = {
     weight: 2.2,
     rMin: 8.5, rMax: 13.5,
     restitution: 0.05,
-    drag: 2.4,             // ひらひら落ちる
+    drag: 2.4,
     liquidDrag: 4.6,
     gravScale: 0.5,
     liquidGravScale: 0.12,
@@ -106,15 +160,18 @@ KKM.FULL_WEIGHT = 190;
 
 /* 物理 */
 KKM.PHYSICS = {
-  GRAVITY: 300,          // 単位/s²（乾いた状態の基準）
+  GRAVITY: 300,
   MAX_DT: 1 / 30,
   SUBSTEPS: 2,
-  WALL_FRICTION: 0.86,   // 壁衝突時の接線速度の残存率
-  CENTRIFUGAL: 0.11,     // 遠心力係数（回すと外に寄る）
-  EULER_COUPLING: 0.55,  // 回し始め/止めで中身が遅れてついてくる係数
+  WALL_FRICTION: 0.86,
+  CENTRIFUGAL: 0.11,
+  EULER_COUPLING: 0.55,
   SLEEP_SPEED: 2.2,
-  TILT_GAIN: 1.35,       // 端末チルト → 重力方向の効き
+  TILT_GAIN: 1.35,
 };
+
+/* 組み立てガイドの順番（はじめてのときだけ光る） */
+KKM.GUIDE_ORDER = ["tube", "mirror", "skin", "fill", "light", "hole"];
 
 /* 最初から入っているおためしレシピ */
 KKM.STARTER = [
@@ -124,6 +181,7 @@ KKM.STARTER = [
 ];
 
 /* localStorage キー */
-KKM.SAVE_KEY = "kkm-recipe-v1";
+KKM.SAVE_KEY = "kkm-recipe-v2";
 KKM.SOUND_KEY = "kkm-sound-v1";
 KKM.COACH_KEY = "kkm-coach-v1";
+KKM.GUIDE_KEY = "kkm-guide-v1";

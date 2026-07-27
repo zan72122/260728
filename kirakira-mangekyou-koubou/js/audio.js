@@ -151,6 +151,23 @@ KKM.Sound = (() => {
     ping(PENTA[4], 0.07, 0.2, 0.6);
   }
 
+  /* 部品が「カチッ」とはまる音 */
+  function snap() {
+    if (!ensure() || muted) return;
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(0.035);
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass"; bp.frequency.value = 3200; bp.Q.value = 5;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.5, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+    src.connect(bp); bp.connect(g); g.connect(master);
+    src.start(t); src.stop(t + 0.05);
+    ping(PENTA[4], 0.03, 0.22, 0.55);
+    ping(PENTA[6], 0.09, 0.16, 0.6);
+  }
+
   function whoosh() {
     if (!ensure() || muted) return;
     const t = ctx.currentTime;
@@ -251,6 +268,6 @@ KKM.Sound = (() => {
     document.body.classList.toggle("sound-muted", muted);
   });
 
-  return { ensure, ping, clack, pour, uiTap, uiSelect, whoosh, reveal, tada,
+  return { ensure, ping, clack, pour, uiTap, uiSelect, snap, whoosh, reveal, tada,
            shutter, popSeq, shimmer, startMusic, duckMusic, setMuted, isMuted };
 })();
