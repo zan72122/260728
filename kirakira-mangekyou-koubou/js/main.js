@@ -64,6 +64,9 @@
       lens: S.lens,
       quality,
       time: chamber.time,
+      // しゃしんのステンドグラス中は、くさびの頂点を写真の中心近くへ。
+      // 中心の被写体（顔など）がセクターに映り、回すと周辺がパンする
+      apexFrac: chamber.photoLayer ? 0.15 : 0.42,
     };
   }
 

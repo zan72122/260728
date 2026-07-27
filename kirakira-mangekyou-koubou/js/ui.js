@@ -176,6 +176,7 @@ KKM.UI = (() => {
         lens: item.cat === "lens" ? item.val : "futsu",
         quality: 1,
         time: chamber.time,
+        apexFrac: chamber.photoLayer ? 0.15 : 0.42,
       });
     }
   }
@@ -261,7 +262,9 @@ KKM.UI = (() => {
 
     $("btn-empty").addEventListener("click", () => {
       const n = chamber.empty();
-      if (n > 0) { Sound.popSeq(n); markDirty(); }
+      const hadPhoto = !!chamber.photoLayer;
+      chamber.clearPhotoLayer();
+      if (n > 0 || hadPhoto) { Sound.popSeq(Math.max(n, 3)); markDirty(); }
     });
   }
 
@@ -634,6 +637,7 @@ KKM.UI = (() => {
         lens: S.lens,
         quality: 1,
         time: chamber.time,
+        apexFrac: chamber.photoLayer ? 0.15 : 0.42,
       });
     }
     g.fillStyle = "#ffd166";

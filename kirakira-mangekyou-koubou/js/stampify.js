@@ -204,22 +204,6 @@ KKM.Stampify = (() => {
     mean /= anl2.lum.length;
     boostPixels(base, 1.32, mean < 105 ? (115 - mean) * 0.7 : 0, 1.06);
 
-    // ── メインタイル：丸角＋白ふち＋照り。元の写真が必ずわかる大きさ ──
-    const T = 300;
-    const tileContent = makeCanvas(T, T);
-    const tg = tileContent.getContext("2d");
-    const rr = T * 0.2;
-    tg.beginPath();
-    tg.moveTo(rr, 0);
-    tg.arcTo(T, 0, T, T, rr);
-    tg.arcTo(T, T, 0, T, rr);
-    tg.arcTo(0, T, 0, 0, rr);
-    tg.arcTo(0, 0, T, 0, rr);
-    tg.closePath();
-    tg.clip();
-    tg.drawImage(base, 0, 0, BASE, BASE, 0, 0, T, T);
-    const tile = stickerize(tileContent, 320, { noTrim: true, border: 320 * 0.05 });
-
     // ── キャンディーチップ：高彩度スポットから打ち抜き ──
     const spots = pickSpots(anl2, 4);
     const shapes = ["maru", "hoshi", "heart", "maru"];
@@ -240,7 +224,8 @@ KKM.Stampify = (() => {
       const chip = stickerize(chipContent, 144, { noTrim: true, border: 144 * 0.05 });
       if (chip) chips.push(chip);
     }
-    return { tile, chips };
+    // base = 補正済みの元画像そのもの。ステンドグラス（背面光）になる
+    return { base, chips };
   }
 
   /* 彩度×明度スコアの高いスポットを、たがいに離して選ぶ */

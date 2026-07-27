@@ -26,7 +26,27 @@ KKM.Chamber = class Chamber {
     this.emptying = null;
     this._sparkles = [];
     this._focus = { x: 0, y: 60 };
+    this.photoLayer = null;      // { canvas, url, ready } しゃしんのステンドグラス
   }
+
+  /* しゃしんをセルの背面光（すりガラス）そのものにする。
+     筒に貼りついて回り、くさびが写真の大きな連続領域を映すので、
+     世界全体が写真でできた曼荼羅になる */
+  setPhotoLayer(srcCanvas) {
+    const MAX = 480;
+    const s = Math.min(1, MAX / Math.max(srcCanvas.width, srcCanvas.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(srcCanvas.width * s);
+    c.height = Math.round(srcCanvas.height * s);
+    const g = c.getContext("2d");
+    g.imageSmoothingQuality = "high";
+    g.drawImage(srcCanvas, 0, 0, c.width, c.height);
+    let url = null;
+    try { url = c.toDataURL("image/jpeg", 0.72); } catch (e) {}
+    this.photoLayer = { canvas: c, url, ready: true };
+  }
+
+  clearPhotoLayer() { this.photoLayer = null; }
 
   focusAngle() {
     return Math.atan2(this._focus.y, this._focus.x);
@@ -397,6 +417,40 @@ KKM.Chamber = class Chamber {
   /* ── ひかりのフタごとの背景光 ─────────────────── */
 
   _drawLight(ctx, pixR, full, light, lightDir, t) {
+    // ── しゃしんのステンドグラス ──
+    // 写真がセルの床いっぱいに敷かれ、ひかりのフタは乗算で色味を変える
+    if (this.photoLayer && this.photoLayer.ready) {
+      const img = this.photoLayer.canvas;
+      const cover = (full * 2) / Math.min(img.width, img.height);
+      const dw = img.width * cover, dh = img.height * cover;
+      ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+      // 光の色を写真の上に乗せる（あさは素通し、よるは夜の写真になる）
+      if (light !== "asa") {
+        ctx.save();
+        ctx.globalCompositeOperation = "multiply";
+        ctx.globalAlpha = 0.72;
+        this._lightGradientFill(ctx, pixR, full, light, lightDir, t);
+        ctx.restore();
+      }
+      // うっすら中心を明るく（すりガラス越しの光）
+      const glow = ctx.createRadialGradient(0, 0, pixR * 0.05, 0, 0, full);
+      glow.addColorStop(0, "rgba(255, 252, 240, .22)");
+      glow.addColorStop(0.6, "rgba(255, 252, 240, .05)");
+      glow.addColorStop(1, "rgba(40, 24, 12, .28)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(-full, -full, full * 2, full * 2);
+      return;
+    }
+    this._lightGradientFill(ctx, pixR, full, light, lightDir, t);
+
+    // にじ・ゆうやけの液体は、うっすら水の色を重ねる
+    if (this.liquid && light !== "asa") {
+      ctx.fillStyle = "rgba(150, 210, 240, .22)";
+      ctx.fillRect(-full, -full, full * 2, full * 2);
+    }
+  }
+
+  _lightGradientFill(ctx, pixR, full, light, lightDir, t) {
     let bg;
     const liquid = this.liquid;
     switch (light) {
@@ -456,12 +510,6 @@ KKM.Chamber = class Chamber {
     }
     ctx.fillStyle = bg;
     ctx.fillRect(-full, -full, full * 2, full * 2);
-
-    // にじ・ゆうやけの液体は、うっすら水の色を重ねる
-    if (liquid && light !== "asa") {
-      ctx.fillStyle = "rgba(150, 210, 240, .22)";
-      ctx.fillRect(-full, -full, full * 2, full * 2);
-    }
   }
 
   /* ── 描画 ─────────────────────────────────
@@ -616,6 +664,7 @@ KKM.Chamber = class Chamber {
   serialize() {
     return {
       liquid: this.liquid,
+      photoBg: this.photoLayer && this.photoLayer.url ? this.photoLayer.url : null,
       particles: this.particles.map(p => ({
         t: p.type, c: p.colorIdx, r: +p.r.toFixed(1),
         x: +p.x.toFixed(1), y: +p.y.toFixed(1),
@@ -653,6 +702,19 @@ KKM.Chamber = class Chamber {
         });
       }
       this.setLiquid(!!data.liquid);
+      if (data.photoBg) {
+        const entry = { canvas: null, url: data.photoBg, ready: false };
+        this.photoLayer = entry;
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement("canvas");
+          c.width = img.width; c.height = img.height;
+          c.getContext("2d").drawImage(img, 0, 0);
+          entry.canvas = c;
+          entry.ready = true;
+        };
+        img.src = data.photoBg;
+      }
       return this.particles.length > 0;
     } catch (e) { return false; }
   }

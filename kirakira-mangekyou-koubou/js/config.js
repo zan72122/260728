@@ -170,8 +170,8 @@ KKM.MATERIALS.stamp = {
 /* おえかき→筒に入るときの複製サイズ（基準半径への倍率） */
 KKM.STAMP_COPIES = [1.0, 0.74, 0.74, 0.52, 0.52];
 KKM.STAMP_BASE_R = 19;        // おえかきスタンプの基準半径（論理単位）
-KKM.PHOTO_TILE_R = 21;        // 写真タイルの基準半径
-KKM.PHOTO_CHIP_R = 11;        // キャンディーチップの半径
+KKM.PHOTO_TILE_R = 21;        // 写真タイルの基準半径（つくったもの棚からの再投入用）
+KKM.PHOTO_CHIP_R = 14;        // キャンディーチップの半径
 KKM.STAMP_STORE_MAX = 10;     // 保存できる手づくり素材の数
 
 /* ゲージ満杯の重さ */

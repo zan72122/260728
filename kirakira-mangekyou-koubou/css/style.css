@@ -870,3 +870,10 @@ input[type="range"]::-webkit-slider-thumb {
 @media (prefers-reduced-motion: reduce) {
   .title-logo, .btn-play, .coach-orbit, .title-sparkles i, .guide-glow { animation: none !important; }
 }
+
+/* ステンドグラスになる写真のプレビュー */
+.machine-glass {
+  border-radius: 18px;
+  box-shadow: 0 0 0 5px #fff, 0 6px 18px rgba(60, 30, 60, .35);
+  object-fit: cover;
+}

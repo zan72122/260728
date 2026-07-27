@@ -61,7 +61,7 @@ KKM.Photo = (() => {
           pending = null;
         }
         els.card.classList.remove("shaking");
-        if (!pending || !pending.tile) {
+        if (!pending || !pending.base) {
           els.stage.innerHTML = `<p class="machine-error"></p>`;
           return;
         }
@@ -80,10 +80,10 @@ KKM.Photo = (() => {
     els.stage.innerHTML = "";
     const wrap = document.createElement("div");
     wrap.className = "machine-result";
-    // メインタイル
+    // ステンドグラスになる補正済み写真
     const tileImg = document.createElement("img");
-    tileImg.className = "machine-tile pop-in";
-    tileImg.src = pending.tile.toDataURL();
+    tileImg.className = "machine-tile machine-glass pop-in";
+    tileImg.src = pending.base.toDataURL("image/jpeg", 0.85);
     wrap.appendChild(tileImg);
     // チップ
     const chipRow = document.createElement("div");
@@ -104,15 +104,18 @@ KKM.Photo = (() => {
 
   function addToChamber() {
     if (!pending) return;
+    // 写真はセルの背面光（ステンドグラス）になる。
+    // 写真が主役になるよう、ほかの中身はいったんぜんぶ出す
+    chamber.clearNow();
+    if (chamber.liquid) chamber.setLiquid(true);
+    chamber.setPhotoLayer(pending.base);
+    // キャンディーチップは飾りの粒として上を転がる
     const Store = KKM.Stampify.Store;
-    const tileId = Store.add(pending.tile, "ptile");
-    chamber.addStamps(tileId, KKM.PHOTO_TILE_R, [1, 0.78]);
-    for (const chip of pending.chips.slice(0, 3)) {
+    for (const chip of pending.chips.slice(0, 4)) {
       const id = Store.add(chip, "pchip");
       chamber.addStamps(id, KKM.PHOTO_CHIP_R, [1]);
     }
-    KKM.Sound.tada();
-    KKM.Sound.pour("beads");
+    KKM.Sound.reveal();
     close();
     if (KKM.UI.notifyStampAdded) KKM.UI.notifyStampAdded();
   }
