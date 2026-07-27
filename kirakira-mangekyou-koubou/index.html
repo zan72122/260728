@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#2a1a3e">
+<title>きらきら まんげきょう こうぼう</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%232a1a3e'/%3E%3Ccircle cx='50' cy='50' r='30' fill='none' stroke='%23ffd166' stroke-width='4'/%3E%3Ccircle cx='42' cy='44' r='8' fill='%23ff8fb3'/%3E%3Ccircle cx='60' cy='52' r='6' fill='%237cc8ff'/%3E%3Ccircle cx='50' cy='62' r='5' fill='%23ffd166'/%3E%3C/svg%3E">
+</head>
+<body>
+<div id="app">
+
+  <!-- ══════════════ タイトル ══════════════ -->
+  <section id="screen-title" class="screen visible">
+    <canvas id="title-canvas"></canvas>
+    <div class="title-overlay">
+      <div class="title-logo">
+        <span class="logo-line1">✦ きらきら ✦</span>
+        <span class="logo-line2">まんげきょう</span>
+        <span class="logo-line3">こうぼう</span>
+      </div>
+      <button id="btn-start" class="btn-big btn-candy">
+        <span class="btn-label">あそぶ！</span>
+      </button>
+      <p class="title-hint">じぶんだけの まんげきょうを つくろう</p>
+    </div>
+    <div class="title-sparkles" aria-hidden="true">
+      <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+    </div>
+  </section>
+
+  <!-- ══════════════ こうぼう ══════════════ -->
+  <section id="screen-workshop" class="screen">
+    <header class="ws-header">
+      <button id="btn-home" class="btn-round btn-wood" aria-label="タイトルへ">
+        <svg viewBox="0 0 24 24"><path d="M12 3.5 3 11h2.5v8.5a1 1 0 0 0 1 1H10v-6h4v6h3.5a1 1 0 0 0 1-1V11H21z" fill="currentColor"/></svg>
+      </button>
+      <div class="ws-title-wrap">
+        <h1 class="ws-title" id="ws-step-title">かがみを えらぼう</h1>
+        <div class="ws-dots"><i class="dot active" data-step="0"></i><i class="dot" data-step="1"></i></div>
+      </div>
+      <button id="btn-sound" class="btn-round btn-wood" aria-label="おと">
+        <svg class="icon-sound-on" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4.5v-15L8 9H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M18.8 6a8.4 8.4 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <svg class="icon-sound-off" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4.5v-15L8 9H4z" fill="currentColor"/><path d="M16.5 9.5 21 14M21 9.5 16.5 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </button>
+    </header>
+
+    <div class="ws-body">
+      <!-- ── ステップ1: かがみ ── -->
+      <div class="ws-step" id="step-mirror">
+        <div class="ws-preview-wrap">
+          <div class="ws-preview-ring">
+            <canvas id="mirror-preview"></canvas>
+          </div>
+          <p class="ws-preview-caption">のぞいたら こう みえるよ</p>
+        </div>
+        <div class="ws-controls">
+          <div class="mirror-cards" id="mirror-cards">
+            <button class="mirror-card" data-mirrors="2">
+              <svg viewBox="0 0 72 72" class="mirror-diagram">
+                <g class="md-glass">
+                  <rect x="14" y="10" width="9" height="52" rx="2" transform="rotate(14 18 36)"/>
+                  <rect x="49" y="10" width="9" height="52" rx="2" transform="rotate(-14 54 36)"/>
+                </g>
+              </svg>
+              <span class="mirror-num">2まい</span>
+              <span class="mirror-desc">おおきな もよう</span>
+            </button>
+            <button class="mirror-card selected" data-mirrors="3">
+              <svg viewBox="0 0 72 72" class="mirror-diagram">
+                <g class="md-glass">
+                  <rect x="31.5" y="6" width="9" height="34" rx="2"/>
+                  <rect x="31.5" y="6" width="9" height="34" rx="2" transform="rotate(120 36 40)"/>
+                  <rect x="31.5" y="6" width="9" height="34" rx="2" transform="rotate(-120 36 40)"/>
+                </g>
+              </svg>
+              <span class="mirror-num">3まい</span>
+              <span class="mirror-desc">おはなみたい</span>
+            </button>
+            <button class="mirror-card" data-mirrors="4">
+              <svg viewBox="0 0 72 72" class="mirror-diagram">
+                <g class="md-glass">
+                  <rect x="31.5" y="4" width="9" height="30" rx="2"/>
+                  <rect x="31.5" y="4" width="9" height="30" rx="2" transform="rotate(90 36 36)"/>
+                  <rect x="31.5" y="4" width="9" height="30" rx="2" transform="rotate(180 36 36)"/>
+                  <rect x="31.5" y="4" width="9" height="30" rx="2" transform="rotate(270 36 36)"/>
+                </g>
+              </svg>
+              <span class="mirror-num">4まい</span>
+              <span class="mirror-desc">こまかい レース</span>
+            </button>
+          </div>
+          <div class="skew-panel">
+            <div class="skew-label-row">
+              <span class="skew-title">かがみを ちょっと ずらす</span>
+              <span class="skew-value" id="skew-value">まっすぐ</span>
+            </div>
+            <div class="skew-slider-wrap">
+              <svg class="skew-icon straight" viewBox="0 0 32 32"><rect x="13" y="4" width="6" height="24" rx="2" fill="currentColor"/></svg>
+              <input type="range" id="skew-slider" min="-100" max="100" value="0" step="1">
+              <svg class="skew-icon tilted" viewBox="0 0 32 32"><rect x="13" y="4" width="6" height="24" rx="2" fill="currentColor" transform="rotate(18 16 16)"/></svg>
+            </div>
+            <p class="skew-hint">ずらすと もようが くずれて おもしろいよ</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── ステップ2: なかみ ── -->
+      <div class="ws-step hidden" id="step-fill">
+        <div class="ws-preview-wrap">
+          <div class="tube-cross">
+            <div class="tube-cross-ring">
+              <canvas id="chamber-view"></canvas>
+            </div>
+            <div class="pour-layer" id="pour-layer"></div>
+            <div class="full-bubble hidden" id="full-bubble">もう いっぱい！</div>
+          </div>
+          <div class="fill-gauge-wrap">
+            <div class="fill-gauge"><div class="fill-gauge-bar" id="fill-gauge-bar"></div></div>
+            <span class="fill-gauge-label">なかみ</span>
+          </div>
+        </div>
+        <div class="ws-controls">
+          <p class="shelf-hint">びんを タップして なかみを いれてね（ながおしで たくさん）</p>
+          <div class="shelf" id="shelf">
+            <button class="jar" data-material="beads" aria-label="びーずをいれる">
+              <svg viewBox="0 0 80 96" class="jar-svg">
+                <path class="jar-glass" d="M16 30 Q14 34 14 42 L14 82 Q14 90 22 90 L58 90 Q66 90 66 82 L66 42 Q66 34 64 30 Z"/>
+                <g class="jar-content">
+                  <circle cx="30" cy="76" r="9" fill="#ff8fb3"/><circle cx="48" cy="79" r="8" fill="#7cc8ff"/>
+                  <circle cx="40" cy="64" r="8.5" fill="#ffd166"/><circle cx="55" cy="66" r="7" fill="#7be0c4"/>
+                  <circle cx="25" cy="60" r="7" fill="#c6a8ff"/><circle cx="46" cy="51" r="7.5" fill="#ff9e7d"/>
+                  <circle cx="33" cy="47" r="6.5" fill="#7cc8ff"/>
+                  <circle cx="27" cy="73" r="3" fill="#ffffff" opacity=".55"/><circle cx="37" cy="61" r="2.6" fill="#ffffff" opacity=".55"/>
+                </g>
+                <path class="jar-shine" d="M20 36 Q19 40 19 46 L19 76 Q19 80 21 82" fill="none"/>
+                <rect class="jar-lid" x="12" y="18" width="56" height="14" rx="6"/>
+              </svg>
+              <span class="jar-label">びーず</span>
+            </button>
+            <button class="jar" data-material="glitter" aria-label="きらきらをいれる">
+              <svg viewBox="0 0 80 96" class="jar-svg">
+                <path class="jar-glass" d="M16 30 Q14 34 14 42 L14 82 Q14 90 22 90 L58 90 Q66 90 66 82 L66 42 Q66 34 64 30 Z"/>
+                <g class="jar-content jar-glitter">
+                  <path d="M14 58 Q30 50 44 58 T66 56 L66 82 Q66 90 58 90 L22 90 Q14 90 14 82 Z" fill="url(#glitterGrad)"/>
+                  <g fill="#fff">
+                    <path d="M30 46l1.6 3.4L35 51l-3.4 1.6L30 56l-1.6-3.4L25 51l3.4-1.6z"/>
+                    <path d="M50 40l1.3 2.7 2.7 1.3-2.7 1.3L50 48l-1.3-2.7L46 44l2.7-1.3z" opacity=".9"/>
+                    <path d="M42 66l1.2 2.5 2.5 1.2-2.5 1.2-1.2 2.5-1.2-2.5-2.5-1.2 2.5-1.2z" opacity=".8"/>
+                    <path d="M26 72l1 2.1 2.1 1-2.1 1-1 2.1-1-2.1-2.1-1 2.1-1z" opacity=".7"/>
+                    <path d="M55 70l1 2.1 2.1 1-2.1 1-1 2.1-1-2.1-2.1-1 2.1-1z" opacity=".85"/>
+                  </g>
+                </g>
+                <path class="jar-shine" d="M20 36 Q19 40 19 46 L19 76 Q19 80 21 82" fill="none"/>
+                <rect class="jar-lid" x="12" y="18" width="56" height="14" rx="6"/>
+                <defs>
+                  <linearGradient id="glitterGrad" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#ffe08a"/><stop offset=".4" stop-color="#ffb3d9"/>
+                    <stop offset=".7" stop-color="#a8e6ff"/><stop offset="1" stop-color="#d9c2ff"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+              <span class="jar-label">きらきら</span>
+            </button>
+            <button class="jar" data-material="petals" aria-label="はなびらをいれる">
+              <svg viewBox="0 0 80 96" class="jar-svg">
+                <path class="jar-glass" d="M16 30 Q14 34 14 42 L14 82 Q14 90 22 90 L58 90 Q66 90 66 82 L66 42 Q66 34 64 30 Z"/>
+                <g class="jar-content">
+                  <path d="M28 78q-8-5-4-13 8-3 11 5 1 8-7 8z" fill="#ffc7dd"/>
+                  <path d="M50 80q9-3 7-12-7-5-12 2-3 8 5 10z" fill="#ffb3cf"/>
+                  <path d="M40 62q-8-4-5-12 8-4 12 3 2 9-7 9z" fill="#ffe3ec"/>
+                  <path d="M27 56q-7-4-4-11 7-3 10 3 2 8-6 8z" fill="#fff2b8"/>
+                  <path d="M52 58q8-4 5-12-8-3-11 4-2 8 6 8z" fill="#ffd9c2"/>
+                  <path d="M39 45q-6-3-4-9 6-3 9 2 2 7-5 7z" fill="#ffc7dd"/>
+                </g>
+                <path class="jar-shine" d="M20 36 Q19 40 19 46 L19 76 Q19 80 21 82" fill="none"/>
+                <rect class="jar-lid" x="12" y="18" width="56" height="14" rx="6"/>
+              </svg>
+              <span class="jar-label">はなびら</span>
+            </button>
+            <button class="jar" data-material="stars" aria-label="おほしさまをいれる">
+              <svg viewBox="0 0 80 96" class="jar-svg">
+                <path class="jar-glass" d="M16 30 Q14 34 14 42 L14 82 Q14 90 22 90 L58 90 Q66 90 66 82 L66 42 Q66 34 64 30 Z"/>
+                <g class="jar-content">
+                  <path d="m30 68 2.9 5.9 6.5.9-4.7 4.6 1.1 6.4L30 82.8l-5.8 3 1.1-6.4-4.7-4.6 6.5-.9z" fill="#ffd75e"/>
+                  <path d="m50 64 2.6 5.3 5.9.8-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.8z" fill="#ff9ec9"/>
+                  <path d="m40 44 2.6 5.3 5.9.8-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.8z" fill="#8fd8ff"/>
+                  <path d="m26 50 2 4 4.5.6-3.3 3.2.8 4.4-4-2.1-4 2.1.8-4.4-3.3-3.2 4.5-.6z" fill="#c9b1ff"/>
+                </g>
+                <path class="jar-shine" d="M20 36 Q19 40 19 46 L19 76 Q19 80 21 82" fill="none"/>
+                <rect class="jar-lid" x="12" y="18" width="56" height="14" rx="6"/>
+              </svg>
+              <span class="jar-label">おほしさま</span>
+            </button>
+          </div>
+          <div class="fill-extra-row">
+            <button class="toggle-water" id="btn-water">
+              <svg viewBox="0 0 40 40" class="water-icon">
+                <path d="M20 4 Q30 18 30 26 a10 10 0 0 1-20 0 Q10 18 20 4z" fill="#8fd8ff" stroke="#5db6e8" stroke-width="2"/>
+                <path d="M15.5 25 q0 5 4.5 6.5" fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" opacity=".85"/>
+              </svg>
+              <span class="toggle-water-label">おみずを いれる</span>
+              <span class="toggle-knob"><i></i></span>
+            </button>
+            <button class="btn-empty" id="btn-empty">
+              <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2m-8 0 1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>からっぽに する</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="ws-footer">
+      <button id="btn-prev" class="btn-nav btn-wood hidden">
+        <svg viewBox="0 0 24 24"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>もどる</span>
+      </button>
+      <button id="btn-next" class="btn-big btn-candy">
+        <span class="btn-label">つぎへ　→</span>
+      </button>
+      <button id="btn-peek" class="btn-big btn-peek hidden">
+        <svg viewBox="0 0 32 32" class="peek-eye"><ellipse cx="16" cy="16" rx="13" ry="8.5" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="16" cy="16" r="4.4" fill="currentColor"/><circle cx="17.6" cy="14.4" r="1.4" fill="#fff"/></svg>
+        <span class="btn-label">のぞいて みる！</span>
+      </button>
+    </footer>
+  </section>
+
+  <!-- ══════════════ のぞき ══════════════ -->
+  <section id="screen-peek" class="screen">
+    <canvas id="peek-canvas"></canvas>
+
+    <div class="peek-ui">
+      <button id="btn-back-workshop" class="btn-round btn-glass" aria-label="こうぼうへもどる">
+        <svg viewBox="0 0 24 24"><path d="M14.5 3.5c-3 0-5 1.5-5 4v1L6 8l3.5 4.5v-2h5c2 0 3-1 3-2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0"/><path d="M12 2.2 4.5 8.5h2v10.3a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V8.5h2L12 2.2zM10 19.8v-5h4v5" fill="currentColor"/></svg>
+        <span class="btn-round-label">こうぼう</span>
+      </button>
+      <div class="peek-right-btns">
+        <button id="btn-tilt" class="btn-round btn-glass hidden" aria-label="かたむきセンサー">
+          <svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="2.5" fill="none" stroke="currentColor" stroke-width="2" transform="rotate(14 12 12)"/><path d="M4 20q8 3 16-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="1.5 3"/></svg>
+          <span class="btn-round-label">かたむき</span>
+        </button>
+        <button id="btn-photo" class="btn-round btn-glass" aria-label="しゃしんをとる">
+          <svg viewBox="0 0 24 24"><path d="M4 7h3.5L9 4.8h6L16.5 7H20a1.5 1.5 0 0 1 1.5 1.5v10A1.5 1.5 0 0 1 20 20H4a1.5 1.5 0 0 1-1.5-1.5v-10A1.5 1.5 0 0 1 4 7z" fill="currentColor"/><circle cx="12" cy="13" r="4" fill="#2a1a3e"/><circle cx="12" cy="13" r="2.2" fill="#fff" opacity=".9"/></svg>
+          <span class="btn-round-label">しゃしん</span>
+        </button>
+        <button id="btn-sound2" class="btn-round btn-glass" aria-label="おと">
+          <svg class="icon-sound-on" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4.5v-15L8 9H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M18.8 6a8.4 8.4 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <svg class="icon-sound-off" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4.5v-15L8 9H4z" fill="currentColor"/><path d="M16.5 9.5 21 14M21 9.5 16.5 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+
+      <!-- どうぐトレイ -->
+      <div class="peek-tray-wrap">
+        <div class="peek-tray hidden" id="peek-tray">
+          <button class="tray-jar" data-material="beads"><i class="tj-icon tj-beads"></i><span>びーず</span></button>
+          <button class="tray-jar" data-material="glitter"><i class="tj-icon tj-glitter"></i><span>きらきら</span></button>
+          <button class="tray-jar" data-material="petals"><i class="tj-icon tj-petals"></i><span>はなびら</span></button>
+          <button class="tray-jar" data-material="stars"><i class="tj-icon tj-stars"></i><span>おほし</span></button>
+          <button class="tray-jar" id="tray-water"><i class="tj-icon tj-water"></i><span>おみず</span></button>
+          <button class="tray-jar" id="tray-mirror"><i class="tj-icon tj-mirror"></i><span>かがみ<b id="tray-mirror-n">3</b></span></button>
+        </div>
+        <button id="btn-tray" class="btn-tray-toggle">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+          <span>なかみを かえる</span>
+        </button>
+      </div>
+
+      <!-- くるくるコーチ -->
+      <div class="coach hidden" id="coach">
+        <div class="coach-orbit">
+          <svg class="coach-hand" viewBox="0 0 48 48">
+            <path d="M18 44c-4-3-8-9-8-14v-8a3 3 0 0 1 6 0v3-14a3 3 0 0 1 6 0v10-12a3 3 0 0 1 6 0v12-9a3 3 0 0 1 6 0v11a26 26 0 0 1-2 11c-1.6 3.4-4 7-6 9z" fill="#ffe3c9" stroke="#e8b98f" stroke-width="1.6"/>
+          </svg>
+        </div>
+        <p class="coach-text">ゆびで くるくる まわしてね</p>
+      </div>
+    </div>
+
+    <div class="photo-flash" id="photo-flash"></div>
+
+    <!-- しゃしんモーダル -->
+    <div class="photo-modal hidden" id="photo-modal">
+      <div class="photo-card">
+        <p class="photo-card-title">できたよ！</p>
+        <img id="photo-img" alt="まんげきょうの しゃしん">
+        <div class="photo-card-btns">
+          <a id="photo-save" class="btn-mid btn-candy" download="mangekyou.png">ほぞん</a>
+          <button id="photo-close" class="btn-mid btn-plain">とじる</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/sprites.js"></script>
+<script src="js/chamber.js"></script>
+<script src="js/kaleido.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
