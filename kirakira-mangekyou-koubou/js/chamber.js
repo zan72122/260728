@@ -76,6 +76,36 @@ KKM.Chamber = class Chamber {
     return added;
   }
 
+  /* つくったスタンプ（おえかき・しゃしん）を筒に入れる */
+  addStamps(stampId, baseR, sizeMults) {
+    if (this.isFull()) return 0;
+    const half = KKM.Shapes.spawnHalfWidth(this.tube, this.R);
+    let added = 0;
+    for (const mult of sizeMults) {
+      if (this.weight() + KKM.MATERIALS.stamp.weight > KKM.FULL_WEIGHT + 6) break;
+      const sx = (Math.random() - 0.5) * 2 * half;
+      const sy = -this.R * (1.1 + Math.random() * 0.5);
+      this.particles.push({
+        type: "stamp",
+        stampId,
+        colorIdx: 0,
+        r: baseR * mult,
+        x: sx, y: sy,
+        vx: (Math.random() - 0.5) * 30,
+        vy: 0,
+        rot: (Math.random() - 0.5) * 0.9,
+        vrot: (Math.random() - 0.5) * 3,
+        phase: Math.random() * Math.PI * 2,
+        squish: 0,
+        drop: true,
+        dead: false,
+        fade: 1,
+      });
+      added++;
+    }
+    return added;
+  }
+
   setLiquid(on) {
     this.liquid = on;
     if (on) {
@@ -514,10 +544,22 @@ KKM.Chamber = class Chamber {
     }
 
     // ── 粒本体 ──
-    const order = { petals: 0, stars: 1, beads: 2, glitter: 3 };
+    const order = { petals: 0, stars: 1, beads: 2, stamp: 2.5, glitter: 3 };
     const sorted = this.particles.slice().sort((a, b) => order[a.type] - order[b.type]);
     const flareThresh = night ? 0.72 : 0.86;   // 夜はラメがよく光る
     for (const p of sorted) {
+      if (p.type === "stamp") {
+        const entry = KKM.Stampify.Store.get(p.stampId);
+        if (!entry || !entry.ready) continue;
+        const size = p.r * 2 * k;
+        ctx.save();
+        ctx.translate(p.x * k, p.y * k);
+        ctx.rotate(p.rot);
+        ctx.globalAlpha = Math.max(0, Math.min(1, p.fade)) * (night ? 0.92 : 1);
+        ctx.drawImage(entry.canvas, -size / 2, -size / 2, size, size);
+        ctx.restore();
+        continue;
+      }
       const spr = S.get(p.type, p.colorIdx);
       const size = p.r * 2 * k;
       ctx.save();
@@ -577,6 +619,7 @@ KKM.Chamber = class Chamber {
       particles: this.particles.map(p => ({
         t: p.type, c: p.colorIdx, r: +p.r.toFixed(1),
         x: +p.x.toFixed(1), y: +p.y.toFixed(1),
+        ...(p.stampId ? { s: p.stampId } : {}),
       })),
     };
   }
@@ -588,6 +631,18 @@ KKM.Chamber = class Chamber {
       for (const q of data.particles || []) {
         const mat = KKM.MATERIALS[q.t];
         if (!mat) continue;
+        if (q.t === "stamp") {
+          if (!q.s || !KKM.Stampify.Store.get(q.s)) continue;
+          this.particles.push({
+            type: "stamp", stampId: q.s, colorIdx: 0,
+            r: Math.max(5, Math.min(28, q.r)),
+            x: q.x, y: q.y, vx: 0, vy: 0,
+            rot: (Math.random() - 0.5) * 0.9, vrot: 0,
+            phase: Math.random() * Math.PI * 2,
+            squish: 0, drop: false, dead: false, fade: 1,
+          });
+          continue;
+        }
         this.particles.push({
           type: q.t, colorIdx: Math.min(q.c | 0, mat.colors.length - 1),
           r: Math.max(mat.rMin, Math.min(mat.rMax, q.r)),

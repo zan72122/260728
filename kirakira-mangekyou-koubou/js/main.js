@@ -209,6 +209,8 @@
     };
 
     KKM.UI.init(chamber);
+    KKM.Paint.init(chamber);
+    KKM.Photo.init(chamber);
 
     if (!KKM.UI.loadRecipe()) {
       for (const [mat, scoops] of KKM.STARTER) {

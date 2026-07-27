@@ -217,7 +217,68 @@ KKM.UI = (() => {
     bindTiltSensors();
     refreshAllSelections();
 
+    // つくったもの棚：保管庫が変わるたびに描き直し＋迷子の粒を掃除
+    KKM.Stampify.Store.setOnChange(() => {
+      chamber.particles = chamber.particles.filter(
+        p => p.type !== "stamp" || KKM.Stampify.Store.get(p.stampId));
+      renderStampShelf();
+    });
+
     try { S.coachDone = localStorage.getItem(KKM.COACH_KEY) === "1"; } catch (e) {}
+  }
+
+  /* ── つくったもの棚 ─────────────────────── */
+
+  const STAMP_POUR = {
+    draw:  { r: () => KKM.STAMP_BASE_R, copies: [0.95, 0.7, 0.52] },
+    ptile: { r: () => KKM.PHOTO_TILE_R, copies: [1, 0.78] },
+    pchip: { r: () => KKM.PHOTO_CHIP_R, copies: [1, 1] },
+  };
+
+  function renderStampShelf() {
+    const shelf = $("stamp-shelf");
+    const row = $("stamp-thumbs");
+    if (!shelf || !row) return;
+    const list = KKM.Stampify.Store.list();
+    shelf.classList.toggle("hidden", list.length === 0);
+    row.innerHTML = "";
+    for (const entry of list) {
+      const b = document.createElement("button");
+      b.className = "stamp-thumb";
+      if (entry.ready) {
+        if (!entry.thumbURL) {
+          try { entry.thumbURL = entry.canvas.toDataURL(); } catch (e) {}
+        }
+        if (entry.thumbURL) b.innerHTML = `<img src="${entry.thumbURL}" alt="">`;
+      }
+      const del = document.createElement("i");
+      del.className = "stamp-del";
+      del.textContent = "×";
+      del.addEventListener("pointerdown", e => {
+        e.stopPropagation();
+        e.preventDefault();
+        KKM.Stampify.Store.remove(entry.id);
+        Sound.popSeq(2);
+        markDirty();
+      });
+      b.appendChild(del);
+      b.addEventListener("click", () => {
+        if (chamber.isFull()) { showFullBubble(); return; }
+        const spec = STAMP_POUR[entry.kind] || STAMP_POUR.draw;
+        chamber.addStamps(entry.id, spec.r(), spec.copies);
+        Sound.pour("beads");
+        markDirty();
+        guideAdvance("fill");
+      });
+      row.appendChild(b);
+    }
+  }
+
+  /* おえかき・しゃしんが筒に入ったときの後始末 */
+  function notifyStampAdded() {
+    markDirty();
+    guideAdvance("fill");
+    renderStampShelf();
   }
 
   /* ── 画面遷移 ─────────────────────────────── */
@@ -271,8 +332,14 @@ KKM.UI = (() => {
     });
     updateSkewLabel();
 
+    // じぶんの え
+    document.getElementById("jar-paint").addEventListener("pointerdown", e => {
+      e.preventDefault();
+      KKM.Paint.open();
+    });
+
     // びん（タップ＆ながおし）
-    document.querySelectorAll("#shelf .jar").forEach(jar => {
+    document.querySelectorAll("#shelf .jar[data-material]").forEach(jar => {
       const material = jar.dataset.material;
       jar.addEventListener("pointerdown", e => {
         e.preventDefault();
@@ -624,6 +691,7 @@ KKM.UI = (() => {
       localStorage.setItem(KKM.SAVE_KEY, JSON.stringify({
         tube: S.tube, mirrors: S.mirrors, skew01: S.skew01,
         skin: S.skin, light: S.light, hole: S.hole, lens: S.lens,
+        stamps: KKM.Stampify.Store.serialize(),
         chamber: chamber.serialize(),
       }));
     } catch (e) {}
@@ -645,6 +713,7 @@ KKM.UI = (() => {
       if (KKM.LIGHTS[data.light]) S.light = data.light;
       if (KKM.HOLES[data.hole]) S.hole = data.hole;
       if (KKM.LENSES[data.lens]) S.lens = data.lens;
+      KKM.Stampify.Store.restore(data.stamps);
       const ok = chamber.restore(data.chamber);
       els.water.classList.toggle("on", chamber.liquid);
       els.trayWater.classList.toggle("on", chamber.liquid);
@@ -653,5 +722,6 @@ KKM.UI = (() => {
     } catch (e) { return false; }
   }
 
-  return { init, showScreen, saveRecipe, loadRecipe, showFullBubble, selectPart };
+  return { init, showScreen, saveRecipe, loadRecipe, showFullBubble, selectPart,
+           notifyStampAdded };
 })();

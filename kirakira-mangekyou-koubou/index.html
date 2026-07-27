@@ -188,6 +188,35 @@
                   </svg>
                   <span class="jar-label">おほしさま</span>
                 </button>
+                <button class="jar jar-special" id="jar-paint" aria-label="じぶんのえをかく">
+                  <svg viewBox="0 0 80 96" class="jar-svg">
+                    <rect x="12" y="26" width="56" height="60" rx="10" fill="#fffdf6" stroke="#e0cfae" stroke-width="2.5"/>
+                    <path d="M24 66 Q30 44 44 40" fill="none" stroke="#ff5f96" stroke-width="7" stroke-linecap="round"/>
+                    <path d="M34 72 Q46 62 56 64" fill="none" stroke="#3fa0e8" stroke-width="7" stroke-linecap="round"/>
+                    <circle cx="52" cy="48" r="5.5" fill="#ffcf3e"/>
+                    <g transform="rotate(38 58 30)">
+                      <rect x="54" y="10" width="9" height="26" rx="2" fill="#f0658a"/>
+                      <path d="M54 36 h9 l-4.5 8 z" fill="#ffc9da"/>
+                      <rect x="54" y="10" width="9" height="6" fill="#c94a6d"/>
+                    </g>
+                  </svg>
+                  <span class="jar-label">じぶんの え</span>
+                </button>
+                <button class="jar jar-special" id="jar-photo" aria-label="しゃしんをえらぶ">
+                  <svg viewBox="0 0 80 96" class="jar-svg">
+                    <rect x="10" y="30" width="60" height="46" rx="9" fill="#8fd8ff" stroke="#4d9fd6" stroke-width="2.5"/>
+                    <rect x="28" y="22" width="24" height="12" rx="4" fill="#4d9fd6"/>
+                    <circle cx="40" cy="53" r="14" fill="#2a5f80"/>
+                    <circle cx="40" cy="53" r="9" fill="#bfe9ff"/>
+                    <circle cx="36.5" cy="49.5" r="3" fill="#ffffff"/>
+                    <circle cx="61" cy="39" r="3.4" fill="#fff3c9"/>
+                  </svg>
+                  <span class="jar-label">しゃしん</span>
+                </button>
+              </div>
+              <div class="stamp-shelf hidden" id="stamp-shelf">
+                <p class="mini-heading">つくったもの（タップで もういちど いれる）</p>
+                <div class="stamp-thumbs" id="stamp-thumbs"></div>
               </div>
               <div class="fill-extra-row">
                 <button class="toggle-water" id="btn-water">
@@ -298,14 +327,62 @@
     </div>
   </section>
 
+  <!-- ══════════════ おえかきスタンプこうぼう ══════════════ -->
+  <div class="modal hidden" id="paint-modal">
+    <div class="paint-wrap">
+      <div class="paint-live">
+        <div class="paint-preview-ring"><canvas id="paint-preview"></canvas></div>
+        <p class="paint-live-caption">かいた せんが ふえていくよ！</p>
+      </div>
+      <div class="paint-main">
+        <div class="paint-board-wrap">
+          <canvas id="paint-canvas"></canvas>
+        </div>
+        <div class="paint-tools">
+          <div class="crayons" id="crayons"></div>
+          <div class="paint-actions">
+            <button id="paint-mirror-pen" class="paint-toggle on">
+              <svg viewBox="0 0 32 32"><path d="M16 4v24M8 10l-4 6 4 6M24 10l4 6-4 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>かがみペン</span>
+            </button>
+            <button id="paint-clear" class="paint-toggle">
+              <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2m-8 0 1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>ぜんぶけす</span>
+            </button>
+          </div>
+        </div>
+        <div class="paint-footer">
+          <button id="paint-cancel" class="btn-mid btn-plain">やめる</button>
+          <button id="paint-done" class="btn-big btn-candy"><span class="btn-label">できた！</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════ しゃしんキャンディーマシン ══════════════ -->
+  <div class="modal hidden" id="photo-machine">
+    <div class="machine-card">
+      <p class="machine-title">🍬 しゃしん キャンディーマシン</p>
+      <div class="machine-stage" id="machine-stage"></div>
+      <div class="machine-btns">
+        <button id="machine-cancel" class="btn-mid btn-plain">やめる</button>
+        <button id="machine-add" class="btn-mid btn-candy hidden">つつに いれる！</button>
+      </div>
+    </div>
+  </div>
+  <input type="file" id="photo-input" accept="image/*" class="hidden">
+
 </div>
 
 <script src="js/config.js"></script>
 <script src="js/shapes.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/sprites.js"></script>
+<script src="js/stampify.js"></script>
 <script src="js/chamber.js"></script>
 <script src="js/kaleido.js"></script>
+<script src="js/paint.js"></script>
+<script src="js/photo.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/main.js"></script>
 </body>

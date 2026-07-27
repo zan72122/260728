@@ -65,6 +65,40 @@ KKM.Kaleido = class Kaleido {
     chamber.draw(g, pixR, tubeAngle, { margin: MARGIN, ...chOpts });
   }
 
+  /* 任意の画像（おえかき）をチャンバーとして流し込む
+     ライブプレビュー用：描いた線がそのまま鏡で増える */
+  renderImage(imgCanvas, pixR, bgStyle) {
+    pixR = Math.max(64, pixR | 0);
+    const MARGIN = 1.45;
+    if (this.chamberPix !== pixR) {
+      this.chamberPix = pixR;
+      this.margin = MARGIN;
+      const full = Math.ceil(pixR * MARGIN);
+      this.chamberFull = full;
+      this.chamberCanvas.width = full * 2;
+      this.chamberCanvas.height = full * 2;
+      this.fxCanvas.width = full * 2;
+      this.fxCanvas.height = full * 2;
+      this.bloomCanvas.width = Math.max(48, (pixR / 5) | 0);
+      this.bloomCanvas.height = Math.max(48, (pixR / 5) | 0);
+    }
+    const g = this.chamberCtx;
+    const full = this.chamberFull;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, full * 2, full * 2);
+    g.translate(full, full);
+    // やわらかい紙のあかり
+    const bg = g.createRadialGradient(0, 0, pixR * 0.1, 0, 0, full);
+    bg.addColorStop(0, bgStyle || "#fffdf4");
+    bg.addColorStop(0.7, "#f6ecdc");
+    bg.addColorStop(1, "#d8c4a8");
+    g.fillStyle = bg;
+    g.fillRect(-full, -full, full * 2, full * 2);
+    const s = (pixR * 2) / Math.max(imgCanvas.width, imgCanvas.height);
+    const dw = imgCanvas.width * s, dh = imgCanvas.height * s;
+    g.drawImage(imgCanvas, -dw / 2, -dh / 2, dw, dh);
+  }
+
   /* 鏡の性格による下ごしらえ（波打ち・ぼかし）→ 描画ソースを返す */
   _prepareSource(skin, t) {
     const skinDef = KKM.SKINS[skin] || {};
@@ -126,7 +160,9 @@ KKM.Kaleido = class Kaleido {
       lens = "futsu",
       quality = 1,
       time = 0,
+      apexFrac = 0.42,     // くさびの頂点がセル中心からずれる量（0 で中心固定）
     } = opts;
+    this.apexFrac = apexFrac;
     this.time = time;
 
     const skinDef = KKM.SKINS[skin] || {};
@@ -197,8 +233,8 @@ KKM.Kaleido = class Kaleido {
     const pixM = this.chamberFull;
     const skinDef = KKM.SKINS[skin] || {};
 
-    const APEX_SHIFT = 0.42 * pix;
-    const ZOOM = 1.35 * zoom;
+    const APEX_SHIFT = this.apexFrac * pix;
+    const ZOOM = (this.apexFrac < 0.05 ? 1.0 : 1.35) * zoom;
     const nS = Math.max(2, Math.round(TAU / a));
 
     const phase0 = Math.PI / 2 - a / 2;

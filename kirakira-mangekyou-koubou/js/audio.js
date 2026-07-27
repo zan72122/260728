@@ -221,6 +221,48 @@ KKM.Sound = (() => {
     }
   }
 
+  /* クレヨンの「しゅっしゅっ」（描いている間、ひかえめに） */
+  let lastScribble = 0;
+  function scribble() {
+    if (!ctx || muted) return;
+    const now = performance.now();
+    if (now - lastScribble < 90) return;
+    lastScribble = now;
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuffer(0.05);
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass"; lp.frequency.value = 1100 + Math.random() * 500; lp.Q.value = 0.6;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.06, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+    src.connect(lp); lp.connect(g); g.connect(master);
+    src.start(t); src.stop(t + 0.06);
+  }
+
+  /* キャンディーマシンの「ガシャン・ゴトゴト」 */
+  function machine() {
+    if (!ensure() || muted) return;
+    const t = ctx.currentTime;
+    const thump = (when, freq, vol) => {
+      const o = ctx.createOscillator();
+      o.type = "sine";
+      o.frequency.setValueAtTime(freq, t + when);
+      o.frequency.exponentialRampToValueAtTime(freq * 0.4, t + when + 0.09);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(vol, t + when);
+      g.gain.exponentialRampToValueAtTime(0.001, t + when + 0.12);
+      o.connect(g); g.connect(master);
+      o.start(t + when); o.stop(t + when + 0.14);
+    };
+    thump(0, 180, 0.5);
+    thump(0.16, 140, 0.4);
+    thump(0.34, 200, 0.35);
+    for (let i = 0; i < 5; i++) {
+      setTimeout(() => clack(0.4 + Math.random() * 0.4, 0.5), 80 + i * 110);
+    }
+  }
+
   /* きらめき（強い輝きがでたときに、ごくたまに） */
   let lastShimmer = 0;
   function shimmer() {
@@ -269,5 +311,6 @@ KKM.Sound = (() => {
   });
 
   return { ensure, ping, clack, pour, uiTap, uiSelect, snap, whoosh, reveal, tada,
-           shutter, popSeq, shimmer, startMusic, duckMusic, setMuted, isMuted };
+           shutter, popSeq, shimmer, scribble, machine,
+           startMusic, duckMusic, setMuted, isMuted };
 })();
