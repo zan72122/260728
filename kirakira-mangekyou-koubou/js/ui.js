@@ -222,6 +222,7 @@ KKM.UI = (() => {
     dock.open = open;
     els.dock.classList.toggle("hidden", !open);
     els.btnDock.classList.toggle("open", open);
+    document.body.classList.toggle("dock-open", open);
   }
 
   function bindDock() {
@@ -445,7 +446,8 @@ KKM.UI = (() => {
     const shelf = $("stamp-shelf");
     const row = $("stamp-thumbs");
     if (!shelf || !row) return;
-    const list = KKM.Stampify.Store.list();
+    const list = KKM.Stampify.Store.list()
+      .filter(e => !KKM.Stampify.Store.isEphemeral(e));
     shelf.classList.toggle("hidden", list.length === 0);
     row.innerHTML = "";
     for (const entry of list) {

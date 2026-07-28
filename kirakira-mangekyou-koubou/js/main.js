@@ -191,6 +191,7 @@
       drawWorld(dt);
       drawChamberWindow();
       KKM.UI.renderCatalog();
+      KKM.Words.update(dt);
       updateGauge();
       if (chamber._sparkles.length > 0) {
         sparkleGlow += dt;
@@ -220,6 +221,7 @@
     KKM.UI.init(chamber);
     KKM.Paint.init(chamber);
     KKM.Photo.init(chamber);
+    KKM.Words.init(chamber);
 
     if (!KKM.UI.loadRecipe()) {
       for (const [mat, scoops] of KKM.STARTER) {

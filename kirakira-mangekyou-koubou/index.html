@@ -204,6 +204,49 @@
         </button>
       </div>
 
+      <!-- ほしのこ（ことばの世界の住人） -->
+      <button id="hoshinoko" class="st-sleep" aria-label="ほしのこ">
+        <svg viewBox="0 0 120 120">
+          <defs>
+            <radialGradient id="hoshiBody" cx="42%" cy="36%" r="75%">
+              <stop offset="0" stop-color="#fff8d0"/>
+              <stop offset=".55" stop-color="#ffe07a"/>
+              <stop offset="1" stop-color="#f0b93e"/>
+            </radialGradient>
+          </defs>
+          <path class="hoshi-body" d="M60 8l13.2 26.8 29.6 4.3-21.4 20.9 5 29.5L60 75.6 33.6 89.5l5-29.5L17.2 39.1l29.6-4.3z"
+                fill="url(#hoshiBody)" stroke="#d99a2b" stroke-width="3" stroke-linejoin="round"/>
+          <g class="hoshi-face">
+            <g class="eyes-sleep">
+              <path d="M46 56 q4 4 8 0" fill="none" stroke="#7a5215" stroke-width="3.4" stroke-linecap="round"/>
+              <path d="M66 56 q4 4 8 0" fill="none" stroke="#7a5215" stroke-width="3.4" stroke-linecap="round"/>
+            </g>
+            <g class="eyes-open">
+              <circle cx="50" cy="55" r="4.4" fill="#4a3210"/>
+              <circle cx="70" cy="55" r="4.4" fill="#4a3210"/>
+              <circle cx="51.5" cy="53.5" r="1.5" fill="#fff"/>
+              <circle cx="71.5" cy="53.5" r="1.5" fill="#fff"/>
+            </g>
+            <circle cx="42" cy="63" r="4.5" fill="#ffb199" opacity=".75"/>
+            <circle cx="78" cy="63" r="4.5" fill="#ffb199" opacity=".75"/>
+            <path class="mouth-smile" d="M55 65 q5 5 10 0" fill="none" stroke="#7a5215" stroke-width="3" stroke-linecap="round"/>
+            <ellipse class="mouth-yawn" cx="60" cy="67" rx="5.5" ry="7" fill="#8a5a20"/>
+          </g>
+          <g class="hoshi-zzz" fill="#fff" opacity=".85">
+            <text x="88" y="30" font-size="16" font-weight="bold">z</text>
+            <text x="98" y="18" font-size="12" font-weight="bold">z</text>
+          </g>
+        </svg>
+      </button>
+      <div id="hoshi-bubble" class="hidden"></div>
+
+      <!-- いたずらもじ さがし（ことばの宝石の輪） -->
+      <div id="word-ring" class="hidden"></div>
+      <!-- ほんものの かぎ -->
+      <div id="word-tray" class="hidden"></div>
+      <!-- もじビーズの くみたて -->
+      <div id="asm-board" class="hidden"></div>
+
       <!-- くるくるコーチ（手だけ・ことばなし） -->
       <div class="coach hidden" id="coach">
         <div class="coach-orbit">
@@ -296,6 +339,7 @@
 <script src="js/kaleido.js"></script>
 <script src="js/paint.js"></script>
 <script src="js/photo.js"></script>
+<script src="js/words.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/main.js"></script>
 </body>

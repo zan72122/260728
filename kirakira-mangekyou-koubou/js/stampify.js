@@ -252,18 +252,26 @@ KKM.Stampify = (() => {
   let nextId = 1;
   let onChange = null;
 
+  const isEphemeral = kind => typeof kind === "string" && kind.startsWith("w_");
+
   const Store = {
+    /* kind が "w_" で始まるものは「ことば」用の一時スタンプ:
+       棚に並ばず、保存もされず、専用の上限で間引かれる */
     add(canvas, kind) {
       const id = "s" + (nextId++) + "_" + Date.now().toString(36);
       store.set(id, { id, kind, canvas, ready: true });
-      // 古いものから間引く
-      while (store.size > KKM.STAMP_STORE_MAX) {
-        const oldest = store.keys().next().value;
-        store.delete(oldest);
+      const durable = [...store.values()].filter(e => !isEphemeral(e.kind));
+      while (durable.length > KKM.STAMP_STORE_MAX) {
+        store.delete(durable.shift().id);
+      }
+      const eph = [...store.values()].filter(e => isEphemeral(e.kind));
+      while (eph.length > 40) {
+        store.delete(eph.shift().id);
       }
       if (onChange) onChange();
       return id;
     },
+    isEphemeral(entry) { return isEphemeral(entry.kind); },
     get(id) { return store.get(id); },
     remove(id) { store.delete(id); if (onChange) onChange(); },
     list() { return [...store.values()]; },
@@ -271,6 +279,7 @@ KKM.Stampify = (() => {
     serialize() {
       const out = [];
       for (const s of store.values()) {
+        if (isEphemeral(s.kind)) continue;
         try { out.push({ id: s.id, kind: s.kind, data: s.canvas.toDataURL("image/png") }); }
         catch (e) {}
       }

@@ -877,3 +877,234 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow: 0 0 0 5px #fff, 0 6px 18px rgba(60, 30, 60, .35);
   object-fit: cover;
 }
+
+/* ═══════════════════════════════════
+   ほしのこ と ことばの世界
+   ═══════════════════════════════════ */
+#hoshinoko {
+  position: absolute;
+  left: calc(var(--sal) + 10px);
+  bottom: calc(var(--sab) + 84px);
+  width: clamp(64px, 13vmin, 92px);
+  height: clamp(64px, 13vmin, 92px);
+  z-index: 6;
+  filter: drop-shadow(0 0 14px rgba(255, 224, 122, .55)) drop-shadow(0 4px 8px rgba(0,0,0,.5));
+  transition: transform .18s ease;
+}
+#hoshinoko:active { transform: scale(.88); }
+#hoshinoko svg { width: 100%; height: 100%; overflow: visible; }
+body.dock-open #hoshinoko { display: none; }
+
+/* ねむり: ゆったり呼吸＋zzz */
+#hoshinoko.st-sleep svg { animation: hoshi-breathe 3.4s ease-in-out infinite; }
+@keyframes hoshi-breathe {
+  0%, 100% { transform: scale(1) rotate(-3deg); }
+  50%      { transform: scale(1.05) rotate(3deg); }
+}
+#hoshinoko .eyes-open, #hoshinoko .mouth-yawn { display: none; }
+#hoshinoko .hoshi-zzz { display: none; }
+#hoshinoko.st-sleep .hoshi-zzz { display: block; animation: zzz-float 2.6s ease-in-out infinite; }
+@keyframes zzz-float {
+  0%, 100% { opacity: .3; transform: translateY(0); }
+  50%      { opacity: .95; transform: translateY(-4px); }
+}
+
+/* おきた・うれしい・あくび */
+#hoshinoko.st-awake .eyes-sleep, #hoshinoko.st-happy .eyes-sleep { display: none; }
+#hoshinoko.st-awake .eyes-open, #hoshinoko.st-happy .eyes-open { display: block; }
+#hoshinoko.st-awake svg { animation: hoshi-bounce .8s ease-in-out infinite; }
+@keyframes hoshi-bounce {
+  0%, 100% { transform: translateY(0) rotate(-4deg); }
+  50%      { transform: translateY(-8px) rotate(4deg); }
+}
+#hoshinoko.st-happy svg { animation: hoshi-spinlet 1s ease-in-out infinite; }
+@keyframes hoshi-spinlet {
+  0%, 100% { transform: rotate(-10deg) scale(1.04); }
+  50%      { transform: rotate(10deg) scale(1.12); }
+}
+#hoshinoko.st-yawn .mouth-smile { display: none; }
+#hoshinoko.st-yawn .mouth-yawn { display: block; }
+#hoshinoko.st-yawn svg { animation: hoshi-yawn 1s ease; }
+@keyframes hoshi-yawn {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.12) rotate(-4deg); }
+  100% { transform: scale(1); }
+}
+
+/* ふきだし（えもじだけ・ことばの意味） */
+#hoshi-bubble {
+  position: absolute;
+  left: calc(var(--sal) + 10px + clamp(58px, 12vmin, 86px));
+  bottom: calc(var(--sab) + 138px);
+  background: rgba(255, 252, 240, .96);
+  border-radius: 22px 22px 22px 6px;
+  padding: 8px 14px;
+  z-index: 6;
+  box-shadow: 0 6px 18px rgba(0,0,0,.4);
+  animation: bubble-pop3 .3s cubic-bezier(.2, 1.7, .4, 1);
+  pointer-events: none;
+}
+@keyframes bubble-pop3 {
+  from { transform: scale(.4); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+.wb-emoji { font-size: clamp(34px, 7.5vmin, 54px); line-height: 1.1; display: block; }
+
+/* ── いたずらもじ さがし: ことばの宝石の輪 ── */
+#word-ring {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 0; height: 0;
+  z-index: 6;
+}
+#word-ring .gem-holder {
+  position: absolute;
+  left: 0; top: 0;
+  animation: gem-orbit 26s linear infinite;
+}
+@keyframes gem-orbit {
+  from { transform: rotate(calc(var(--gi) / var(--gn) * 360deg)) translateY(calc(-1 * var(--ring-r, 32vmin))) rotate(calc(var(--gi) / var(--gn) * -360deg)); }
+  to   { transform: rotate(calc(var(--gi) / var(--gn) * 360deg + 360deg)) translateY(calc(-1 * var(--ring-r, 32vmin))) rotate(calc(var(--gi) / var(--gn) * -360deg - 360deg)); }
+}
+.word-gem {
+  transform: translate(-50%, -50%);
+  display: block;
+  width: clamp(96px, 24vmin, 190px);
+  filter: drop-shadow(0 4px 10px rgba(0,0,0,.5));
+  transition: transform .15s ease;
+}
+.word-gem img { width: 100%; display: block; }
+.word-gem:active { transform: translate(-50%, -50%) scale(.92); }
+.word-gem.gem-impostor { animation: gem-wobble 1.6s ease-in-out infinite; }
+@keyframes gem-wobble {
+  0%, 100% { rotate: -3deg; }
+  50%      { rotate: 3deg; }
+}
+.word-gem.gem-giggle { animation: gem-giggle .4s ease; }
+@keyframes gem-giggle {
+  0%, 100% { transform: translate(-50%, -50%); }
+  30% { transform: translate(-50%, -56%) rotate(-6deg); }
+  65% { transform: translate(-50%, -47%) rotate(5deg); }
+}
+.word-gem.gem-caught { animation: gem-caught .8s ease; }
+@keyframes gem-caught {
+  0% { transform: translate(-50%, -50%) scale(1); }
+  30% { transform: translate(-50%, -50%) scale(1.45) rotate(8deg); }
+  60% { transform: translate(-50%, -50%) scale(1.2) rotate(-6deg); }
+  100% { transform: translate(-50%, -50%) scale(1.3); }
+}
+#word-ring.ring-burst .gem-holder { animation: none; }
+#word-ring.ring-burst .word-gem {
+  animation: gem-burst .9s ease forwards;
+}
+@keyframes gem-burst {
+  to { transform: translate(-50%, -50%) scale(.1) rotate(300deg); opacity: 0; }
+}
+
+/* ── ほんものの かぎ ── */
+#word-tray {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--sab) + 96px);
+  transform: translateX(-50%);
+  display: flex;
+  gap: clamp(10px, 2.6vmin, 24px);
+  z-index: 6;
+  animation: tray-up .3s ease;
+}
+.word-key {
+  width: clamp(110px, 26vmin, 210px);
+  filter: drop-shadow(0 5px 12px rgba(0,0,0,.5));
+  transition: transform .14s ease;
+  animation: key-float 2.4s ease-in-out infinite;
+}
+.word-key:nth-child(2) { animation-delay: .5s; }
+.word-key:nth-child(3) { animation-delay: 1s; }
+@keyframes key-float {
+  0%, 100% { translate: 0 0; }
+  50%      { translate: 0 -7px; }
+}
+.word-key img { width: 100%; display: block; }
+.word-key:active { transform: scale(.92); }
+.word-key.key-win { animation: key-win 1s ease forwards; }
+@keyframes key-win {
+  30% { transform: scale(1.35) rotate(-5deg); }
+  60% { transform: scale(1.15) rotate(4deg); }
+  100% { transform: scale(1.25); }
+}
+.word-key.key-melt {
+  animation: key-melt 1.1s ease forwards;
+  pointer-events: none;
+}
+@keyframes key-melt {
+  0% { filter: drop-shadow(0 5px 12px rgba(0,0,0,.5)); }
+  40% { transform: scaleY(.82) scaleX(1.06); filter: hue-rotate(90deg) saturate(.6); }
+  100% { transform: translateY(46px) scaleY(.28) scaleX(1.2); opacity: 0; filter: hue-rotate(90deg) saturate(.4) blur(2px); }
+}
+.word-key.key-hint { animation: key-hint 1s ease-in-out infinite; }
+@keyframes key-hint {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(255, 214, 92, .6)); }
+  50%      { filter: drop-shadow(0 0 22px rgba(255, 214, 92, 1)); }
+}
+
+/* ── もじビーズの くみたて ── */
+#asm-board {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--sab) + 88px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(10px, 2.4vmin, 22px);
+  z-index: 6;
+  animation: tray-up .3s ease;
+}
+.asm-slots, .asm-beads {
+  display: flex;
+  gap: clamp(6px, 1.6vmin, 14px);
+}
+.asm-slot {
+  width: clamp(58px, 12.5vmin, 92px);
+  height: clamp(58px, 12.5vmin, 92px);
+  border-radius: 18px;
+  background: rgba(255, 252, 240, .14);
+  box-shadow: inset 0 0 0 2.5px rgba(255, 224, 122, .55), inset 0 3px 8px rgba(0,0,0,.35);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Arial Rounded MT Bold', var(--font-round);
+  font-size: clamp(30px, 6.6vmin, 50px);
+  font-weight: 900;
+  color: rgba(255, 248, 214, .34);
+}
+.asm-slot img { width: 92%; display: block; }
+.asm-slot.slot-done {
+  background: rgba(255, 224, 122, .22);
+  box-shadow: inset 0 0 0 3px rgba(255, 224, 122, .95), 0 0 16px rgba(255, 214, 92, .55);
+}
+.asm-slot.slot-no { animation: slot-no .4s ease; }
+@keyframes slot-no {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-7px); }
+  60% { transform: translateX(6px); }
+}
+.asm-bead {
+  width: clamp(58px, 12.5vmin, 92px);
+  touch-action: none;
+  cursor: grab;
+  filter: drop-shadow(0 4px 10px rgba(0,0,0,.5));
+  animation: key-float 2.6s ease-in-out infinite;
+}
+.asm-bead:nth-child(2) { animation-delay: .4s; }
+.asm-bead:nth-child(3) { animation-delay: .8s; }
+.asm-bead:nth-child(4) { animation-delay: 1.2s; }
+.asm-bead:nth-child(5) { animation-delay: 1.6s; }
+.asm-bead img { width: 100%; display: block; pointer-events: none; }
+.asm-bead.bead-drag { animation: none; z-index: 8; position: relative; filter: drop-shadow(0 10px 18px rgba(0,0,0,.6)); }
+
+@media (orientation: landscape) {
+  #hoshinoko { bottom: calc(var(--sab) + 14px); }
+  #hoshi-bubble { bottom: calc(var(--sab) + 96px); }
+  #word-ring { --ring-r: 30vmin; }
+  #word-tray { bottom: calc(var(--sab) + 14px); left: 42%; }
+  #asm-board { bottom: calc(var(--sab) + 12px); left: 42%; }
+}
