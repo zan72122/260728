@@ -14,6 +14,8 @@
   const canvases = {};
   let lastT = 0;
   let sparkleGlow = 0;
+  let zoomT = 0;          // 近づきズーム 0=はなれている 1=目に押し当てている
+  let lastTouch = -1e9;
 
   function dpr() { return Math.min(DPR_CAP, window.devicePixelRatio || 1); }
 
@@ -90,16 +92,34 @@
   }
 
   /* ── せかい（全画面万華鏡） ── */
-  function drawWorld() {
+  function drawWorld(dt) {
     const e = resizeCanvas(canvases["peek-canvas"]);
     const { ctx, w, h } = e;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const dockOpen = KKM.UI.dockInfo().open;
     const landscape = w > h;
-    // ドックが開いているときは、円をドックの反対側へ少し寄せる
-    const cx = dockOpen && landscape ? w * 0.40 : w / 2;
-    const cy = dockOpen && !landscape ? h * 0.40 : h / 2;
-    const viewR = Math.min(w, h) / 2 * (dockOpen ? 0.85 : 0.94);
+
+    // ── 近づきズーム ──
+    // ふれた瞬間、目に押し当てるように視界が近づき、
+    // はなして少したつと、ゆっくりはなれて額縁が戻る
+    const now = performance.now();
+    if (S.touchActive) lastTouch = now;
+    const engagedWanted = !dockOpen &&
+      (S.touchActive || now - lastTouch < 2200 || Math.abs(S.tubeOmega) > 0.3);
+    const target = engagedWanted ? 1 : 0;
+    zoomT += (target - zoomT) * (1 - Math.exp(-dt * (target > zoomT ? 5 : 1.7)));
+    const ease = zoomT * zoomT * (3 - 2 * zoomT);
+    const lerp = (a, b) => a + (b - a) * ease;
+
+    // やすんでいる時：額縁のある美術品（定番の底上げで一回り大きく）
+    const restCx = dockOpen && landscape ? w * 0.40 : w / 2;
+    const restCy = dockOpen && !landscape ? h * 0.40 : h / 2;
+    const restR = Math.min(w, h) / 2 * (dockOpen ? 0.88 : 1.02);
+    // ふれている時：窓が画面からはみ出し、四隅にだけ額縁の気配が残る
+    const engagedR = Math.hypot(w, h) / 2 * 0.92;
+    const cx = lerp(restCx, w / 2);
+    const cy = lerp(restCy, h / 2);
+    const viewR = lerp(restR, engagedR);
     kaleido.drawSurround(ctx, w, h, cx, cy, viewR, contentRot(), S.hole);
     const chPix = Math.min(560, Math.max(220, viewR | 0));
     const cOpts = chamberOpts();
@@ -168,7 +188,7 @@
     if (S.screen === "title") {
       drawTitle();
     } else {
-      drawWorld();
+      drawWorld(dt);
       drawChamberWindow();
       KKM.UI.renderCatalog();
       updateGauge();

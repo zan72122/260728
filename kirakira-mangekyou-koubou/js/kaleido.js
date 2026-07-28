@@ -266,6 +266,7 @@ KKM.Kaleido = class Kaleido {
         ctx.drawImage(this.bloomCanvas, cx - viewR, cy - viewR, viewR * 2, viewR * 2);
         ctx.globalCompositeOperation = "source-over";
         ctx.globalAlpha = 1;
+        this._bloomSeeded = true;
       }
       ctx.restore();
     }
@@ -500,6 +501,7 @@ KKM.Kaleido = class Kaleido {
       ctx.drawImage(this.bloomCanvas, cx - viewR, cy - viewR, viewR * 2, viewR * 2);
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
+      this._bloomSeeded = true;   // すりガラスの額縁が使う
     }
 
     // 中心のあつまる光
@@ -540,14 +542,38 @@ KKM.Kaleido = class Kaleido {
     ctx.stroke();
   }
 
-  /* のぞき画面の周辺部（筒の内側の暗がり） */
+  /* のぞき画面の周辺部
+     すりガラスの額縁：まどの外にも同じ模様が、くもりガラス越しに
+     ぼんやり続いている。前フレームのブルーム縮小バッファを
+     画面いっぱいに引き伸ばすだけなので、コストはほぼゼロ */
   drawSurround(ctx, w, h, cx, cy, viewR, tubeAngle, hole = "maru") {
-    let grad = ctx.createRadialGradient(cx, cy, viewR, cx, cy, Math.max(w, h) * 0.75);
-    grad.addColorStop(0, "#0b0612");
-    grad.addColorStop(0.5, "#070409");
-    grad.addColorStop(1, "#020103");
-    ctx.fillStyle = grad;
+    ctx.fillStyle = "#050308";
     ctx.fillRect(0, 0, w, h);
+    let grad;
+    if (this._bloomSeeded && this.bloomCanvas.width > 4) {
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.imageSmoothingEnabled = true;
+      const s = Math.max(
+        Math.max(cx, w - cx) * 2,
+        Math.max(cy, h - cy) * 2) * 1.06;
+      ctx.drawImage(this.bloomCanvas, cx - s / 2, cy - s / 2, s, s);
+      ctx.restore();
+      // まどの外は夜のガラス：外へいくほど暗く沈む
+      grad = ctx.createRadialGradient(cx, cy, viewR * 0.85, cx, cy, Math.hypot(w, h) * 0.62);
+      grad.addColorStop(0, "rgba(5, 3, 8, .22)");
+      grad.addColorStop(0.5, "rgba(5, 3, 8, .46)");
+      grad.addColorStop(1, "rgba(3, 2, 5, .68)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+    } else {
+      grad = ctx.createRadialGradient(cx, cy, viewR, cx, cy, Math.max(w, h) * 0.75);
+      grad.addColorStop(0, "#0b0612");
+      grad.addColorStop(0.5, "#070409");
+      grad.addColorStop(1, "#020103");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+    }
 
     // のぞきあなの縁金属リング
     grad = ctx.createRadialGradient(cx, cy, viewR * 0.95, cx, cy, viewR * 1.14);

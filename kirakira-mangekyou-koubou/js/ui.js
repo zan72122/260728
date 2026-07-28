@@ -25,6 +25,7 @@ KKM.state = {
   tubeOmega: 0,
   titleAngle: 0,
   photoZoom: 1,          // ピンチで写真を拡大・縮小
+  touchActive: false,    // 画面にゆびがふれている（近づきズーム用）
   dragging: false,
   tilt: { x: 0, y: 1, active: false },
   coachDone: false,
@@ -525,6 +526,7 @@ KKM.UI = (() => {
     cv.addEventListener("pointerdown", e => {
       try { cv.setPointerCapture(e.pointerId); } catch (err) {}
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      S.touchActive = true;
       if (pointers.size === 2) {
         // ピンチ開始：回転をやめて、写真の拡大・縮小へ
         S.dragging = false;
@@ -570,6 +572,7 @@ KKM.UI = (() => {
         startRotation(p.x, p.y, id);
       } else if (pointers.size === 0) {
         S.dragging = false;
+        S.touchActive = false;
         activeId = null;
       }
     };
