@@ -7,6 +7,10 @@
 - **文字は 1つも出しません。** 操作はぜんぶ 絵アイコンと、指の動きのお手本アニメで伝えます。
 - **ビルド不要。** three.js を CDN から読み込むだけの、ふつうの HTML です（通信できないときは同梱コピーに自動で切り替わります）。
 
+| たて画面（iPhone） | よこ画面（iPad） |
+|---|---|
+| <img src="docs/screenshots/iphone-portrait.png" width="260"> | <img src="docs/screenshots/ipad-landscape.png" width="420"> |
+
 ## あそびかた
 
 | アイコン | お世話 | 指の動き |

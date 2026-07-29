@@ -124,9 +124,14 @@ html, body {
   #back-btn { position: absolute; left: calc(16px + env(safe-area-inset-left)); bottom: calc(16px + env(safe-area-inset-bottom)); }
 }
 
-/* せまい画面ではボタンを少し小さく */
+/* せまい画面ではボタンとフキダシを少し小さく */
 @media (max-width: 400px), (max-height: 400px) {
   :root { --btn: 68px; --btn-small: 48px; --gap: 10px; }
+}
+
+@media (max-height: 460px) {
+  .bubble { width: 68px; height: 68px; margin: -34px 0 0 -34px; }
+  .hint { width: 60px; height: 60px; margin: -30px 0 0 -30px; }
 }
 
 /* ------------------------------------------------- 赤ちゃんのフキダシ */

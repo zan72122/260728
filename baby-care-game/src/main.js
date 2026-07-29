@@ -132,7 +132,7 @@ function updateMood(dt) {
 
   if (urgent) {
     baby.getHeadWorldPosition(headPos);
-    headPos.y += 0.42;
+    headPos.y += 0.85;   // あたまに かぶらない高さ
     headPos.project(camera);
     const x = (headPos.x * 0.5 + 0.5) * screen.width;
     const y = (-headPos.y * 0.5 + 0.5) * screen.height;

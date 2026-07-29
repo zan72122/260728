@@ -100,9 +100,13 @@ export class CameraRig {
     this.idle = 0;
   }
 
-  /** 画面のたて／よこに合わせて、ひきの量を変える。 */
+  /**
+   * 画面のたて／よこに合わせて、ひきの量を変える。
+   * たて長の画面では引きすぎると 上下がスカスカになるので、上限を決めている
+   * （左右がすこし切れても、主役の赤ちゃんが大きく見えるほうがよい）。
+   */
   setAspect(aspect) {
-    this._radiusScale = aspect >= 1.1 ? 1 : clamp(1.12 / aspect, 1, 1.95);
+    this._radiusScale = aspect >= 1.1 ? 1 : clamp(1.04 / aspect, 1, 1.55);
   }
 
   update(dt) {

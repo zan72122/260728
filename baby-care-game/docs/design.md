@@ -78,6 +78,22 @@
 - パーティクルは 90 個のメッシュを使い回すプール方式（`scene/particles.js`）。
 - `renderer.setPixelRatio(min(dpr, 2))` で Retina でも過剰に描かないようにしています。
 
+## 画面の確認
+
+`docs/screenshots/` に、たて・よこ 4パターンの実画面を置いています。
+
+| ファイル | 想定 |
+|---|---|
+| `ipad-landscape.png` | 1180 x 820（iPad よこ） |
+| `ipad-portrait.png` | 820 x 1180（iPad たて） |
+| `iphone-landscape.png` | 844 x 390（iPhone よこ） |
+| `iphone-portrait.png` | 390 x 844（iPhone たて） |
+
+いずれもボタン・フキダシ・ヒントが重ならず、部屋と赤ちゃんが収まることを確認しています。
+お世話4種は、ヘッドレスブラウザで「ボタン → 移動 → ドラッグ → ごほうび → ラグへ戻る」まで
+通しで動くこと（ほしが1枚ずつ増え、欲求が 0 に戻ること）を確認済みです。
+なお、描画速度はソフトウェアレンダラでの測定になるため、実機の fps は未計測です。
+
 ## セーブデータ
 
 `localStorage` のキー `baby-care-game/v1` に、欲求4種・ほしの数・ミュート設定を保存します。
