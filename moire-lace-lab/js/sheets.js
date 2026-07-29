@@ -48,28 +48,34 @@
     };
   }
 
+  // 縞をくっきりさせるとモアレの明暗 (うなり) が強く出る
+  function sharpen(v) {
+    const t = Math.min(1, Math.max(0, (v - 0.18) / (0.82 - 0.18)));
+    return t * t * (3 - 2 * t); // smoothstep(0.18, 0.82, v)
+  }
+
   // ---- 模様の値 (0..1)。GLSL 側 patternValue() と同一式を保つこと ----
   function patternValue(type, x, y) {
     const f = BASE_FREQ;
+    let v;
     if (type === 0) {
-      return 0.5 + 0.5 * Math.sin(TAU * f * x);
-    }
-    if (type === 1) {
+      v = 0.5 + 0.5 * Math.sin(TAU * f * x);
+    } else if (type === 1) {
       const a = 0.5 + 0.5 * Math.sin(TAU * f * x);
       const b = 0.5 + 0.5 * Math.sin(TAU * f * y);
-      return Math.max(a, b) * 0.85 + 0.15 * a * b;
-    }
-    if (type === 2) {
+      v = Math.max(a, b) * 0.85 + 0.15 * a * b;
+    } else if (type === 2) {
       const d = Math.sin(TAU * f * 0.75 * x) * Math.sin(TAU * f * 0.75 * y);
-      return 0.5 + 0.5 * d;
+      v = 0.5 + 0.5 * d;
+    } else if (type === 3) {
+      v = 0.5 + 0.5 * Math.sin(TAU * f * 0.9 * Math.hypot(x, y));
+    } else {
+      // type === 4 (おはな): 花びら + うずまき
+      const ang = Math.atan2(y, x);
+      const r = Math.hypot(x, y);
+      v = 0.5 + 0.5 * Math.sin(12.0 * ang + TAU * f * 0.35 * r);
     }
-    if (type === 3) {
-      return 0.5 + 0.5 * Math.sin(TAU * f * 0.9 * Math.hypot(x, y));
-    }
-    // type === 4 (おはな): 花びら + うずまき
-    const ang = Math.atan2(y, x);
-    const r = Math.hypot(x, y);
-    return 0.5 + 0.5 * Math.sin(12.0 * ang + TAU * f * 0.35 * r);
+    return sharpen(v);
   }
 
   // ワールド座標 (短辺=1, 中心原点, y は下向き) → シートのローカル座標
@@ -103,12 +109,15 @@
     ];
   })();
 
+  // 包絡線を 0..1 に広げる係数 (縞2枚の平均積は最大でもおよそ 0.45)
+  const ENV_GAIN = 2.2;
+
   function envelopeAt(state, wx, wy) {
     let sum = 0;
     for (let i = 0; i < ENV_OFFSETS.length; i++) {
       sum += moireAt(state, wx + ENV_OFFSETS[i][0], wy + ENV_OFFSETS[i][1]);
     }
-    return sum / ENV_OFFSETS.length; // 0 (暗い谷) .. ~0.9 (明るい山)
+    return Math.min(1, (sum / ENV_OFFSETS.length) * ENV_GAIN); // 0 (暗い谷) .. 1 (明るい山)
   }
 
   // ピボット (ワールド座標の一点) を固定したまま、回転 dTheta / 倍率 k をかける。

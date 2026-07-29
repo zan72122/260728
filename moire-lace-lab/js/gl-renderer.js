@@ -33,27 +33,28 @@ uniform float u_mist;       // 霧吹き 0..1
 
 const float TAU = 6.28318530718;
 const float FREQ = 42.0;
+const float ENV_GAIN = 2.2;   // sheets.js ENV_GAIN と同じ値
 
-// sheets.js patternValue() と同一式
+// sheets.js patternValue() と同一式 (縞をくっきりさせてモアレを強く出す)
 float patternValue(int type, vec2 p) {
+  float v;
   if (type == 0) {
-    return 0.5 + 0.5 * sin(TAU * FREQ * p.x);
-  }
-  if (type == 1) {
+    v = 0.5 + 0.5 * sin(TAU * FREQ * p.x);
+  } else if (type == 1) {
     float a = 0.5 + 0.5 * sin(TAU * FREQ * p.x);
     float b = 0.5 + 0.5 * sin(TAU * FREQ * p.y);
-    return max(a, b) * 0.85 + 0.15 * a * b;
-  }
-  if (type == 2) {
+    v = max(a, b) * 0.85 + 0.15 * a * b;
+  } else if (type == 2) {
     float d = sin(TAU * FREQ * 0.75 * p.x) * sin(TAU * FREQ * 0.75 * p.y);
-    return 0.5 + 0.5 * d;
+    v = 0.5 + 0.5 * d;
+  } else if (type == 3) {
+    v = 0.5 + 0.5 * sin(TAU * FREQ * 0.9 * length(p));
+  } else {
+    float ang = atan(p.y, p.x);
+    float r = length(p);
+    v = 0.5 + 0.5 * sin(12.0 * ang + TAU * FREQ * 0.35 * r);
   }
-  if (type == 3) {
-    return 0.5 + 0.5 * sin(TAU * FREQ * 0.9 * length(p));
-  }
-  float ang = atan(p.y, p.x);
-  float r = length(p);
-  return 0.5 + 0.5 * sin(12.0 * ang + TAU * FREQ * 0.35 * r);
+  return smoothstep(0.18, 0.82, v);
 }
 
 vec2 toSheet(vec2 w, vec4 sh) {
@@ -61,6 +62,25 @@ vec2 toSheet(vec2 w, vec4 sh) {
   float s = sin(-sh.z);
   vec2 q = w - sh.xy;
   return vec2(c * q.x - s * q.y, s * q.x + c * q.y) / sh.w;
+}
+
+// 2 枚重ねの透過光
+float moire(vec2 w) {
+  return patternValue(u_patA, toSheet(w, u_sheetA))
+       * patternValue(u_patB, toSheet(w, u_sheetB));
+}
+
+// 細かい縞をならした「大きなうなり模様」(sheets.js envelopeAt() と同じ 7 点平均)
+float envelope(vec2 w, float m0) {
+  float l = 1.0 / FREQ;
+  vec2 o1 = vec2(0.5 * l, 0.0);
+  vec2 o2 = vec2(0.0, 0.5 * l);
+  vec2 o3 = vec2(0.35 * l, 0.35 * l);
+  float sum = m0
+    + moire(w + o1) + moire(w - o1)
+    + moire(w + o2) + moire(w - o2)
+    + moire(w + o3) + moire(w - o3);
+  return clamp(sum / 7.0 * ENV_GAIN, 0.0, 1.0);
 }
 
 vec3 hsv2rgb(vec3 c) {
@@ -74,28 +94,28 @@ void main() {
   vec2 w = vec2(gl_FragCoord.x - 0.5 * u_res.x,
                 0.5 * u_res.y - gl_FragCoord.y) / minDim;
 
-  float a = patternValue(u_patA, toSheet(w, u_sheetA));
-  float b = patternValue(u_patB, toSheet(w, u_sheetB));
-  float m = a * b;                       // 透過光の重なり → モアレ
-  m = pow(m, 0.85);                      // 少し持ち上げて柔らかく
+  float m = moire(w);            // 細かい重なり (レースの質感)
+  float env = envelope(w, m);    // 大きなうなり模様 (モアレの主役)
 
+  // 大きな模様で色を塗り、細かい縞は明るさの質感として重ねる
   vec3 col;
+  float texFine = 0.78 + 0.44 * m;
   if (u_rainbow > 0.5) {
-    float hue = fract(m * 0.72 + 0.06 * w.x - 0.04 * w.y + u_time * 0.012);
-    col = hsv2rgb(vec3(hue, 0.55, 0.28 + 0.72 * m));
+    float hue = fract(env * 0.62 + 0.05 * w.x - 0.03 * w.y + u_time * 0.012);
+    col = hsv2rgb(vec3(hue, 0.55, 0.30 + 0.70 * env)) * texFine;
   } else {
-    float t2 = clamp(m * 2.0, 0.0, 1.0);
-    float t3 = clamp(m * 2.0 - 1.0, 0.0, 1.0);
-    col = mix(mix(u_colA, u_colB, t2), u_colC, t3);
+    float t2 = clamp(env * 2.0, 0.0, 1.0);
+    float t3 = clamp(env * 2.0 - 1.0, 0.0, 1.0);
+    col = mix(mix(u_colA, u_colB, t2), u_colC, t3) * texFine;
   }
 
   // 大きな模様がゆらゆら息をするような、ごく弱いきらめき
-  col *= 1.0 + 0.05 * sin(u_time * 0.6 + m * 7.0);
+  col *= 1.0 + 0.05 * sin(u_time * 0.6 + env * 7.0);
 
   // 光を当てる: タッチについてくる暖かい光だまり
   if (u_light.z > 0.5) {
     float d = distance(w, u_light.xy);
-    float glow = exp(-d * d * 9.0) * (0.30 + 0.70 * m);
+    float glow = exp(-d * d * 9.0) * (0.30 + 0.70 * env);
     col += vec3(1.0, 0.86, 0.55) * glow * 0.85;
   }
 
