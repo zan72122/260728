@@ -1,0 +1,47 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f6efe3">
+<title>あかちゃんのおうち</title>
+<link rel="stylesheet" href="./src/ui/style.css">
+
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="overlay">
+    <div id="bubble" class="bubble hidden"></div>
+    <div id="hint" class="hint hidden"></div>
+    <div id="hud">
+      <div id="care-buttons"></div>
+      <button id="back-btn" class="round-btn small hidden" aria-label="modoru"></button>
+      <button id="mute-btn" class="round-btn small" aria-label="oto"></button>
+    </div>
+    <div id="reward" class="reward hidden"></div>
+  </div>
+  <div id="splash"><div class="splash-star"></div></div>
+</div>
+
+<script>
+  // three.js は CDN を優先し、通信できないときは同梱コピーへ自動で切り替える。
+  // どちらの場合もビルド不要（importmap を作ってからモジュールを読み込む）。
+  (async () => {
+    const CDN = 'https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js';
+    const LOCAL = './vendor/three.module.js';
+    let url = CDN;
+    try {
+      const res = await fetch(CDN, { cache: 'force-cache' });
+      if (!res.ok) throw new Error('cdn ' + res.status);
+    } catch (e) {
+      url = LOCAL;
+    }
+    const map = document.createElement('script');
+    map.type = 'importmap';
+    map.textContent = JSON.stringify({ imports: { three: url } });
+    document.head.appendChild(map);
+
+    const entry = document.createElement('script');
+    entry.type = 'module';
+    entry.src = './src/main.js';
+    document.body.appendChild(entry);
+  })();
+</script>

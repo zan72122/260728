@@ -1,0 +1,242 @@
+/* 4さいのゆびで さわる前提のレイアウト。文字はつかわず、絵と色だけで伝える。 */
+
+:root {
+  --btn: 84px;
+  --btn-small: 56px;
+  --gap: 14px;
+  --cream: #fdf6ea;
+  --ink: #6b5b4c;
+  --shadow: 0 6px 0 rgba(120, 100, 80, .22), 0 10px 22px rgba(120, 100, 80, .18);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #efe6d6;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#app { position: fixed; inset: 0; }
+
+#stage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+/* オーバーレイ自体はタッチを通し、ボタンだけが受け取る */
+#overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ------------------------------------------------------------------ HUD */
+
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#care-buttons {
+  position: absolute;
+  display: flex;
+  gap: var(--gap);
+  pointer-events: none;
+}
+
+.round-btn {
+  pointer-events: auto;
+  width: var(--btn);
+  height: var(--btn);
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--cream);
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform .12s ease, box-shadow .12s ease, opacity .2s ease;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.round-btn svg { width: 68%; height: 68%; display: block; pointer-events: none; }
+
+.round-btn:active { transform: translateY(4px) scale(.96); box-shadow: 0 2px 0 rgba(120, 100, 80, .22); }
+
+.round-btn.small { width: var(--btn-small); height: var(--btn-small); }
+
+.round-btn.hidden { display: none; }
+
+/* お世話してほしいときは、ボタンがゆっくり跳ねて知らせる */
+.round-btn.wanted { animation: wanted 1.1s ease-in-out infinite; }
+.round-btn.wanted::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 4px solid #ffd166;
+  opacity: .9;
+}
+@keyframes wanted {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%      { transform: translateY(-10px) scale(1.06); }
+}
+
+.round-btn.busy { opacity: .35; }
+
+/* たて画面：下に横一列 / よこ画面：右に縦一列 */
+@media (orientation: portrait) {
+  #care-buttons {
+    left: 50%;
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    flex-direction: row;
+  }
+  #mute-btn { position: absolute; right: calc(16px + env(safe-area-inset-right)); top: calc(16px + env(safe-area-inset-top)); }
+  #back-btn { position: absolute; left: calc(16px + env(safe-area-inset-left)); top: calc(16px + env(safe-area-inset-top)); }
+}
+
+@media (orientation: landscape) {
+  #care-buttons {
+    right: calc(18px + env(safe-area-inset-right));
+    top: 50%;
+    transform: translateY(-50%);
+    flex-direction: column;
+  }
+  #mute-btn { position: absolute; left: calc(16px + env(safe-area-inset-left)); top: calc(16px + env(safe-area-inset-top)); }
+  #back-btn { position: absolute; left: calc(16px + env(safe-area-inset-left)); bottom: calc(16px + env(safe-area-inset-bottom)); }
+}
+
+/* せまい画面ではボタンを少し小さく */
+@media (max-width: 400px), (max-height: 400px) {
+  :root { --btn: 68px; --btn-small: 48px; --gap: 10px; }
+}
+
+/* ------------------------------------------------- 赤ちゃんのフキダシ */
+
+.bubble {
+  position: absolute;
+  width: 92px;
+  height: 92px;
+  margin: -46px 0 0 -46px;
+  border-radius: 50%;
+  background: #fffdf7;
+  box-shadow: 0 8px 20px rgba(120, 100, 80, .25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  animation: float 1.6s ease-in-out infinite;
+  transition: opacity .25s ease;
+}
+
+.bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin-left: -22px;
+  border-radius: 50%;
+  background: #fffdf7;
+}
+
+.bubble svg { width: 62%; height: 62%; }
+
+.bubble.hidden { opacity: 0; }
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+
+/* ---------------------------------------------- ゆびの動きのお手本 */
+
+.hint {
+  position: absolute;
+  width: 76px;
+  height: 76px;
+  margin: -38px 0 0 -38px;
+  pointer-events: none;
+  opacity: .95;
+  transition: opacity .3s ease;
+}
+
+.hint svg { width: 100%; height: 100%; filter: drop-shadow(0 4px 8px rgba(90, 70, 50, .35)); }
+
+.hint.hidden { opacity: 0; }
+
+.hint.down  { animation: hint-down 1.6s ease-in-out infinite; }
+.hint.side  { animation: hint-side 1.5s ease-in-out infinite; }
+.hint.up    { animation: hint-up 1.7s ease-in-out infinite; }
+
+@keyframes hint-down { 0% { transform: translateY(-26px); opacity: 0; } 20% { opacity: 1; } 80% { transform: translateY(40px); opacity: 1; } 100% { transform: translateY(52px); opacity: 0; } }
+@keyframes hint-side { 0%, 100% { transform: translateX(-40px); } 50% { transform: translateX(40px); } }
+@keyframes hint-up   { 0% { transform: translate(30px, 40px); opacity: 0; } 20% { opacity: 1; } 80% { transform: translate(-10px, -20px); opacity: 1; } 100% { transform: translate(-14px, -30px); opacity: 0; } }
+
+/* --------------------------------------------------------- ごほうび */
+
+.reward {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.reward svg { width: 42vmin; height: 42vmin; animation: pop 1.4s cubic-bezier(.2, 1.6, .4, 1) forwards; }
+
+.reward.hidden { display: none; }
+
+@keyframes pop {
+  0%   { transform: scale(.2) rotate(-30deg); opacity: 0; }
+  35%  { transform: scale(1.1) rotate(6deg); opacity: 1; }
+  70%  { transform: scale(1) rotate(0deg); opacity: 1; }
+  100% { transform: scale(1.5) translateY(-18vmin); opacity: 0; }
+}
+
+/* ------------------------------------------------------- スプラッシュ */
+
+#splash {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(#fdf3e0, #f3e2d0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity .6s ease;
+  z-index: 10;
+}
+
+#splash.done { opacity: 0; pointer-events: none; }
+
+.splash-star {
+  width: 22vmin;
+  height: 22vmin;
+  background: #ffd166;
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+  animation: spin 1.6s ease-in-out infinite;
+}
+
+@keyframes spin {
+  0%, 100% { transform: rotate(-8deg) scale(.9); }
+  50%      { transform: rotate(8deg) scale(1.05); }
+}
