@@ -6,10 +6,10 @@ import { damp } from '../util/tween.js';
  */
 export class Lighting {
   constructor(scene) {
-    this.hemi = new THREE.HemisphereLight(0xfff4e2, 0xcbb59a, 0.62);
+    this.hemi = new THREE.HemisphereLight(0xfff4e2, 0xcbb59a, 0.78);
     scene.add(this.hemi);
 
-    this.sun = new THREE.DirectionalLight(0xfff0d6, 1.9);
+    this.sun = new THREE.DirectionalLight(0xfff0d6, 1.7);
     this.sun.position.set(4.5, 8, 5);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(1024, 1024);
@@ -44,8 +44,8 @@ export class Lighting {
   update(dt) {
     this.night = damp(this.night, this.nightTarget, 2.2, dt);
     const n = this.night;
-    this.hemi.intensity = 0.62 - 0.4 * n;
-    this.sun.intensity = 1.9 - 1.55 * n;
+    this.hemi.intensity = 0.78 - 0.5 * n;
+    this.sun.intensity = 1.7 - 1.4 * n;
     this.fill.intensity = 0.35 + 0.25 * n;
     this.hemi.color.setHex(n > 0.5 ? 0xbcc6ff : 0xfff4e2);
     this.scene.background.copy(this.dayFog).lerp(this.nightFog, n * 0.85);

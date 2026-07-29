@@ -35,12 +35,13 @@ html, body {
   touch-action: none;
 }
 
-/* オーバーレイ自体はタッチを通し、ボタンだけが受け取る */
+/* オーバーレイ自体はタッチを通し、ボタンだけが受け取る。
+   投影座標をそのまま使えるよう、ここには padding を入れない
+   （セーフエリアの余白は、ボタン側の位置指定で吸収している） */
 #overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 /* ------------------------------------------------------------------ HUD */

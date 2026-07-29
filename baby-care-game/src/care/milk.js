@@ -20,13 +20,13 @@ export class MilkAction extends CareAction {
   hintAnchor() { return this._bottle ? this._bottle.position.clone() : super.hintAnchor(); }
 
   enter() {
-    const { baby, camera } = this.ctx;
+    const { baby } = this.ctx;
     baby.setExpression('fussy');
 
     this._bottle = this._makeBottle();
-    const head = baby.getHeadWorldPosition(new THREE.Vector3());
-    const toCam = camera.position.clone().sub(head).setY(0).normalize();
-    this._bottle.position.copy(head).addScaledVector(toCam, 0.55).add(new THREE.Vector3(0, -0.42, 0));
+    // びんは「おくちと同じ奥行きの板」の上だけを動く。だから運べば必ず届く。
+    const mouth = baby.mouthSmile.getWorldPosition(new THREE.Vector3());
+    this._bottle.position.copy(this.placeInView(mouth, 0.55, -0.5));
     this._home = this._bottle.position.clone();
     this.addObject(this._bottle);
 
@@ -84,14 +84,15 @@ export class MilkAction extends CareAction {
 
   pointerMove(p) {
     if (!this._grabbed || this._attached || this.done) return;
-    const hit = this.dragPoint(p.ray, this._home);
+    const mouth = this.ctx.baby.mouthSmile.getWorldPosition(new THREE.Vector3());
+    const hit = this.dragPoint(p.ray, mouth);
     if (!hit) return;
     this._bottle.position.copy(hit);
 
-    const mouth = this.ctx.baby.mouthSmile.getWorldPosition(new THREE.Vector3());
     const tip = this._bottle.position.clone().add(new THREE.Vector3(0, this._tipOffset, 0));
-    this.progress = clamp(1 - tip.distanceTo(mouth) / 0.9, 0, 0.95);
-    if (tip.distanceTo(mouth) < 0.3) this._attach(mouth);
+    const near = this.screenDistance(tip, mouth);
+    this.progress = clamp(1 - near / 0.9, 0, 0.95);
+    if (near < 0.4) this._attach(mouth);
   }
 
   pointerUp() { this._grabbed = false; }

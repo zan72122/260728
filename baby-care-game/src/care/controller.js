@@ -132,8 +132,8 @@ export class CareController {
   }
 
   update(dt, time) {
-    if (this.phase === 'play') this.action?.update(dt, time);
-    else if (this.phase === 'reward') this.action?.update?.(dt, time);
+    // ごほうび中も、あひるが浮かぶなどの演出は動かしつづける
+    if (this.phase === 'play' || this.phase === 'reward') this.action?.update(dt, time);
 
     if (this._hintVisible && this.action) {
       const p = this._project(this.action.hintAnchor());

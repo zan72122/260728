@@ -24,7 +24,7 @@ export class BathAction extends CareAction {
   hintAnchor() { return this._sponge ? this._sponge.position.clone() : super.hintAnchor(); }
 
   enter() {
-    const { baby, props, sfx, camera } = this.ctx;
+    const { baby, props, sfx } = this.ctx;
     baby.setExpression('neutral');
 
     // おゆを ためる
@@ -64,9 +64,9 @@ export class BathAction extends CareAction {
     this._sponge.add(top);
     this._sponge.traverse((o) => { if (o.isMesh) o.castShadow = true; });
 
-    const head = baby.getHeadWorldPosition(new THREE.Vector3());
-    const toCam = camera.position.clone().sub(head).setY(0).normalize();
-    this._sponge.position.copy(head).addScaledVector(toCam, 0.5).add(new THREE.Vector3(0.3, -0.25, 0));
+    // スポンジは「からだと同じ奥行きの板」の上を動く（届かない奥行きに固定されないように）
+    this._chest = baby.pose.localToWorld(new THREE.Vector3(0, 0.3, 0));
+    this._sponge.position.copy(this.placeInView(this._chest, 0.6, 0.05));
     this.addObject(this._sponge);
 
     this._grabbed = false;
@@ -82,7 +82,7 @@ export class BathAction extends CareAction {
 
   pointerMove(p) {
     if (!this._grabbed || this.done) return;
-    const hit = this.dragPoint(p.ray, this._sponge.position);
+    const hit = this.dragPoint(p.ray, this._chest);
     if (!hit) return;
     const moved = hit.distanceTo(this._sponge.position);
     this._sponge.position.copy(hit);
@@ -103,7 +103,7 @@ export class BathAction extends CareAction {
     for (const spot of this._spots) {
       if (spot.userData.clean) continue;
       spot.getWorldPosition(this._tmp);
-      if (this._tmp.distanceTo(this._sponge.position) > 0.22) continue;
+      if (this.screenDistance(this._tmp, this._sponge.position) > 0.3) continue;
 
       spot.userData.wear = (spot.userData.wear ?? 0) + moved * 3 + 0.02;
       spot.scale.setScalar(Math.max(0.01, 1 - spot.userData.wear));

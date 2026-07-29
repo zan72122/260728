@@ -26,11 +26,12 @@ export class Room {
   }
 
   /**
-   * 透け対象として登録する。outward は部屋の中心から外向きのベクトル。
-   * groups には マテリアルの配列を入れる（あとから増える配列でもよい）。
+   * 透け対象として登録する。
+   * カメラが「その面より外側」に来たときだけ透ける（threshold は面までの距離）。
+   * 部屋の中心からの向きで判定すると、寄りのカメラで奥の壁まで消えてしまうため。
    */
-  _registerFader(outward, materials) {
-    const fader = { outward: outward.clone().normalize(), groups: [materials] };
+  _registerFader(outward, materials, threshold) {
+    const fader = { outward: outward.clone().normalize(), groups: [materials], threshold };
     this.faders.push(fader);
     return fader;
   }
@@ -115,7 +116,7 @@ export class Room {
       const name = side.kind === 'window' ? (side.outward.x < 0 ? 'left' : 'right') : side.kind;
       this.group.add(wall);
       this.walls[name] = wall;
-      this.wallFaders[name] = this._registerFader(side.outward, mats);
+      this.wallFaders[name] = this._registerFader(side.outward, mats, ROOM_HALF - 0.4);
     }
   }
 
@@ -130,16 +131,16 @@ export class Room {
 
     const skyMat = new THREE.MeshBasicMaterial({ map: skyTex, transparent: true });
     const pane = new THREE.Mesh(makeArchGeometry(1.2, 1.8, 0.04), skyMat);
-    pane.position.set(x, 1.05, 0.13);
+    pane.position.set(x, 1.05, 0.17);
     wall.add(pane);
     mats.push(skyMat);
 
     const barMat = toonUnique(PALETTE.cream, { transparent: true });
     const vbar = new THREE.Mesh(new THREE.BoxGeometry(0.07, 1.45, 0.06), barMat);
-    vbar.position.set(x, 1.82, 0.17);
+    vbar.position.set(x, 1.82, 0.21);
     wall.add(vbar);
     const hbar = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.07, 0.06), barMat);
-    hbar.position.set(x, 1.9, 0.17);
+    hbar.position.set(x, 1.9, 0.21);
     wall.add(hbar);
     mats.push(barMat);
 
@@ -169,7 +170,7 @@ export class Room {
     mats.push(frameMat);
 
     const skyMat = new THREE.MeshBasicMaterial({ map: skyTex, transparent: true });
-    const pane = new THREE.Mesh(new THREE.CircleGeometry(0.55, 24), skyMat);
+    const pane = new THREE.Mesh(new THREE.CircleGeometry(0.5, 24), skyMat);
     pane.position.set(0, 2.76, 0.13);
     wall.add(pane);
     mats.push(skyMat);
@@ -263,16 +264,17 @@ export class Room {
       tower.userData.flag = flag;
 
       this.group.add(tower);
-      this._registerFader(pos, mats);
+      // 塔は部屋の外なので、その角に近づいたときだけ透ける
+      this._registerFader(pos, mats, pos.length() * 0.62);
     });
   }
 
   update(camera, dt, time) {
     // 手前にきた壁・塔を透かして、部屋の中がいつでも見えるようにする
-    this._camDir.set(camera.position.x, 0, camera.position.z).normalize();
+    this._camDir.set(camera.position.x, 0, camera.position.z);
     for (const fader of this.faders) {
       const facing = fader.outward.dot(this._camDir);
-      const target = facing > 0.12 ? 0.05 : 1;
+      const target = facing > fader.threshold ? 0.05 : 1;
       for (const group of fader.groups) {
         for (const mat of group) {
           mat.opacity = damp(mat.opacity, target, 8, dt);

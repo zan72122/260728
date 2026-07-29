@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { STATIONS } from '../scene/props.js';
 import { clamp, damp } from '../util/tween.js';
 
-const PHI_MIN = 0.42;   // 上から見おろす限界
+const PHI_MIN = 0.62;   // 上から見おろす限界（真上まで行くと迷子になるので手前で止める）
 const PHI_MAX = 1.38;   // 床すれすれの限界
 const RADIUS_MIN = 3.2;
 const RADIUS_MAX = 15;
@@ -17,11 +17,15 @@ function thetaTowardCenter(spot) {
   return Math.atan2(-spot.x, -spot.z);
 }
 
-function stationView(key, radius, phi, height = 0.35, swing = 0) {
+/**
+ * @param {number} [theta] 明示したいときの方位角。ねかせる場所では
+ *   体の軸と直角から見ないと「あたまのてっぺん」しか見えないので、ここで指定する。
+ */
+function stationView(key, radius, phi, height = 0.35, theta = null) {
   const spot = STATIONS[key].spot;
   return {
     target: new THREE.Vector3(spot.x, spot.y + height, spot.z),
-    theta: thetaTowardCenter(spot) + swing,
+    theta: theta === null ? thetaTowardCenter(spot) : theta,
     phi,
     radius,
   };
@@ -38,9 +42,9 @@ export class CameraRig {
     this.presets = {
       overview: { target: new THREE.Vector3(0, 0.95, 0), theta: 0.0, phi: 1.02, radius: 7.8 },
       play:     { target: new THREE.Vector3(0, 0.75, 0.4), theta: 0.15, phi: 1.1, radius: 4.6 },
-      diaper:   stationView('table', 3.3, 1.05, 0.55),
+      diaper:   stationView('table', 3.3, 1.05, 0.5, Math.PI / 2 + 0.25),
       milk:     stationView('chair', 3.1, 1.1, 0.75),
-      sleep:    stationView('crib', 3.5, 0.95, 0.5, -0.3),
+      sleep:    stationView('crib', 3.6, 0.95, 0.55, Math.PI / 2 - 0.25),
       bath:     stationView('bath', 3.2, 0.92, 0.85),
     };
 

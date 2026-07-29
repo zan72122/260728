@@ -10,7 +10,7 @@ import { makeStarGeometry } from '../util/shapes.js';
 export const STATIONS = {
   // ねかせる場所は、体の向きが 家具の長い辺 と そろうように face を決めている
   rug:   { spot: new THREE.Vector3(0, 0, 0.4),          face: 0,        pose: 'sit' },
-  crib:  { spot: new THREE.Vector3(-2.95, 0.75, -2.75), face: Math.PI,  pose: 'lie' },
+  crib:  { spot: new THREE.Vector3(-2.95, 0.85, -2.75), face: Math.PI,  pose: 'lie' },
   bath:  { spot: new THREE.Vector3(2.95, 0.16, -2.6),   face: -0.85,    pose: 'sit' },
   table: { spot: new THREE.Vector3(-2.9, 1.0, 2.15),    face: Math.PI,  pose: 'lie' },
   chair: { spot: new THREE.Vector3(2.85, 0.62, 2.15),   face: -2.2,     pose: 'sit' },
@@ -40,6 +40,7 @@ export function makeCrib() {
   const st = STATIONS.crib;
   g.position.set(st.spot.x, 0, st.spot.z);
   g.rotation.y = Math.PI / 2;
+  g.scale.setScalar(1.15);   // 赤ちゃんがゆったり寝られる大きさ
 
   const woodMat = toon(PALETTE.wood);
   const base = shade(new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.18, 1.25), woodMat));
@@ -86,15 +87,15 @@ export function makeCrib() {
   }
 
   // おふとん（ねんねのときだけ かける）
-  const blanket = shade(new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.14, 1.1), toon(PALETTE.pink)));
-  blanket.position.set(0.15, 0.76, 0);
+  const blanket = shade(new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.14, 1.16), toon(PALETTE.pink)));
+  blanket.position.set(0.45, 0.9, 0);
   blanket.visible = false;
   g.add(blanket);
   g.userData.blanket = blanket;
 
   // メリー（くるくる回る）
   const mobile = new THREE.Group();
-  mobile.position.set(0.2, 1.85, 0);
+  mobile.position.set(0.6, 1.95, 0);
   const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.9, 8), toon(PALETTE.woodDark));
   arm.rotation.z = Math.PI / 2;
   mobile.add(arm);
@@ -109,7 +110,7 @@ export function makeCrib() {
     mobile.add(charm);
   });
   const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.3, 8), toon(PALETTE.woodDark));
-  stand.position.set(-0.75, 1.3, 0);
+  stand.position.set(0.95, 1.3, 0);
   g.add(stand);
   g.add(mobile);
   g.userData.mobile = mobile;
@@ -182,22 +183,22 @@ export function makeChangingTable() {
   g.position.set(st.spot.x, 0, st.spot.z);
   g.rotation.y = Math.PI / 2;
 
-  const top = shade(new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.16, 1.0), toon(PALETTE.wood)));
+  const top = shade(new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.16, 1.05), toon(PALETTE.wood)));
   top.position.y = 0.78;
   g.add(top);
 
-  const cushion = shade(new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.18, 0.92), toon(PALETTE.mint)));
+  const cushion = shade(new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.18, 0.97), toon(PALETTE.mint)));
   cushion.position.y = 0.9;
   g.add(cushion);
 
   for (const side of [-1, 1]) {
-    const guard = shade(new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.16, 0.1), toon(PALETTE.woodLight)));
-    guard.position.set(0, 1.02, side * 0.46);
+    const guard = shade(new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.16, 0.1), toon(PALETTE.woodLight)));
+    guard.position.set(0, 1.02, side * 0.49);
     g.add(guard);
   }
 
   // だなと おむつのストック
-  const shelf = shade(new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.12, 0.9), toon(PALETTE.woodLight)));
+  const shelf = shade(new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.12, 0.95), toon(PALETTE.woodLight)));
   shelf.position.y = 0.34;
   g.add(shelf);
   for (const [x, c] of [[-0.45, PALETTE.pink], [0.1, PALETTE.sky], [0.55, PALETTE.lilac]]) {
@@ -205,7 +206,7 @@ export function makeChangingTable() {
     stack.position.set(x, 0.51, 0);
     g.add(stack);
   }
-  for (const [x, z] of [[-0.75, -0.4], [0.75, -0.4], [-0.75, 0.4], [0.75, 0.4]]) {
+  for (const [x, z] of [[-0.9, -0.42], [0.9, -0.42], [-0.9, 0.42], [0.9, 0.42]]) {
     const leg = shade(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.78, 10), toon(PALETTE.woodDark)));
     leg.position.set(x, 0.39, z);
     g.add(leg);
@@ -318,11 +319,10 @@ export class StickerBoard {
     return new THREE.Vector3(-0.9 + col * 0.45, 0.42 - row * 0.42, 0.1);
   }
 
-  /** 何もアニメせずに count 個ぶん並べる（セーブデータの復元用）。 */
+  /** 何もアニメせずに count 枚ぶん並べる（セーブデータの復元用）。 */
   setCount(count) {
-    const shown = Math.min(count, this.capacity) || 0;
-    const wrapped = count > 0 && count % this.capacity === 0 ? this.capacity : count % this.capacity;
-    const target = count >= this.capacity ? wrapped : shown;
+    // 満杯になったら次の1枚で貼り直すので、表示枚数は 1〜capacity をくり返す
+    const target = count <= 0 ? 0 : ((count - 1) % this.capacity) + 1;
     while (this.stars.length > target) {
       const s = this.stars.pop();
       this.group.remove(s);

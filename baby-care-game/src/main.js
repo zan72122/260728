@@ -54,9 +54,11 @@ stickerBoard.setCount(state.stars);
 const screen = { width: window.innerWidth, height: window.innerHeight };
 
 const hud = new Hud({
-  onCare: (kind) => care.start(kind),
-  onBack: () => care.cancel(),
+  // iOS は最初のタッチまで音を出せないので、どの入口でも unlock しておく
+  onCare: (kind) => { sfx.unlock(); care.start(kind); },
+  onBack: () => { sfx.unlock(); care.cancel(); },
   onMute: () => {
+    sfx.unlock();
     state.muted = !state.muted;
     state.save();
     sfx.setMuted(state.muted);

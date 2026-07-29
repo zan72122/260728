@@ -15,6 +15,7 @@ const POSES = {
   sit: {
     lift: 0.16,
     tilt: 0,
+    shift: 0,
     hip: { x: -1.35, z: 0.22 },
     knee: { x: 0.55 },
     shoulder: { x: 0.1, z: 0.55 },
@@ -23,14 +24,17 @@ const POSES = {
   lie: {
     lift: 0.17,
     tilt: -Math.PI / 2,
+    shift: 0.32,          // あたまが台からはみ出さないように 足もと側へ
+    
     hip: { x: -0.55, z: 0.34 },
     knee: { x: 0.9 },
-    shoulder: { x: -0.15, z: 0.85 },
+    shoulder: { x: -0.15, z: 0.7 },
     elbow: { x: -0.75 },
   },
   held: {
     lift: 0.2,
     tilt: -0.35,
+    shift: 0,
     hip: { x: -1.0, z: 0.3 },
     knee: { x: 0.7 },
     shoulder: { x: 0.0, z: 0.7 },
@@ -116,7 +120,7 @@ export class Baby {
 
     // よごれ（おむつ交換のときだけ 見せる）
     this.diaperSpots = [];
-    for (const [x, y, z] of [[-0.05, 0.0, 0.13], [0.06, -0.03, 0.12], [0.0, 0.03, 0.15]]) {
+    for (const [x, y, z] of [[-0.055, 0.0, 0.165], [0.06, -0.03, 0.16], [0.0, 0.045, 0.17]]) {
       const spot = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), toonUnique(PALETTE.dirt));
       spot.position.set(x, y, z);
       spot.scale.set(1.2, 0.9, 0.5);
@@ -314,11 +318,20 @@ export class Baby {
     this.arms.forEach((a) => { set(a.basePivot, p.shoulder, a.side); set(a.baseJoint, p.elbow); });
     this.legs.forEach((l) => { set(l.basePivot, p.hip, l.side); set(l.baseJoint, p.knee); });
 
+    const shift = p.shift ?? 0;
     if (instant) {
       this.pose.rotation.x = p.tilt;
+      this.bob.position.z = shift;
     } else {
-      const from = this.pose.rotation.x;
-      tween({ duration: 0.55, onUpdate: (t) => { this.pose.rotation.x = lerp(from, p.tilt, t); } });
+      const fromTilt = this.pose.rotation.x;
+      const fromShift = this.bob.position.z;
+      tween({
+        duration: 0.55,
+        onUpdate: (t) => {
+          this.pose.rotation.x = lerp(fromTilt, p.tilt, t);
+          this.bob.position.z = lerp(fromShift, shift, t);
+        },
+      });
     }
   }
 
