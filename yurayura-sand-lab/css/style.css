@@ -1,0 +1,269 @@
+/* ゆらゆら すなもよう ラボ — 4歳児向けのやわらかい見た目 */
+
+:root {
+  --bg-top: #ffeef6;
+  --bg-bottom: #e8f4ff;
+  --ink: #6b5876;
+  --panel: rgba(255, 255, 255, 0.72);
+  --accent: #f97ba8;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'M PLUS Rounded 1c', 'Hiragino Maru Gothic ProN', 'BIZ UDGothic', sans-serif;
+  color: var(--ink);
+  background: linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+  touch-action: manipulation;
+}
+
+#app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 8px;
+  gap: 4px;
+}
+
+/* ---- 上のバー ---- */
+
+#topbar {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 6px;
+}
+
+#title {
+  margin: 0;
+  font-size: clamp(15px, 3.6vw, 22px);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#badgeBar {
+  display: flex;
+  gap: 4px;
+  font-size: clamp(14px, 3vw, 20px);
+}
+
+.badge {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+  transition: transform 0.3s, opacity 0.3s, filter 0.3s;
+}
+
+.badge.earned {
+  opacity: 1;
+  filter: none;
+  transform: scale(1.15);
+}
+
+.icon-btn {
+  border: none;
+  background: var(--panel);
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  font-size: 20px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(110, 80, 130, 0.18);
+}
+
+/* ---- ステージ ---- */
+
+#stageWrap {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+#stage {
+  height: 100%;
+  max-width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: contain;
+  border-radius: 20px;
+  box-shadow: 0 8px 28px rgba(120, 90, 150, 0.2);
+  cursor: grab;
+  touch-action: none;
+}
+
+.bubble {
+  position: absolute;
+  top: 12%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 18px;
+  padding: 10px 18px;
+  font-size: clamp(13px, 3vw, 17px);
+  font-weight: 800;
+  text-align: center;
+  line-height: 1.6;
+  box-shadow: 0 4px 14px rgba(120, 90, 150, 0.25);
+  animation: bob 2.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 9px solid transparent;
+  border-top-color: rgba(255, 255, 255, 0.92);
+  border-bottom: none;
+}
+
+@keyframes bob {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(-7px); }
+}
+
+#popup {
+  position: absolute;
+  top: 34%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.95);
+  border: 3px solid #ffd6a5;
+  border-radius: 24px;
+  padding: 18px 30px;
+  font-size: clamp(16px, 4vw, 24px);
+  text-align: center;
+  line-height: 1.7;
+  box-shadow: 0 8px 28px rgba(120, 90, 150, 0.3);
+  pointer-events: none;
+}
+
+#popup.pop-in {
+  animation: pop-in 0.45s cubic-bezier(0.2, 1.6, 0.45, 1);
+}
+
+@keyframes pop-in {
+  from { transform: translate(-50%, -50%) scale(0.4); opacity: 0; }
+  to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---- 下のコントロール ---- */
+
+#controls {
+  width: 100%;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+
+#palette {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 4px 2px;
+  scrollbar-width: none;
+}
+
+#palette::-webkit-scrollbar {
+  display: none;
+}
+
+.swatch {
+  flex: 0 0 auto;
+  width: clamp(58px, 11vw, 76px);
+  border: 3px solid transparent;
+  border-radius: 18px;
+  background: var(--panel);
+  padding: 6px 2px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s, background 0.15s;
+  box-shadow: 0 2px 6px rgba(110, 80, 130, 0.14);
+}
+
+.swatch-emoji {
+  font-size: clamp(20px, 4.6vw, 28px);
+  line-height: 1.1;
+}
+
+.swatch-label {
+  font-size: clamp(10px, 2.2vw, 13px);
+  font-weight: 800;
+}
+
+.swatch.selected {
+  border-color: var(--swatch-color);
+  background: #ffffff;
+  transform: translateY(-4px) scale(1.06);
+}
+
+.swatch-rainbow.selected {
+  border-image: linear-gradient(45deg, #f97ba8, #f7c948, #6fd695, #54b8ef, #a58ae0) 1;
+}
+
+#actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.action-btn {
+  border: none;
+  border-radius: 22px;
+  background: var(--panel);
+  padding: 12px 14px;
+  font-family: inherit;
+  font-size: clamp(13px, 3vw, 17px);
+  font-weight: 800;
+  color: var(--ink);
+  cursor: pointer;
+  box-shadow: 0 3px 8px rgba(110, 80, 130, 0.2);
+  transition: transform 0.12s;
+}
+
+.action-btn:active {
+  transform: scale(0.94);
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+}
+
+.action-btn.pulse {
+  animation: pulse 0.9s ease-in-out infinite;
+  background: #fff1d6;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
