@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>ゆらゆら すなもよう ラボ</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -12,28 +12,33 @@
 </head>
 <body>
   <div id="app">
-    <header id="topbar">
-      <h1 id="title">ゆらゆら すなもよう ラボ</h1>
-      <div id="badgeBar" aria-label="あつめた ほし"></div>
-      <button id="muteBtn" class="icon-btn" aria-label="おとの おん・おふ">🔊</button>
-    </header>
-
     <main id="stageWrap">
-      <canvas id="stage" width="900" height="1200"></canvas>
-      <div id="hint" class="bubble">
+      <canvas id="stage"></canvas>
+      <div id="hint" class="bubble hidden">
         カップを ゆびで ひっぱって、<br />ぱっ! と はなしてみてね
       </div>
       <div id="popup" class="hidden"></div>
+      <div id="colorToast" class="color-toast hidden" aria-live="polite"></div>
+      <button id="fabBtn" class="fab" type="button" aria-label="メニューを ひらく" aria-expanded="false">🎨</button>
     </main>
 
-    <footer id="controls">
-      <div id="palette" aria-label="すなの いろ"></div>
-      <div id="actions">
-        <button id="refillBtn" class="action-btn">🥄 すなを いれる</button>
-        <button id="mistBtn" class="action-btn">🌫️ きりを かける</button>
-        <button id="paperBtn" class="action-btn">📄 かみを かえる</button>
+    <aside id="panel" class="panel" aria-hidden="true">
+      <div class="panel-inner">
+        <div class="panel-head">
+          <h1 id="title">ゆらゆら すなもよう ラボ</h1>
+          <div class="panel-head-right">
+            <div id="badgeBar" aria-label="あつめた ほし"></div>
+            <button id="muteBtn" class="icon-btn" type="button" aria-label="おとの おん・おふ">🔊</button>
+          </div>
+        </div>
+        <div id="palette" aria-label="すなの いろ"></div>
+        <div id="actions">
+          <button id="refillBtn" class="action-btn" type="button">🥄 すなを いれる</button>
+          <button id="mistBtn" class="action-btn" type="button">🌫️ きりを かける</button>
+          <button id="paperBtn" class="action-btn" type="button">📄 かみを かえる</button>
+        </div>
       </div>
-    </footer>
+    </aside>
   </div>
 
   <script type="module" src="js/main.js"></script>

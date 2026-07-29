@@ -1,7 +1,6 @@
-// エントリーポイント。入力・ゲームループ・各モジュールの糊付けを担当。
-import {
-  STAGE, HOME, LIMITS, GRAB_RADIUS, PUSH, SAND_TYPES, PAPERS,
-} from './config.js';
+// エントリーポイント。入力・リサイズ・ゲームループ。
+import { SAND_TYPES, PAPERS } from './config.js';
+import { computeLayout, getLayout } from './layout.js';
 import { clamp, dist } from './utils.js';
 import { Pendulum } from './pendulum.js';
 import { SandSystem } from './sand.js';
@@ -11,26 +10,55 @@ import { UI } from './ui.js';
 
 const canvas = document.getElementById('stage');
 const audio = new AudioBox();
-const pendulum = new Pendulum(HOME, LIMITS);
-const sand = new SandSystem(STAGE.W, STAGE.H);
-const renderer = new Renderer(canvas, sand);
+
+let prevLayout = null;
+let pendulum = null;
+let sand = null;
+let renderer = null;
 
 const state = {
   paperIndex: 0,
   type: SAND_TYPES[0],
   grabbing: false,
-  pointerTrail: [],   // フリック速度の計測用 {x, y, t}
+  pointerTrail: [],
+  pointerStart: null,
   lastPushAt: -Infinity,
   mistTimer: 0,
-  slideTimer: 0,      // かみ替えスライドアニメの残り時間
+  slideTimer: 0,
   releases: 0,
   emptiedOnce: false,
   time: 0,
   nextBadgeCheckAt: 0,
 };
 
-sand.setType(state.type);
-sand.setPaper(PAPERS[state.paperIndex]);
+function applyStageSize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  prevLayout = getLayout();
+  const layout = computeLayout(w, h);
+
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  canvas.style.width = `${w}px`;
+  canvas.style.height = `${h}px`;
+
+  if (!sand) {
+    sand = new SandSystem(w, h);
+    sand.setType(state.type);
+    sand.setPaper(PAPERS[state.paperIndex]);
+    renderer = new Renderer(canvas, sand);
+    pendulum = new Pendulum(layout.home, layout.limits);
+    pendulum.settleAmp = layout.settle.amp;
+    pendulum.settleSpeed = layout.settle.speed;
+  } else {
+    sand.resize(w, h, prevLayout);
+    renderer.rebuildBackground();
+    pendulum.applyLayout(layout.home, layout.limits, layout.scale);
+  }
+
+  renderer.setDpr(dpr);
+}
 
 const ui = new UI({
   onSelectType(type) {
@@ -44,7 +72,7 @@ const ui = new UI({
     sand.refill();
     audio.pour();
     ui.setRefillPulse(false);
-    state.emptiedOnce = false; // 次に空にしたらまたバッジ判定できる
+    state.emptiedOnce = false;
   },
   onMist() {
     if (state.mistTimer > 0) return;
@@ -67,13 +95,25 @@ const ui = new UI({
   },
 });
 
-// ---- ポインター入力 -------------------------------------------------
+applyStageSize();
+ui.positionFab();
+window.addEventListener('resize', () => {
+  applyStageSize();
+  ui.positionFab();
+});
+window.addEventListener('orientationchange', () => setTimeout(() => {
+  applyStageSize();
+  ui.positionFab();
+}, 120));
+
+// ---- 座標変換 -------------------------------------------------------
 
 function toStage(event) {
   const rect = canvas.getBoundingClientRect();
+  const { stage } = getLayout();
   return {
-    x: (event.clientX - rect.left) * (STAGE.W / rect.width),
-    y: (event.clientY - rect.top) * (STAGE.H / rect.height),
+    x: (event.clientX - rect.left) * (stage.w / rect.width),
+    y: (event.clientY - rect.top) * (stage.h / rect.height),
   };
 }
 
@@ -94,21 +134,21 @@ function flickVelocity() {
   return { vx: (last.x - first.x) / dtSec, vy: (last.y - first.y) / dtSec };
 }
 
+// ---- ポインター入力 -------------------------------------------------
+
 canvas.addEventListener('pointerdown', (event) => {
+  if (ui.isPanelOpen()) return;
   audio.ensure();
+  state.pointerStart = { x: event.clientX, y: event.clientY };
   const point = toStage(event);
+  const { grabRadius } = getLayout();
   const cup = pendulum.pos;
-  if (dist(point.x, point.y, cup.x, cup.y) <= GRAB_RADIUS) {
+  if (dist(point.x, point.y, cup.x, cup.y) <= grabRadius) {
     state.grabbing = true;
     state.pointerTrail = [];
     recordTrail(point);
     pendulum.grab(point.x, point.y);
     canvas.setPointerCapture(event.pointerId);
-  } else if (state.time - state.lastPushAt > PUSH.cooldownSec) {
-    // そっと押す:カップ以外をタップすると、指から離れる向きへ小さな力
-    state.lastPushAt = state.time;
-    pendulum.push(point.x, point.y, PUSH.impulse, PUSH.maxSpeed);
-    audio.tick();
   }
 });
 
@@ -119,25 +159,51 @@ canvas.addEventListener('pointermove', (event) => {
   pendulum.grabTo(point.x, point.y);
 });
 
-function endGrab() {
-  if (!state.grabbing) return;
-  state.grabbing = false;
-  const { vx, vy } = flickVelocity();
-  pendulum.release(vx * 0.9, vy * 0.9);
-  state.releases += 1;
-  audio.pop();
-  ui.hideHint();
-  checkBadges();
+function endPointer(event) {
+  if (state.grabbing) {
+    state.grabbing = false;
+    const { vx, vy } = flickVelocity();
+    pendulum.release(vx * 0.9, vy * 0.9);
+    state.releases += 1;
+    audio.pop();
+    ui.hideHint();
+    checkBadges();
+    state.pointerStart = null;
+    return;
+  }
+
+  if (ui.isPanelOpen() || !state.pointerStart) return;
+
+  const dx = event.clientX - state.pointerStart.x;
+  const dy = event.clientY - state.pointerStart.y;
+  const adx = Math.abs(dx);
+  const ady = Math.abs(dy);
+  state.pointerStart = null;
+
+  // 左右スワイプで色変更
+  if (adx > 50 && adx > ady * 1.5) {
+    ui.cycleColor(dx > 0 ? -1 : 1);
+    return;
+  }
+
+  // 小さなタップは「そっと押す」
+  const { push } = getLayout();
+  if (adx < 18 && ady < 18 && state.time - state.lastPushAt > push.cooldownSec) {
+    const point = toStage(event);
+    state.lastPushAt = state.time;
+    pendulum.push(point.x, point.y, push.impulse, push.maxSpeed);
+    audio.tick();
+  }
 }
 
-canvas.addEventListener('pointerup', endGrab);
-canvas.addEventListener('pointercancel', endGrab);
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) audio.setHiss(0);
 });
 
-// ---- バッジ(あそびの小目標) ----------------------------------------
+// ---- バッジ ----------------------------------------------------------
 
 function checkBadges() {
   if (sand.depositCount > 260) {
@@ -163,14 +229,12 @@ function frame(now) {
   pendulum.update(dt);
   const flowing = sand.update(dt, pendulum.pos, state.time);
 
-  // 砂が溜まっている最中でもバッジに気づけるよう、定期的に判定する
   if (state.time >= state.nextBadgeCheckAt) {
     state.nextBadgeCheckAt = state.time + 1.5;
     checkBadges();
   }
   audio.setHiss(flowing ? clamp(0.35 + pendulum.speed() / 900, 0, 1) : 0);
 
-  // すなが空になった瞬間
   if (sand.amount <= 0) {
     ui.setRefillPulse(true);
     if (!state.emptiedOnce) {
@@ -179,7 +243,6 @@ function frame(now) {
     }
   }
 
-  // 揺れおわりの「できあがり」演出(1回の揺れにつき1度だけ)
   if (!pendulum.settleNotified && pendulum.isSettled()) {
     pendulum.settleNotified = true;
     sand.spawnSettleSparkles(pendulum.pos.x, pendulum.pos.y);
@@ -187,19 +250,18 @@ function frame(now) {
     checkBadges();
   }
 
-  // きりのアニメーション
   if (state.mistTimer > 0) {
     state.mistTimer -= dt;
     sand.mistStep();
     if (state.mistTimer <= 0) ui.setMistBusy(false);
   }
 
-  // かみ替えのスライドアニメーション
   let slideX = 0;
+  const { stage } = getLayout();
   if (state.slideTimer > 0) {
     state.slideTimer -= dt;
     const progress = 1 - Math.max(state.slideTimer, 0) / 0.45;
-    slideX = progress * progress * (STAGE.W + 80);
+    slideX = progress * progress * (stage.w + 80);
     if (state.slideTimer <= 0) {
       state.paperIndex = (state.paperIndex + 1) % PAPERS.length;
       sand.setPaper(PAPERS[state.paperIndex]);

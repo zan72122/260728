@@ -1,27 +1,4 @@
-// ゲーム全体で共有する定数・カタログ定義。
-// 数値はすべてステージ論理座標(900x1200)基準。
-
-export const STAGE = { W: 900, H: 1200 };
-
-/** 床に敷く「かみ」の領域 */
-export const PAPER = { x: 80, y: 250, w: 740, h: 880, r: 40 };
-
-/** カップを吊るすフックの位置 */
-export const ANCHOR = { x: STAGE.W / 2, y: 44 };
-
-/** カップの静止位置(かみの中心) */
-export const HOME = { x: PAPER.x + PAPER.w / 2, y: PAPER.y + PAPER.h / 2 };
-
-/** 振り子の可動範囲(かみの内側に収める楕円半径) */
-export const LIMITS = { rx: PAPER.w / 2 - 45, ry: PAPER.h / 2 - 45 };
-
-/** カップをつかめる判定半径(子ども向けに大きめ) */
-export const GRAB_RADIUS = 110;
-
-/** そっと押すときの強さと上限速度 */
-export const PUSH = { impulse: 240, maxSpeed: 1500, cooldownSec: 0.25 };
-
-export const CUP = { w: 66, h: 64 };
+// ゲーム全体で共有するカタログ定義(座標は layout.js が担当)。
 
 /** すなの種類。kind が描画スタイルを決める。
  *  kind: 'sand'=色砂 / 'rainbow'=色が巡る / 'star'=きらきら星くず / 'sugar'=粉砂糖 */
@@ -56,11 +33,11 @@ export const BADGES = [
 
 /** すなの流量・堆積のチューニング値 */
 export const SAND_TUNING = {
-  maxAmount: 100,          // カップ満タン時の砂量
-  flowMin: 4.2,            // 1秒あたりの流出量(最小)
-  flowMax: 6.5,            // 1秒あたりの流出量(最大)
-  dotSpacing: 2.4,         // 堆積ドットの間隔(px)
-  alphaScale: 4.6,         // 流出量→ドット不透明度の係数
-  fallTimeSec: 0.3,        // 粒が床に届くまでの時間
-  bleedChance: 0.07,       // にじみハロが出る確率
+  maxAmount: 100,
+  flowMin: 4.2,
+  flowMax: 6.5,
+  dotSpacing: 2.4,
+  alphaScale: 4.6,
+  fallTimeSec: 0.3,
+  bleedChance: 0.07,
 };

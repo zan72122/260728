@@ -1,8 +1,6 @@
 // すなのシステム。
-// - 床(かみ)への堆積は永続オフスクリーンキャンバスに描く
-// - カップから床までの落下は短い遅延キューで表現する
-// - 見た目用の落下粒・きらめきもここで管理する
-import { PAPER, SAND_TUNING } from './config.js';
+import { SAND_TUNING } from './config.js';
+import { getLayout } from './layout.js';
 import { rand, clamp, roundRectPath, TAU } from './utils.js';
 
 export class SandSystem {
@@ -11,35 +9,69 @@ export class SandSystem {
     this.floor.width = stageW;
     this.floor.height = stageH;
     this.fctx = this.floor.getContext('2d');
+    this.paperBg = '#fbf0dc';
 
     this.amount = SAND_TUNING.maxAmount;
     this.flowBase = rand(SAND_TUNING.flowMin, SAND_TUNING.flowMax);
     this.flowPhase = rand(0, TAU);
-    this.type = null;          // 選択中のすな(config.SAND_TYPES の要素)
-    this.paperDark = false;
+    this.type = null;
 
-    this.lastEmit = null;      // 前フレームの放出位置(線分補間用)
-    this.pending = [];         // 落下中で、まだ床に届いていない堆積ドット
-    this.grains = [];          // 見た目用の落下粒
-    this.sparkles = [];        // きらめき・霧のしずく
+    this.lastEmit = null;
+    this.pending = [];
+    this.grains = [];
+    this.sparkles = [];
 
-    this.depositCount = 0;     // このかみに置いたドット数(バッジ判定用)
+    this.depositCount = 0;
     this.colorsUsed = new Set();
+  }
+
+  /** 画面リサイズ。堆積はかみ領域ごとスケールして維持する。 */
+  resize(newW, newH, oldLayout) {
+    const newLayout = getLayout();
+    const oldFloor = this.floor;
+    const next = document.createElement('canvas');
+    next.width = newW;
+    next.height = newH;
+    const nctx = next.getContext('2d');
+
+    if (oldLayout) {
+      const op = oldLayout.paper;
+      const np = newLayout.paper;
+      nctx.fillStyle = this.paperBg;
+      roundRectPath(nctx, np.x, np.y, np.w, np.h, np.r);
+      nctx.fill();
+      nctx.drawImage(oldFloor, op.x, op.y, op.w, op.h, np.x, np.y, np.w, np.h);
+    }
+
+    this.floor = next;
+    this.fctx = nctx;
+    this.pending = [];
+    this.grains = [];
+    const sx = oldLayout ? newLayout.stage.w / oldLayout.stage.w : 1;
+    const sy = oldLayout ? newLayout.stage.h / oldLayout.stage.h : 1;
+    for (const s of this.sparkles) {
+      s.x *= sx;
+      s.y *= sy;
+    }
+    if (this.lastEmit) {
+      this.lastEmit.x *= sx;
+      this.lastEmit.y *= sy;
+    }
   }
 
   setType(type) {
     this.type = type;
   }
 
-  /** かみを新しくする。堆積を消して背景色で塗り直す。 */
   setPaper(paper) {
+    const region = getLayout().paper;
     this.paperDark = paper.dark;
     const c = this.fctx;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.globalCompositeOperation = 'source-over';
     c.globalAlpha = 1;
     c.clearRect(0, 0, this.floor.width, this.floor.height);
-    roundRectPath(c, PAPER.x, PAPER.y, PAPER.w, PAPER.h, PAPER.r);
+    roundRectPath(c, region.x, region.y, region.w, region.h, region.r);
     c.fillStyle = paper.bg;
     c.fill();
     this.paperBg = paper.bg;
@@ -58,7 +90,6 @@ export class SandSystem {
     return clamp(this.amount / SAND_TUNING.maxAmount, 0, 1);
   }
 
-  /** 現在のすなの色を返す(にじは時間で色が巡る) */
   currentColor(t) {
     if (!this.type) return '#f97ba8';
     if (this.type.kind === 'rainbow') {
@@ -68,14 +99,9 @@ export class SandSystem {
     return this.type.color;
   }
 
-  /**
-   * 毎フレームの更新。カップ位置から砂を放出し、落下キューを処理する。
-   * @returns {boolean} 砂が流れているか(音のヒス用)
-   */
   update(dt, cupPos, t) {
     const flowing = this.amount > 0 && this.type != null;
     if (flowing) {
-      // 流量は一定 + ゆっくり揺らぐ(毎回・毎瞬すこし違う)
       const flow = this.flowBase * (0.85 + 0.3 * Math.sin(t * 0.7 + this.flowPhase));
       const out = Math.min(this.amount, flow * dt);
       this.amount -= out;
@@ -89,27 +115,26 @@ export class SandSystem {
     return flowing;
   }
 
-  /** 前回位置から今回位置まで、砂の量を等間隔ドットに分配して落とす */
   emitSegment(cupPos, out, t) {
+    const { scale } = getLayout();
     if (!this.lastEmit) this.lastEmit = { x: cupPos.x, y: cupPos.y };
     const from = this.lastEmit;
     const dx = cupPos.x - from.x;
     const dy = cupPos.y - from.y;
     const len = Math.hypot(dx, dy);
-    // 大きく飛んだときは線を引かずに繋ぎ直す(紙替え直後など)
-    if (len > 90) {
+    if (len > 90 * scale) {
       this.lastEmit = { x: cupPos.x, y: cupPos.y };
       return;
     }
-    const dots = Math.max(1, Math.ceil(len / SAND_TUNING.dotSpacing));
-    // 速く動くほど1粒あたりが薄くなる=線の濃淡が揺れの速さを写す
+    const spacing = SAND_TUNING.dotSpacing * scale;
+    const dots = Math.max(1, Math.ceil(len / spacing));
     const alpha = clamp((out * SAND_TUNING.alphaScale) / dots, 0.03, 0.4);
     const color = this.currentColor(t);
     const kind = this.type.kind;
     for (let i = 1; i <= dots; i++) {
-      const px = from.x + (dx * i) / dots + rand(-1.6, 1.6);
-      const py = from.y + (dy * i) / dots + rand(-1.6, 1.6);
-      const radius = kind === 'sugar' ? rand(2.6, 4.4) : rand(1.7, 3.0);
+      const px = from.x + (dx * i) / dots + rand(-1.6, 1.6) * scale;
+      const py = from.y + (dy * i) / dots + rand(-1.6, 1.6) * scale;
+      const radius = (kind === 'sugar' ? rand(2.6, 4.4) : rand(1.7, 3.0)) * scale;
       this.pending.push({
         x: px, y: py, r: radius, alpha, color, kind,
         due: t + SAND_TUNING.fallTimeSec,
@@ -119,7 +144,6 @@ export class SandSystem {
     this.colorsUsed.add(this.type.id);
   }
 
-  /** 床に届いた分を堆積キャンバスへ焼き込む */
   applyPending(t) {
     while (this.pending.length > 0 && this.pending[0].due <= t) {
       const dot = this.pending.shift();
@@ -129,23 +153,23 @@ export class SandSystem {
   }
 
   depositDot(dot) {
+    const region = getLayout().paper;
     const c = this.fctx;
     c.save();
-    roundRectPath(c, PAPER.x, PAPER.y, PAPER.w, PAPER.h, PAPER.r);
+    roundRectPath(c, region.x, region.y, region.w, region.h, region.r);
     c.clip();
     c.globalCompositeOperation = this.compositeFor(dot.kind);
     c.globalAlpha = dot.alpha;
     c.fillStyle = dot.color;
+    const { scale } = getLayout();
     if (dot.kind === 'star' && Math.random() < 0.02) {
-      // ときどき小さな星のかたちで落ちる
       c.globalAlpha = Math.min(0.7, dot.alpha * 3);
-      drawStar(c, dot.x, dot.y, rand(3.5, 6.5));
+      drawStar(c, dot.x, dot.y, rand(3.5, 6.5) * scale);
     } else {
       c.beginPath();
       c.arc(dot.x, dot.y, dot.r, 0, TAU);
       c.fill();
     }
-    // にじみ:たまに大きく薄いハロを重ねる
     if (Math.random() < SAND_TUNING.bleedChance) {
       c.globalAlpha = dot.alpha * 0.25;
       c.beginPath();
@@ -155,37 +179,35 @@ export class SandSystem {
     c.restore();
   }
 
-  /** 紙の明るさとすなの種類で重ね方を選ぶ(重なりが濃く・光って見える) */
   compositeFor(kind) {
     if (kind === 'sugar') return 'source-over';
     if (this.paperDark) return kind === 'star' ? 'lighter' : 'screen';
     return 'multiply';
   }
 
-  /** きりをかける:堆積を少しぼかして溶かす。毎フレーム少しずつ呼ぶ。 */
   mistStep() {
+    const region = getLayout().paper;
     const c = this.fctx;
     c.save();
-    roundRectPath(c, PAPER.x, PAPER.y, PAPER.w, PAPER.h, PAPER.r);
+    roundRectPath(c, region.x, region.y, region.w, region.h, region.r);
     c.clip();
     c.globalCompositeOperation = 'source-over';
     c.filter = 'blur(1.4px)';
     c.globalAlpha = 0.45;
     c.drawImage(this.floor, 0, 0);
     c.filter = 'none';
-    // うっすら紙色を重ねて「すこし溶けた」感じにする
     c.globalAlpha = 0.02;
     c.fillStyle = this.paperBg;
-    c.fillRect(PAPER.x, PAPER.y, PAPER.w, PAPER.h);
+    c.fillRect(region.x, region.y, region.w, region.h);
     c.restore();
   }
 
-  /** きりのしずく(見た目)をまく */
   spawnMistDrops() {
+    const region = getLayout().paper;
     for (let i = 0; i < 46; i++) {
       this.sparkles.push({
-        x: rand(PAPER.x + 30, PAPER.x + PAPER.w - 30),
-        y: rand(PAPER.y + 20, PAPER.y + PAPER.h - 20),
+        x: rand(region.x + 30, region.x + region.w - 30),
+        y: rand(region.y + 20, region.y + region.h - 20),
         r: rand(1, 2.6),
         life: rand(0.5, 1.1),
         age: 0,
@@ -195,13 +217,12 @@ export class SandSystem {
     }
   }
 
-  /** 揺れ終わりのお祝いきらめき */
   spawnSettleSparkles(x, y) {
     for (let i = 0; i < 14; i++) {
       const a = rand(0, TAU);
-      const speed = rand(30, 110);
+      const speed = rand(30, 110) * getLayout().scale;
       this.sparkles.push({
-        x, y, r: rand(1.5, 3.2),
+        x, y, r: rand(1.5, 3.2) * getLayout().scale,
         vx: Math.cos(a) * speed,
         vy: Math.sin(a) * speed,
         life: rand(0.5, 0.9),
@@ -211,16 +232,16 @@ export class SandSystem {
     }
   }
 
-  /** 見た目用の落下粒。カップの下でちいさく散って消える。 */
   spawnGrains(dt, cupPos, t) {
+    const { scale } = getLayout();
     const perSec = 42;
     if (Math.random() > perSec * dt) return;
     this.grains.push({
-      x: cupPos.x + rand(-3, 3),
-      y: cupPos.y + rand(28, 34),
-      vx: rand(-14, 14),
-      vy: rand(46, 90),
-      r: rand(1.4, 2.4),
+      x: cupPos.x + rand(-3, 3) * scale,
+      y: cupPos.y + rand(28, 34) * scale,
+      vx: rand(-14, 14) * scale,
+      vy: rand(46, 90) * scale,
+      r: rand(1.4, 2.4) * scale,
       life: SAND_TUNING.fallTimeSec,
       age: 0,
       color: this.currentColor(t),
@@ -249,8 +270,8 @@ export class SandSystem {
     this.sparkles = this.sparkles.filter((s) => s.age < s.life);
   }
 
-  /** 落下粒ときらめきをライブキャンバスへ描く */
   drawFx(ctx) {
+    const { scale } = getLayout();
     for (const g of this.grains) {
       const k = 1 - g.age / g.life;
       ctx.globalAlpha = 0.85 * k;
@@ -261,7 +282,7 @@ export class SandSystem {
       if (g.sparkle && Math.random() < 0.25) {
         ctx.globalAlpha = 0.7 * k;
         ctx.fillStyle = '#fff3c4';
-        drawStar(ctx, g.x + rand(-4, 4), g.y + rand(-4, 4), 2.4);
+        drawStar(ctx, g.x + rand(-4, 4) * scale, g.y + rand(-4, 4) * scale, 2.4 * scale);
       }
     }
     for (const s of this.sparkles) {
@@ -276,7 +297,6 @@ export class SandSystem {
   }
 }
 
-/** 4つの角がある小さな星を描く */
 function drawStar(ctx, cx, cy, size) {
   ctx.beginPath();
   for (let i = 0; i < 8; i++) {

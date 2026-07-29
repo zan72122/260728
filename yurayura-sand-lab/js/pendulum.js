@@ -22,8 +22,23 @@ export class Pendulum {
     this.grabbed = false;
     this.targetX = 0;
     this.targetY = 0;
-    this.settleNotified = true; // 揺れ終わり通知を一度だけ出すためのフラグ
+    this.settleNotified = true;
+    this.settleAmp = 14;
+    this.settleSpeed = 26;
     this.randomizeMode();
+  }
+
+  /** 画面リサイズ時に座標系を更新(相対位置は維持) */
+  applyLayout(home, limits, scale) {
+    const fracX = this.rx > 0 ? this.x / this.rx : 0;
+    const fracY = this.ry > 0 ? this.y / this.ry : 0;
+    this.home = home;
+    this.rx = limits.rx;
+    this.ry = limits.ry;
+    this.x = fracX * limits.rx;
+    this.y = fracY * limits.ry;
+    this.settleAmp = 14 * scale;
+    this.settleSpeed = 26 * scale;
   }
 
   /** 離すたびに揺れの個性を変える(毎回少し違う模様の源) */
@@ -161,6 +176,6 @@ export class Pendulum {
 
   /** 揺れがほぼ止まったか(「できあがり」の合図用) */
   isSettled() {
-    return !this.grabbed && this.amplitude() < 14 && this.speed() < 26;
+    return !this.grabbed && this.amplitude() < this.settleAmp && this.speed() < this.settleSpeed;
   }
 }
