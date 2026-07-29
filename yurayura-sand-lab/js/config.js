@@ -59,8 +59,8 @@ export const SAND_TUNING = {
   maxAmount: 100,          // カップ満タン時の砂量
   flowMin: 4.2,            // 1秒あたりの流出量(最小)
   flowMax: 6.5,            // 1秒あたりの流出量(最大)
-  dotSpacing: 2.6,         // 堆積ドットの間隔(px)
-  alphaScale: 3.2,         // 流出量→ドット不透明度の係数
+  dotSpacing: 2.4,         // 堆積ドットの間隔(px)
+  alphaScale: 4.6,         // 流出量→ドット不透明度の係数
   fallTimeSec: 0.3,        // 粒が床に届くまでの時間
   bleedChance: 0.07,       // にじみハロが出る確率
 };

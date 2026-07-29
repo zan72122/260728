@@ -103,13 +103,13 @@ export class SandSystem {
     }
     const dots = Math.max(1, Math.ceil(len / SAND_TUNING.dotSpacing));
     // 速く動くほど1粒あたりが薄くなる=線の濃淡が揺れの速さを写す
-    const alpha = clamp((out * SAND_TUNING.alphaScale) / dots, 0.015, 0.4);
+    const alpha = clamp((out * SAND_TUNING.alphaScale) / dots, 0.03, 0.4);
     const color = this.currentColor(t);
     const kind = this.type.kind;
     for (let i = 1; i <= dots; i++) {
       const px = from.x + (dx * i) / dots + rand(-1.6, 1.6);
       const py = from.y + (dy * i) / dots + rand(-1.6, 1.6);
-      const radius = kind === 'sugar' ? rand(2.4, 4.2) : rand(1.4, 2.6);
+      const radius = kind === 'sugar' ? rand(2.6, 4.4) : rand(1.7, 3.0);
       this.pending.push({
         x: px, y: py, r: radius, alpha, color, kind,
         due: t + SAND_TUNING.fallTimeSec,

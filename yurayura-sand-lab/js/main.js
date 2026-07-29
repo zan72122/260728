@@ -24,9 +24,9 @@ const state = {
   mistTimer: 0,
   slideTimer: 0,      // かみ替えスライドアニメの残り時間
   releases: 0,
-  mistUsedOnce: false,
   emptiedOnce: false,
   time: 0,
+  nextBadgeCheckAt: 0,
 };
 
 sand.setType(state.type);
@@ -162,6 +162,12 @@ function frame(now) {
 
   pendulum.update(dt);
   const flowing = sand.update(dt, pendulum.pos, state.time);
+
+  // 砂が溜まっている最中でもバッジに気づけるよう、定期的に判定する
+  if (state.time >= state.nextBadgeCheckAt) {
+    state.nextBadgeCheckAt = state.time + 1.5;
+    checkBadges();
+  }
   audio.setHiss(flowing ? clamp(0.35 + pendulum.speed() / 900, 0, 1) : 0);
 
   // すなが空になった瞬間
