@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#ffd6e7">
+<link rel="icon" type="image/png" href="assets/icon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<title>にじのおうちの あかちゃん</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="game-canvas"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="status-bar">
+      <div class="status-chip" data-need="hunger"><span class="chip-icon">🍼</span><div class="chip-bar"><div class="chip-fill"></div></div></div>
+      <div class="status-chip" data-need="diaper"><span class="chip-icon">🩲</span><div class="chip-bar"><div class="chip-fill"></div></div></div>
+      <div class="status-chip" data-need="sleepy"><span class="chip-icon">🌙</span><div class="chip-bar"><div class="chip-fill"></div></div></div>
+      <div class="status-chip" data-need="fun"><span class="chip-icon">🧸</span><div class="chip-bar"><div class="chip-fill"></div></div></div>
+      <div class="status-chip" data-need="clean"><span class="chip-icon">🛁</span><div class="chip-bar"><div class="chip-fill"></div></div></div>
+    </div>
+    <div id="corner-buttons">
+      <button id="btn-camera" class="corner-btn" aria-label="カメラをもどす">📷</button>
+      <button id="btn-mute" class="corner-btn" aria-label="おとのオン・オフ">🔊</button>
+    </div>
+    <div id="action-bar">
+      <button class="action-btn" data-action="feed"   aria-label="ミルクをあげる"><span class="btn-icon">🍼</span><span class="btn-label">ミルク</span></button>
+      <button class="action-btn" data-action="diaper" aria-label="おむつをかえる"><span class="btn-icon">🩲</span><span class="btn-label">おむつ</span></button>
+      <button class="action-btn" data-action="sleep"  aria-label="ねんねさせる"><span class="btn-icon">🌙</span><span class="btn-label">ねんね</span></button>
+      <button class="action-btn" data-action="play"   aria-label="いっしょにあそぶ"><span class="btn-icon">🧸</span><span class="btn-label">あそぶ</span></button>
+      <button class="action-btn" data-action="bath"   aria-label="おふろにいれる"><span class="btn-icon">🛁</span><span class="btn-label">おふろ</span></button>
+    </div>
+  </div>
+
+  <!-- スタート画面 -->
+  <div id="start-overlay">
+    <div class="start-card">
+      <div class="start-art">🌈☁️🏠☁️</div>
+      <h1 class="start-title">にじのおうちの<br>あかちゃん</h1>
+      <p class="start-sub">🍼 あかちゃんの おせわを しよう！ 🧸</p>
+      <button id="btn-start">はじめる ▶</button>
+    </div>
+  </div>
+</div>
+
+<script src="lib/three.min.js"></script>
+<script src="lib/OrbitControls.js"></script>
+<script src="js/sfx.js"></script>
+<script src="js/world.js"></script>
+<script src="js/baby.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>

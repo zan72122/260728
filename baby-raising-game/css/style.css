@@ -1,0 +1,249 @@
+/* にじのおうちの あかちゃん — スタイル */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  font-family: "Hiragino Maru Gothic ProN", "Hiragino Sans", "BIZ UDPGothic",
+               "Yu Gothic", "Meiryo", system-ui, sans-serif;
+  background: #ffd6e7;
+}
+
+#app { position: fixed; inset: 0; }
+
+#game-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- HUD ---------- */
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* ステータス表示（上部） */
+#status-bar {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.75);
+  border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(240, 130, 180, 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.status-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 40px;
+}
+
+.chip-icon { font-size: clamp(18px, 4.5vw, 26px); line-height: 1; }
+
+.chip-bar {
+  width: clamp(34px, 8vw, 48px);
+  height: 8px;
+  border-radius: 999px;
+  background: #f3d2de;
+  overflow: hidden;
+  border: 1.5px solid #fff;
+}
+
+.chip-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff8fbf, #ff5fa2);
+  transition: width 0.4s ease, background 0.4s ease;
+}
+
+.status-chip.low .chip-fill { background: linear-gradient(90deg, #ffb84d, #ff7043); }
+.status-chip.low .chip-icon { animation: chip-wiggle 0.7s ease-in-out infinite; }
+
+@keyframes chip-wiggle {
+  0%, 100% { transform: rotate(-8deg) scale(1.08); }
+  50%      { transform: rotate(8deg)  scale(1.18); }
+}
+
+/* 右上ボタン */
+#corner-buttons {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  right: calc(env(safe-area-inset-right, 0px) + 10px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.corner-btn {
+  pointer-events: auto;
+  width: clamp(42px, 9vw, 54px);
+  height: clamp(42px, 9vw, 54px);
+  border-radius: 50%;
+  border: 3px solid #fff;
+  background: rgba(255, 255, 255, 0.85);
+  font-size: clamp(18px, 4.5vw, 24px);
+  box-shadow: 0 4px 10px rgba(240, 130, 180, 0.4);
+  cursor: pointer;
+}
+
+.corner-btn:active { transform: scale(0.9); }
+
+/* アクションボタン（下部） */
+#action-bar {
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: clamp(8px, 2.4vw, 18px);
+  padding: 0 8px;
+}
+
+.action-btn {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: clamp(58px, 15vw, 92px);
+  height: clamp(58px, 15vw, 92px);
+  border-radius: 28px;
+  border: 4px solid #fff;
+  background: linear-gradient(160deg, #ffe3f0, #ffb7d5);
+  box-shadow: 0 6px 0 #f08fb8, 0 10px 16px rgba(240, 130, 180, 0.45);
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, filter 0.2s ease;
+}
+
+.action-btn:active {
+  transform: translateY(5px);
+  box-shadow: 0 1px 0 #f08fb8, 0 4px 8px rgba(240, 130, 180, 0.45);
+}
+
+.action-btn:disabled {
+  filter: grayscale(0.55) opacity(0.6);
+  pointer-events: none;
+}
+
+.action-btn.attention {
+  animation: btn-bounce 0.85s ease-in-out infinite;
+  background: linear-gradient(160deg, #fff3c8, #ffd97a);
+  box-shadow: 0 6px 0 #eab648, 0 10px 18px rgba(234, 182, 72, 0.5);
+}
+
+@keyframes btn-bounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%      { transform: translateY(-7px) scale(1.07); }
+}
+
+.btn-icon { font-size: clamp(26px, 7vw, 42px); line-height: 1.15; }
+
+.btn-label {
+  font-size: clamp(10px, 2.6vw, 15px);
+  font-weight: 700;
+  color: #b04a78;
+}
+
+/* 横画面・低い画面ではボタンを少しコンパクトに */
+@media (orientation: landscape) and (max-height: 480px) {
+  .action-btn { width: clamp(52px, 11vh, 76px); height: clamp(52px, 11vh, 76px); border-radius: 22px; }
+  .btn-icon   { font-size: clamp(22px, 5.5vh, 34px); }
+  .btn-label  { font-size: clamp(9px, 2.2vh, 13px); }
+  #status-bar { left: calc(env(safe-area-inset-left, 0px) + 10px); transform: none; }
+}
+
+/* ---------- スタート画面 ---------- */
+#start-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #ffe9f4 0%, #ffd6e7 45%, #cdeeff 100%);
+  z-index: 10;
+  transition: opacity 0.7s ease;
+}
+
+#start-overlay.fade-out { opacity: 0; pointer-events: none; }
+
+.start-card {
+  text-align: center;
+  padding: clamp(20px, 5vw, 44px) clamp(28px, 7vw, 60px);
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 40px;
+  border: 5px solid #ffb7d5;
+  box-shadow: 0 14px 40px rgba(240, 130, 180, 0.45);
+  max-width: min(86vw, 460px);
+}
+
+.start-art {
+  font-size: clamp(34px, 9vw, 58px);
+  animation: art-float 2.6s ease-in-out infinite;
+}
+
+@keyframes art-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+
+.start-title {
+  margin-top: 10px;
+  font-size: clamp(24px, 6.5vw, 42px);
+  line-height: 1.3;
+  color: #d1568f;
+  text-shadow: 0 2px 0 #fff, 0 4px 10px rgba(240, 130, 180, 0.35);
+}
+
+.start-sub {
+  margin-top: 10px;
+  font-size: clamp(13px, 3.4vw, 18px);
+  color: #b06a8c;
+  font-weight: 700;
+}
+
+#btn-start {
+  margin-top: 20px;
+  padding: clamp(12px, 3vw, 18px) clamp(34px, 9vw, 64px);
+  font-size: clamp(19px, 5vw, 28px);
+  font-weight: 800;
+  font-family: inherit;
+  color: #fff;
+  background: linear-gradient(160deg, #ff8fbf, #ff5fa2);
+  border: 4px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 7px 0 #d14b86, 0 12px 22px rgba(240, 130, 180, 0.55);
+  cursor: pointer;
+  animation: start-pulse 1.4s ease-in-out infinite;
+}
+
+#btn-start:active {
+  transform: translateY(6px);
+  box-shadow: 0 1px 0 #d14b86, 0 5px 10px rgba(240, 130, 180, 0.55);
+  animation: none;
+}
+
+@keyframes start-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.06); }
+}
