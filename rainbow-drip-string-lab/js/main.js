@@ -39,7 +39,7 @@ class World {
     // 底辺の反応オブジェクト(左の縦トレイを避けて右寄りに配置)
     this.paper = new Paper(0.22);
     this.flowers = [new Flower(0.36, [1, 0.15, 0.25]), new Flower(0.90, [0.9, 0.1, 0.6])];
-    this.cups = [new Cup(0.50), new Cup(0.635)];
+    this.cups = [new Cup(0.44), new Cup(0.635)];
     this.sponge = new Sponge(0.77);
 
     this.tool = 'pin';
@@ -62,6 +62,16 @@ class World {
     return { id: entry.id, ryb: entry.ryb, rainbow: entry.id === 'rainbow' };
   }
 
+  setColor(id) {
+    this.currentColor = this._colorEntry(id);
+  }
+
+  setTool(id) {
+    this.tool = id;
+    this.input.selectedPin = null;
+    this.input.stringPreview = null;
+  }
+
   // ------------------------------------------------------------ レイアウト
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -79,12 +89,13 @@ class World {
     this.groundY = h - SHELF_DEPTH;
     this.objectScale = Math.min(1.15, Math.max(0.62, w / 760));
 
-    // 既存のピンは相対位置を保って引っ越し
+    // 既存のピンと雲は相対位置を保って引っ越し
     if (oldW !== w || oldH !== h) {
       for (const p of this.pins) {
         p.x = (p.x / oldW) * w;
         p.y = (p.y / oldH) * h;
       }
+      this.cloud.x = (this.cloud.x / oldW) * w;
     }
     this.stains.resize(w, h);
     this.cloud.layout(w, h, TOP_BAR_BOTTOM);
@@ -95,9 +106,10 @@ class World {
   }
 
   pinBounds() {
+    // 左右の縦トレイ(UI)の下にピンが隠れないよう余白を取る
     return {
-      minX: SIDE_TRAY_PAD * 0.55,
-      maxX: this.width - SIDE_TRAY_PAD * 0.55,
+      minX: SIDE_TRAY_PAD,
+      maxX: this.width - SIDE_TRAY_PAD,
       minY: this.cloud.y + 58,
       maxY: this.groundY - 84,
     };
@@ -122,8 +134,15 @@ class World {
     const h = this.height;
     const a = this.addPin(w * 0.32, h * 0.38);
     const b = this.addPin(w * 0.60, h * 0.50);
-    this.addPin(w * 0.80, h * 0.34);
-    this.ropes.push(new Rope(a, b));
+    this.addPin(w * 0.78, h * 0.34);
+    const rope = new Rope(a, b);
+    this.ropes.push(rope);
+    // お手本の紐は「たわみの腹」から滴下するので、その真下にカップを置く。
+    // 雲を押すだけで しずく→紐→カップ の成功体験がすぐ得られる。
+    let low = rope._samples[0];
+    for (const p of rope._samples) if (p.y > low.y) low = p;
+    this.cups[1].xRatio = Math.min(0.7, low.x / w - 0.006);
+    this.cups[1].layout(w, this.groundY, this.objectScale);
     this.cloud.x = w * 0.32;
     this.currentColor = this._colorEntry('blue');
     this.ui?.refresh();
@@ -301,6 +320,7 @@ class World {
 const canvas = document.getElementById('game');
 const uiRoot = document.getElementById('ui');
 const world = new World(canvas, uiRoot);
+window.world = world; // 自動テスト・デバッグ用フック
 
 let last = performance.now();
 function frame(now) {

@@ -39,7 +39,7 @@ export class Flower {
   }
 
   /** 花の頭の高さ */
-  stemH() { return (16 + this.stage * 15) * this.scale; }
+  stemH() { return (24 + this.stage * 15) * this.scale; }
   headY() { return this.groundY - this.stemH(); }
   headR() { return (7 + this.stage * 4.4) * this.scale * (1 + this.bloomPulse * 0.25); }
 
@@ -84,10 +84,14 @@ export class Flower {
     // 花びら
     const R = this.headR();
     if (this.stage === 0) {
-      // つぼみ
+      // つぼみ(「ここにお水をあげてね」と分かる大きさにする)
       ctx.beginPath();
-      ctx.ellipse(headX, headY, 6 * this.scale, 8 * this.scale, sway * 0.02, 0, Math.PI * 2);
+      ctx.ellipse(headX, headY, 9 * this.scale, 12 * this.scale, sway * 0.02, 0, Math.PI * 2);
       ctx.fillStyle = '#8fd18a';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(headX - 2 * this.scale, headY - 3 * this.scale, 3 * this.scale, 4.5 * this.scale, -0.4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
       ctx.fill();
     } else {
       const petals = 6;

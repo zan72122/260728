@@ -28,7 +28,7 @@ export class Cup {
 
   /** 落下中のしずくが口に入ったか */
   tryCatch(drop, prevY, world) {
-    const inX = Math.abs(drop.x - this.x) < this.w / 2 - 4;
+    const inX = Math.abs(drop.x - this.x) < this.w / 2 - 1;
     const crossed = prevY < this.topY + 6 && drop.y + drop.r >= this.topY + 6;
     if (!inX || !crossed) return false;
     this.ryb = this.fill > 0.2 ? mixRyb(this.ryb, this.fill, drop.currentRyb(0), drop.vol) : drop.currentRyb(0).slice();
@@ -46,12 +46,13 @@ export class Cup {
     if (this.fill > CONFIG.CUP_CAPACITY) {
       this.spillTimer -= dt;
       if (this.spillTimer <= 0) {
-        this.spillTimer = 0.22;
-        const excess = Math.min(1.2, this.fill - CONFIG.CUP_CAPACITY);
+        this.spillTimer = 0.2;
+        const excess = Math.min(2.0, this.fill - CONFIG.CUP_CAPACITY);
         this.fill -= excess;
         const side = Math.random() < 0.5 ? -1 : 1;
-        world.droplets.spawn(this.x + side * (this.w / 2 - 2), this.topY + 4, this.ryb, {
-          vol: excess, vx: side * 40, vy: 10,
+        // 縁の少し外側に生成する(内側だと即また口にキャッチされてしまう)
+        world.droplets.spawn(this.x + side * (this.w / 2 + 8), this.topY + 6, this.ryb, {
+          vol: excess, vx: side * 30, vy: 20,
         });
         world.particles.bubbles(this.x, this.topY + 4, this.ryb, 3);
         sounds.bubble();

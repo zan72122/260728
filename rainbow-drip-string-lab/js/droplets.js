@@ -25,6 +25,9 @@ export class Droplet {
     this.t = 0;    // 紐上のパラメータ 0..1
     this.s = 0;    // 紐上の速度(px/s, +t 方向が正)
     this.age = 0;
+    // 滴下・端から落下した直後に同じ紐へ即再付着しないためのクールダウン
+    this.avoidRope = null;
+    this.avoidTimer = 0;
   }
 
   get r() {
@@ -75,6 +78,8 @@ export class DropletSystem {
 
   _detach(d) {
     if (d.rope) {
+      d.avoidRope = d.rope;
+      d.avoidTimer = 0.3;
       const p = d.rope.pointAt(Math.min(1, Math.max(0, d.t)));
       const dir = d.rope.derivAt(Math.min(1, Math.max(0, d.t)));
       const len = Math.hypot(dir.x, dir.y) || 1;
@@ -123,9 +128,11 @@ export class DropletSystem {
     // 紐への付着(下向きに動いている間だけ)。
     // 高速落下でもすり抜けないよう、1フレームの移動量ぶん判定を広げる。
     if (d.vy > 0) {
+      if (d.avoidTimer > 0) d.avoidTimer -= dt;
       const hitDist = CONFIG.STRING_HIT_DIST + d.r * 0.4 + d.vy * dt * 0.6;
       let best = null;
       for (const rope of world.ropes) {
+        if (d.avoidTimer > 0 && rope === d.avoidRope) continue;
         const n = rope.nearest(d.x, d.y);
         if (n.dist < hitDist) {
           if (!best || n.dist < best.dist) best = { rope, ...n };
@@ -232,14 +239,22 @@ export class DropletSystem {
     const spawned = [];
     for (const d of this.items) {
       if (d.state !== 'string') continue;
-      if (d.vol > CONFIG.DROP_MAX_VOL_ON_STRING && Math.abs(d.s) < 60) {
+      if (d.vol <= CONFIG.DROP_MAX_VOL_ON_STRING) continue;
+      // 水は「たわみのいちばん低い所」から落ちる。塊が低い所の近くで
+      // ゆっくりしているときに、最低点から滴下させる(降雨中の到着運動量で
+      // 塊が最低点から少し押されていても、滴下位置は安定する)。
+      const low = d.rope.lowestPoint();
+      const nearLow = Math.hypot(d.x - low.x, d.y - low.y) < Math.max(60, d.r * 3);
+      if (nearLow && Math.abs(d.s) < 80) {
         const part = d.vol * 0.45;
         d.vol -= part;
-        const nd = new Droplet(d.x, d.y + d.r + 2, d.ryb, {
+        const nd = new Droplet(low.x, low.y + d.r + 2, d.ryb, {
           vol: part,
           vy: 30,
           rainbow: d.rainbow,
         });
+        nd.avoidRope = d.rope;
+        nd.avoidTimer = 0.35;
         spawned.push(nd);
         d.rope.excite(0.3);
         sounds.plop(part);

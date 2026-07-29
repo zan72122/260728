@@ -152,11 +152,12 @@ html, body {
   border-radius: 2px;
 }
 
-/* ---------------- 右下: おそうじ ---------------- */
+/* ---------------- 右: おそうじ ---------------- */
 .clean-tray {
   position: absolute;
   right: max(8px, env(safe-area-inset-right));
-  bottom: max(96px, calc(84px + env(safe-area-inset-bottom)));
+  top: 50%;
+  transform: translateY(-42%);
   display: flex;
   flex-direction: column;
   align-items: center;

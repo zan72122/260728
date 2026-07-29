@@ -142,6 +142,15 @@ export class Rope {
     };
   }
 
+  /** 紐のいちばん低い点(サンプル中の最大 y)。滴下位置に使う */
+  lowestPoint() {
+    let low = this._samples[0];
+    for (const p of this._samples) {
+      if (p.y > low.y) low = p;
+    }
+    return low;
+  }
+
   /** 点にもっとも近い t とその距離を返す(サンプル走査+1回refine) */
   nearest(x, y) {
     const pts = this._samples;
