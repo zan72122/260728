@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>あかちゃん おせわランド</title>
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./lib/three.module.js",
+    "three/addons/controls/OrbitControls.js": "./lib/OrbitControls.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="game-canvas"></canvas>
+
+  <!-- はじめる画面 -->
+  <div id="start-overlay">
+    <div class="start-card">
+      <div class="start-emoji">👶</div>
+      <h1>あかちゃん<br>おせわランド</h1>
+      <button id="start-button">タップして はじめる</button>
+    </div>
+  </div>
+
+  <!-- 上部UI -->
+  <div id="hud-top" class="hud hidden">
+    <div id="mood-panel">
+      <span id="mood-face">😊</span>
+      <div id="mood-bar"><div id="mood-fill"></div></div>
+    </div>
+    <div id="star-panel">⭐ <span id="star-count">0</span></div>
+    <button id="mute-button" aria-label="おとのオンオフ">🔊</button>
+  </div>
+
+  <!-- おしらせメッセージ -->
+  <div id="caption" class="hidden"></div>
+
+  <!-- ふきふき進捗 -->
+  <div id="wipe-progress" class="hidden">
+    <span class="wipe-dot">🫧</span><span class="wipe-dot">🫧</span><span class="wipe-dot">🫧</span>
+  </div>
+
+  <!-- 下部UI -->
+  <div id="hud-bottom" class="hud hidden">
+    <button id="diaper-button">
+      <span class="btn-icon">🩲</span>
+      <span class="btn-label">おむつ こうかん</span>
+    </button>
+  </div>
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

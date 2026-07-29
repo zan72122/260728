@@ -1,0 +1,235 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: fixed;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  font-family: "Hiragino Maru Gothic ProN", "Hiragino Kaku Gothic ProN",
+    "BIZ UDGothic", "Yu Gothic", "Rounded Mplus 1c", sans-serif;
+  background: #ffd9ec;
+}
+
+#app { width: 100%; height: 100%; position: relative; }
+
+#game-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- はじめる画面 ---------- */
+#start-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, #ffe3f1 0%, #ffd0e6 45%, #cfe9ff 100%);
+}
+
+.start-card {
+  text-align: center;
+  padding: 24px;
+  animation: floaty 2.4s ease-in-out infinite;
+}
+
+.start-emoji { font-size: clamp(64px, 16vw, 120px); }
+
+.start-card h1 {
+  color: #d64f8e;
+  font-size: clamp(28px, 7vw, 52px);
+  line-height: 1.3;
+  margin: 12px 0 28px;
+  text-shadow: 0 3px 0 #ffffff;
+}
+
+#start-button {
+  font-family: inherit;
+  font-size: clamp(20px, 5vw, 30px);
+  font-weight: bold;
+  color: #fff;
+  background: linear-gradient(180deg, #ff8fbf, #f2609d);
+  border: none;
+  border-radius: 999px;
+  padding: 18px 42px;
+  box-shadow: 0 6px 0 #c74a80, 0 10px 18px rgba(214, 79, 142, 0.35);
+  cursor: pointer;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes floaty {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+/* ---------- HUD ---------- */
+.hud {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  padding-left: max(14px, env(safe-area-inset-left));
+  padding-right: max(14px, env(safe-area-inset-right));
+}
+
+.hud > * { pointer-events: auto; }
+
+#hud-top {
+  top: max(12px, env(safe-area-inset-top));
+  gap: 12px;
+}
+
+#hud-bottom {
+  bottom: max(16px, env(safe-area-inset-bottom));
+  justify-content: center;
+}
+
+#mood-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  padding: 8px 16px 8px 10px;
+  box-shadow: 0 3px 8px rgba(214, 79, 142, 0.25);
+}
+
+#mood-face { font-size: clamp(24px, 5vw, 34px); }
+
+#mood-bar {
+  width: clamp(90px, 22vw, 180px);
+  height: clamp(14px, 3vw, 20px);
+  background: #ffe0ee;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 2px solid #ffb7d5;
+}
+
+#mood-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff9ec6, #ff5f9e);
+  transition: width 0.4s ease;
+}
+
+#star-panel {
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: clamp(18px, 4.4vw, 28px);
+  font-weight: bold;
+  color: #b8860b;
+  box-shadow: 0 3px 8px rgba(214, 79, 142, 0.25);
+}
+
+#mute-button {
+  margin-left: auto;
+  font-size: clamp(20px, 5vw, 30px);
+  background: rgba(255, 255, 255, 0.85);
+  border: none;
+  border-radius: 50%;
+  width: clamp(48px, 11vw, 64px);
+  height: clamp(48px, 11vw, 64px);
+  box-shadow: 0 3px 8px rgba(214, 79, 142, 0.25);
+  cursor: pointer;
+}
+
+/* ---------- おむつボタン ---------- */
+#diaper-button {
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: clamp(18px, 4.6vw, 28px);
+  font-weight: bold;
+  color: #fff;
+  background: linear-gradient(180deg, #7fd4ff, #3fa9e8);
+  border: none;
+  border-radius: 999px;
+  padding: 16px 30px;
+  box-shadow: 0 6px 0 #2f86bb, 0 10px 16px rgba(63, 169, 232, 0.4);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+#diaper-button:active { transform: scale(0.94); }
+
+#diaper-button .btn-icon { font-size: 1.4em; }
+
+#diaper-button.attention {
+  animation: pulse 0.9s ease-in-out infinite;
+  background: linear-gradient(180deg, #ffb45f, #f28a2a);
+  box-shadow: 0 6px 0 #c46f1e, 0 10px 18px rgba(242, 138, 42, 0.45);
+}
+
+#diaper-button:disabled {
+  opacity: 0.45;
+  animation: none;
+}
+
+/* ---------- キャプション ---------- */
+#caption {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  background: rgba(255, 255, 255, 0.94);
+  color: #d64f8e;
+  font-size: clamp(20px, 5.4vw, 36px);
+  font-weight: bold;
+  padding: 14px 30px;
+  border-radius: 24px;
+  border: 3px solid #ffb7d5;
+  box-shadow: 0 6px 14px rgba(214, 79, 142, 0.3);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: caption-in 0.35s ease;
+}
+
+@keyframes caption-in {
+  from { transform: translateX(-50%) scale(0.6); opacity: 0; }
+  to { transform: translateX(-50%) scale(1); opacity: 1; }
+}
+
+/* ---------- ふきふき進捗 ---------- */
+#wipe-progress {
+  position: absolute;
+  top: calc(18% + 78px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  gap: 14px;
+  pointer-events: none;
+}
+
+.wipe-dot {
+  font-size: clamp(28px, 7vw, 44px);
+  opacity: 0.3;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.wipe-dot.done {
+  opacity: 1;
+  transform: scale(1.25);
+}
