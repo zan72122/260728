@@ -1,0 +1,177 @@
+/* レースのまほうラボ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #2a2140;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  font-family: "Hiragino Maru Gothic ProN", "BIZ UDGothic", "Yu Gothic",
+    system-ui, sans-serif;
+}
+
+canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+#gl {
+  cursor: grab;
+}
+
+#gl:active {
+  cursor: grabbing;
+}
+
+#fx {
+  pointer-events: none; /* タッチは下の WebGL キャンバスへ素通し */
+}
+
+/* ---------- はじめのカーテン ---------- */
+
+#splash,
+#nogl {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 38%,
+      rgba(120, 90, 160, 0.92), rgba(42, 33, 64, 0.97));
+  z-index: 20;
+  transition: opacity 0.7s ease, visibility 0.7s;
+}
+
+#splash.hidden,
+#nogl.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.splash-card {
+  text-align: center;
+  color: #fff6ec;
+  padding: 24px;
+}
+
+.splash-card h1 {
+  font-size: clamp(2rem, 8vw, 3.4rem);
+  line-height: 1.3;
+  letter-spacing: 0.08em;
+  text-shadow: 0 4px 22px rgba(255, 200, 255, 0.45);
+  margin: 12px 0 4px;
+}
+
+.splash-card p {
+  font-size: 1.1rem;
+  line-height: 1.9;
+  opacity: 0.9;
+}
+
+.splash-lace {
+  width: min(64vw, 320px);
+  opacity: 0.85;
+}
+
+.splash-hand {
+  width: clamp(64px, 16vw, 96px);
+  margin-top: 10px;
+  animation: hand-tap 1.6s ease-in-out infinite;
+}
+
+.splash-note {
+  margin-top: 6px;
+  font-size: 1rem;
+  opacity: 0.75;
+  letter-spacing: 0.2em;
+}
+
+@keyframes hand-tap {
+  0%, 100% { transform: translateY(0) rotate(-4deg); }
+  50% { transform: translateY(14px) rotate(4deg); }
+}
+
+/* ---------- アイコンボタン ---------- */
+
+#toolbar {
+  position: fixed;
+  left: 50%;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  gap: clamp(6px, 1.6vw, 14px);
+  padding: 10px clamp(10px, 2vw, 18px);
+  border-radius: 999px;
+  background: rgba(255, 252, 248, 0.28);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 6px 26px rgba(20, 10, 40, 0.35);
+  z-index: 10;
+  max-width: calc(100vw - 16px);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.tool {
+  width: clamp(52px, 11vw, 72px);
+  height: clamp(52px, 11vw, 72px);
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 253, 250, 0.92);
+  box-shadow: 0 3px 10px rgba(30, 15, 50, 0.30);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  touch-action: none;
+}
+
+.tool svg {
+  width: 62%;
+  height: 62%;
+  pointer-events: none;
+}
+
+.tool:active {
+  transform: scale(0.88);
+}
+
+.tool.active {
+  background: #fff1c9;
+  box-shadow: 0 0 0 4px rgba(255, 214, 110, 0.75),
+    0 3px 12px rgba(30, 15, 50, 0.3);
+}
+
+.tool.ring-pink {
+  box-shadow: 0 0 0 3px rgba(224, 86, 140, 0.55),
+    0 3px 10px rgba(30, 15, 50, 0.3);
+}
+
+.tool.ring-blue {
+  box-shadow: 0 0 0 3px rgba(46, 134, 193, 0.55),
+    0 3px 10px rgba(30, 15, 50, 0.3);
+}
+
+.tool.pop {
+  animation: btn-pop 0.28s ease;
+}
+
+@keyframes btn-pop {
+  0% { transform: scale(0.82); }
+  55% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
