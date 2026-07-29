@@ -29,6 +29,7 @@ const state = {
   emptiedOnce: false,
   time: 0,
   nextBadgeCheckAt: 0,
+  timeScale: 1,
 };
 
 function applyStageSize() {
@@ -92,6 +93,9 @@ const ui = new UI({
   onMute(muted) {
     audio.ensure();
     audio.setMuted(muted);
+  },
+  onFastForward(scale) {
+    state.timeScale = scale;
   },
 });
 
@@ -224,10 +228,11 @@ let lastFrame = performance.now();
 function frame(now) {
   const dt = clamp((now - lastFrame) / 1000, 0, 0.033);
   lastFrame = now;
-  state.time += dt;
+  const scaledDt = dt * state.timeScale;
+  state.time += scaledDt;
 
-  pendulum.update(dt);
-  const flowing = sand.update(dt, pendulum.pos, state.time);
+  pendulum.update(scaledDt);
+  const flowing = sand.update(scaledDt, pendulum.pos, state.time);
 
   if (state.time >= state.nextBadgeCheckAt) {
     state.nextBadgeCheckAt = state.time + 1.5;
@@ -248,10 +253,12 @@ function frame(now) {
     sand.spawnSettleSparkles(pendulum.pos.x, pendulum.pos.y);
     audio.settleChime();
     checkBadges();
+    // 揺れが止まったら早送りを自動 OFF
+    if (state.timeScale > 1) ui.resetFastForward();
   }
 
   if (state.mistTimer > 0) {
-    state.mistTimer -= dt;
+    state.mistTimer -= scaledDt;
     sand.mistStep();
     if (state.mistTimer <= 0) ui.setMistBusy(false);
   }
@@ -259,7 +266,7 @@ function frame(now) {
   let slideX = 0;
   const { stage } = getLayout();
   if (state.slideTimer > 0) {
-    state.slideTimer -= dt;
+    state.slideTimer -= scaledDt;
     const progress = 1 - Math.max(state.slideTimer, 0) / 0.45;
     slideX = progress * progress * (stage.w + 80);
     if (state.slideTimer <= 0) {

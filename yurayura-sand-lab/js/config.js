@@ -31,6 +31,18 @@ export const BADGES = [
   { id: 'five',   label: 'いっぱい ゆらした', emoji: '⭐' },
 ];
 
+/** 早送りの段階(タップで循環) */
+export const SPEED_STAGES = [1, 2, 4, 6, 8];
+
+/** 早送り段階に対応する表示ラベル */
+export const SPEED_LABELS = {
+  1: 'ふつう',
+  2: '2ばい',
+  4: '4ばい',
+  6: '6ばい',
+  8: '8ばい',
+};
+
 /** すなの流量・堆積のチューニング値 */
 export const SAND_TUNING = {
   maxAmount: 100,

@@ -1,5 +1,5 @@
-// DOM まわりの UI。パネル開閉・FAB 配置・スワイプ色切替・バッジ。
-import { SAND_TYPES, BADGES } from './config.js';
+// DOM まわりの UI。パネル開閉・FAB 配置・スワイプ色切替・早送り・バッジ。
+import { SAND_TYPES, BADGES, SPEED_STAGES, SPEED_LABELS } from './config.js';
 import { getLayout } from './layout.js';
 
 const STORAGE_KEY = 'yurayura-sand-lab-badges';
@@ -8,17 +8,20 @@ const HINT_KEY = 'yurayura-sand-lab-hint';
 export class UI {
   /**
    * @param {object} callbacks
-   *   onSelectType(type), onRefill(), onMist(), onPaper(), onMute(muted)
+   *   onSelectType(type), onRefill(), onMist(), onPaper(), onMute(muted), onFastForward(scale)
    */
   constructor(callbacks) {
     this.callbacks = callbacks;
     this.awarded = this.loadBadges();
     this.colorIndex = 0;
+    this.speedIndex = 0;
     this.toggleCount = 0;
     this.panelOpen = false;
 
     this.panel = document.getElementById('panel');
     this.fab = document.getElementById('fabBtn');
+    this.ffBtn = document.getElementById('ffBtn');
+    this.ffIndicator = document.getElementById('ffIndicator');
     this.hint = document.getElementById('hint');
     this.popup = document.getElementById('popup');
     this.colorToast = document.getElementById('colorToast');
@@ -30,6 +33,7 @@ export class UI {
     this.wireActions();
     this.wireFab();
     this.initHint();
+    this.updateFastForwardUI();
   }
 
   loadBadges() {
@@ -122,6 +126,7 @@ export class UI {
   }
 
   wireActions() {
+    this.ffBtn.addEventListener('click', () => this.cycleFastForward());
     document.getElementById('refillBtn').addEventListener('click', () => this.callbacks.onRefill());
     document.getElementById('mistBtn').addEventListener('click', () => this.callbacks.onMist());
     document.getElementById('paperBtn').addEventListener('click', () => this.callbacks.onPaper());
@@ -162,6 +167,42 @@ export class UI {
 
   isPanelOpen() {
     return this.panelOpen;
+  }
+
+  getTimeScale() {
+    return SPEED_STAGES[this.speedIndex];
+  }
+
+  /** タップで ふつう→2ばい→4ばい→6ばい→8ばい→ふつう を循環 */
+  cycleFastForward() {
+    this.speedIndex = (this.speedIndex + 1) % SPEED_STAGES.length;
+    this.applyFastForward();
+  }
+
+  /** 揺れ停止時など、main から ふつう(1倍)に戻す */
+  resetFastForward() {
+    if (this.speedIndex === 0) return;
+    this.speedIndex = 0;
+    this.applyFastForward();
+  }
+
+  applyFastForward() {
+    const scale = SPEED_STAGES[this.speedIndex];
+    this.updateFastForwardUI();
+    this.callbacks.onFastForward(scale);
+  }
+
+  updateFastForwardUI() {
+    const scale = SPEED_STAGES[this.speedIndex];
+    const label = SPEED_LABELS[scale];
+    this.ffBtn.textContent = `⏩ ${label}`;
+    this.ffBtn.classList.toggle('active', scale > 1);
+    if (scale > 1) {
+      this.ffIndicator.textContent = `はやおくり ${label}`;
+      this.ffIndicator.classList.remove('hidden');
+    } else {
+      this.ffIndicator.classList.add('hidden');
+    }
   }
 
   /** かみ領域の右下に FAB を重ねる(画面下端は使わない) */

@@ -138,6 +138,25 @@ body {
   display: none !important;
 }
 
+/* ---- 早送りインジケータ ---- */
+
+.ff-indicator {
+  position: absolute;
+  top: calc(var(--safe-top) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 14px;
+  padding: 5px 14px;
+  font-size: clamp(12px, 3.2vw, 15px);
+  font-weight: 800;
+  color: var(--ink);
+  box-shadow: 0 2px 10px rgba(100, 70, 130, 0.2);
+  pointer-events: none;
+  z-index: 5;
+  white-space: nowrap;
+}
+
 /* ---- 開閉 FAB（かみの上に重ねる） ---- */
 
 .fab {
@@ -328,6 +347,20 @@ body {
 .action-btn.pulse {
   animation: pulse 0.9s ease-in-out infinite;
   background: #fff1d6;
+}
+
+.action-btn-ff {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 14px 16px;
+  font-size: clamp(14px, 3.8vw, 18px);
+  background: rgba(255, 248, 220, 0.95);
+}
+
+.action-btn-ff.active {
+  background: #fff0f6;
+  box-shadow: 0 0 0 3px rgba(249, 123, 168, 0.35);
 }
 
 @keyframes pulse {
