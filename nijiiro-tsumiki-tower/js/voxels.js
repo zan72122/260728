@@ -17,7 +17,7 @@
    （無ければ内蔵の数字ビットマップにフォールバック）。
    ============================================================ */
 
-import { gridKey } from './demolition.js';
+import { gridKey, keyToGxGyGz, findUnsupported } from './demolition.js';
 
 // ---- シード付き乱数 ----
 export function mulberry32(seed) {
@@ -454,32 +454,126 @@ const MOTIFS = [
   motifButterfly, motifCastle, motifTower, motifBunny, motifChar,
 ];
 
+/* ------------------------------------------------------------
+   ゆりかご式展示台：
+   ・全モチーフを 幅広の白い台座（PLATFORM_ROWS 段・輪郭+2 マス）にのせる
+   ・さらに 形の下面の曲線に沿って 台を盛り上げ、形の すべての列を
+     真下から支える（ハートの下すぼみも 星の谷も 台が受ける）
+   → 1点接地が なくなり、厳格な支え判定でも 初期形状は崩れない。
+   台座も ふつうに 壊せる積み木。
+   ------------------------------------------------------------ */
+const PLATFORM_ROWS = 2;
+const PLATFORM_MARGIN = 2;
+
+function addStand(cells) {
+  const P = PLATFORM_ROWS, M = PLATFORM_MARGIN;
+  // 列ごとの 形の最下段
+  const colKey = (gx, gz) => gx * 4096 + gz;
+  const colMin = new Map();
+  for (const c of cells) {
+    const k = colKey(c.gx, c.gz);
+    const cur = colMin.get(k);
+    if (cur === undefined || c.gy < cur) colMin.set(k, c.gy);
+  }
+  // 形を 上へ P、横へ M ずらして 台座ぶんの すきまを あける
+  for (const c of cells) { c.gx += M; c.gz += M; c.gy += P; }
+  const stand = [];
+  // 台座（輪郭を M マス ふくらませた 板）
+  const platCols = new Set();
+  for (const k of colMin.keys()) {
+    const gx = Math.floor(k / 4096), gz = k % 4096;
+    for (let dx = -M; dx <= M; dx++) {
+      for (let dz = -M; dz <= M; dz++) {
+        platCols.add(colKey(gx + M + dx, gz + M + dz));
+      }
+    }
+  }
+  for (const k of platCols) {
+    const gx = Math.floor(k / 4096), gz = k % 4096;
+    if (gx < 0 || gz < 0) continue;
+    for (let gy = 0; gy < P; gy++) stand.push({ gx, gy, gz, tag: 'stand' });
+  }
+  // ゆりかご（形の下面まで 台を盛り上げる）
+  for (const [k, minGy] of colMin) {
+    const gx = Math.floor(k / 4096) + M, gz = (k % 4096) + M;
+    for (let gy = P; gy < minGy + P; gy++) stand.push({ gx, gy, gz, tag: 'stand' });
+  }
+  return stand;
+}
+
+/* 列の中に 縦の すきまが ある形（おはなの 葉と花びらの間 など）では、
+   ゆりかごは 最下段までしか 届かない。のこった宙吊りセルの 真下に
+   白い支え柱を 1段ずつ 伸ばして、すべてのセルを 支える。
+   （博物館の 標本マウントの 支持棒の イメージ） */
+function addSupportPillars(cells, stand) {
+  const map = new Map();
+  for (const c of cells) map.set(gridKey(c.gx, c.gy, c.gz), c);
+  for (const c of stand) map.set(gridKey(c.gx, c.gy, c.gz), c);
+  for (let iter = 0; iter < 60; iter++) {
+    const orphans = findUnsupported(map);
+    if (orphans.length === 0) break;
+    let added = false;
+    for (const key of orphans) {
+      const [gx, gy, gz] = keyToGxGyGz(key);
+      if (gy === 0) continue;
+      const belowKey = gridKey(gx, gy - 1, gz);
+      if (!map.has(belowKey)) {
+        const cell = { gx, gy: gy - 1, gz, tag: 'stand' };
+        map.set(belowKey, cell);
+        stand.push(cell);
+        added = true;
+      }
+    }
+    if (!added) break;   // これ以上 伸ばせない（次の反復で 解決するはず）
+  }
+}
+
 export function buildStageSpec(stage, seed, budget, rasterizeChar) {
-  const rng = mulberry32(seed);
   const idx = (stage - 1) % MOTIFS.length;
   const cycle = Math.floor((stage - 1) / MOTIFS.length);
-  const m = MOTIFS[idx](budget, rng, { cycle, rasterizeChar });
 
-  // 文字なども含め、床につく列を接地させる：
-  // gy の最小値が 0 になるよう全体を下へ詰める
-  let minY = Infinity;
-  for (const c of m.cells) minY = Math.min(minY, c.gy);
-  if (minY > 0) for (const c of m.cells) c.gy -= minY;
+  // 台座ぶんも 含めて 予算に収める（超えたら 形を少し小さくして 作り直し）
+  let rng, m, stand;
+  let effBudget = budget;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    rng = mulberry32(seed);
+    m = MOTIFS[idx](effBudget, rng, { cycle, rasterizeChar });
+    let minY = Infinity;
+    for (const c of m.cells) minY = Math.min(minY, c.gy);
+    if (minY > 0) for (const c of m.cells) c.gy -= minY;
+    stand = addStand(m.cells);
+    addSupportPillars(m.cells, stand);
+    const total = m.cells.length + stand.length;
+    if (total <= budget * 1.3) break;
+    effBudget = Math.max(250, Math.round((budget * budget) / total));
+  }
 
+  const P = PLATFORM_ROWS;
   const dims = { cols: m.cols, rows: m.rows, depth: m.depth };
   const V = Math.max(0.28, Math.min(0.8, m.targetH / m.rows));
+  const all = [...stand, ...m.cells];
+
+  // 中心合わせ用の 範囲
+  let maxGx = 0, maxGz = 0;
+  for (const c of all) {
+    maxGx = Math.max(maxGx, c.gx);
+    maxGz = Math.max(maxGz, c.gz);
+  }
 
   const blocks = [];
   let maxYw = 0, maxRw = 0;
-  for (const c of m.cells) {
+  for (const c of all) {
     const jr = rng() - 0.5;
-    const x = (c.gx - (m.cols - 1) / 2) * V;
+    const x = (c.gx - maxGx / 2) * V;
     const y = c.gy * V + V / 2;
-    const z = (c.gz - (m.depth - 1) / 2) * V;
+    const z = (c.gz - maxGz / 2) * V;
+    const color = c.tag === 'stand'
+      ? hsl(45, 0.16, 0.9 + jr * 0.04)
+      : m.colorOf({ ...c, gy: c.gy - P }, dims, jr);
     blocks.push({
       p: [x, y, z],
       g: [c.gx, c.gy, c.gz],
-      c: m.colorOf(c, dims, jr),
+      c: color,
       front: !!c.front,
       faceRoll: rng(),
     });

@@ -4,43 +4,51 @@
 
    検証すること:
    1. 全モチーフ×複数予算で、ブロック数が予算に収まっている
-   2. 構造が接地している（宙に浮いた はぐれブロックが ほぼ無い）
-   3. 💣1個で ちゃんと崩れ、崩れたあとに「宙に浮いたまま凍結」の
-      ブロックが残らない（接地チェックの連鎖が正しく働く）
+   2. 展示台があり（接地行が広い）、厳格な支え判定
+      （真下は無償・横/ぶら下がりは2マスまで）でも初期形状が崩れない
+      = 1点接地・宙吊りの ない構造
+   3. 💣で ちゃんと崩れ、崩壊後に「宙に浮いたまま」の凍結ブロックや
+      がれきが 1個も残らない
    ============================================================ */
 
 import * as CANNON from '../lib/cannon-es.js';
 import { buildStageSpec } from '../js/voxels.js';
 import {
-  PHYS, bombParams, bombEffect, gridKey, findUngrounded,
+  PHYS, bombParams, bombEffect, gridKey, findUnsupported,
 } from '../js/demolition.js';
 
 const BUDGET = 1500;
 let failures = 0;
 
 /* ---- 1 & 2: 予算とかたち ---- */
-console.log('=== 予算チェック（budget 800 / 1500 / 2500） ===');
+console.log('=== 予算・接地チェック（budget 800 / 1500 / 2500） ===');
 for (const budget of [800, 1500, 2500]) {
   for (let stg = 1; stg <= 9; stg++) {
     const spec = buildStageSpec(stg, 4242 + stg, budget);
     const map = new Map();
-    for (const b of spec.blocks) map.set(gridKey(b.g[0], b.g[1], b.g[2]), b);
-    const orphans = findUngrounded(map).length;
-    const okCount = spec.count >= budget * 0.35 && spec.count <= budget * 1.3;
+    let baseCells = 0;
+    for (const b of spec.blocks) {
+      map.set(gridKey(b.g[0], b.g[1], b.g[2]), b);
+      if (b.g[1] === 0) baseCells++;
+    }
+    const orphans = findUnsupported(map).length;
+    const okCount = spec.count >= budget * 0.35 && spec.count <= budget * 1.35;
     const okOrphan = orphans <= spec.count * 0.02;
-    if (!okCount || !okOrphan) failures++;
-    if (budget === BUDGET || !okCount || !okOrphan) {
+    const okBase = baseCells >= 25;
+    if (!okCount || !okOrphan || !okBase) failures++;
+    if (budget === BUDGET || !okCount || !okOrphan || !okBase) {
       console.log(
         `  b=${budget} stage ${stg} ${spec.icon} ${spec.name.padEnd(9, '　')} ` +
         `count=${String(spec.count).padStart(4)} V=${spec.V.toFixed(2)} ` +
-        `devices=${spec.devices} orphans=${orphans} ` +
-        (okCount && okOrphan ? 'OK' : `★★ NG (count:${okCount} orphan:${okOrphan}) ★★`)
+        `接地行=${String(baseCells).padStart(3)} orphans=${orphans} ` +
+        (okCount && okOrphan && okBase ? 'OK'
+          : `★★ NG (count:${okCount} orphan:${okOrphan} base:${okBase}) ★★`)
       );
     }
   }
 }
 
-/* ---- 3: 💣で崩れる & 浮遊ブロックが残らない ---- */
+/* ---- 3: 💣で崩れる & 浮遊が残らない ---- */
 console.log('\n=== 💣 解体シミュレーション（main.js と同じ凍結方式） ===');
 
 function simulateBomb(spec) {
@@ -65,12 +73,42 @@ function simulateBomb(spec) {
   const gridMap = new Map();
   const dynSet = new Set();
   const blocks = spec.blocks.map((bs, i) => {
-    const block = {
-      i, g: bs.g, home: bs.p, y0: bs.p[1], state: 'frozen', body: null,
-    };
+    const block = { i, g: bs.g, home: bs.p, y0: bs.p[1], state: 'frozen', body: null };
     gridMap.set(gridKey(bs.g[0], bs.g[1], bs.g[2]), block);
     return block;
   });
+
+  // ワールド座標 → 格子座標（main.js と同じ逆算）
+  const b0 = spec.blocks[0];
+  const gxOffset = b0.g[0] - b0.p[0] / V;
+  const gzOffset = b0.g[2] - b0.p[2] / V;
+
+  // 支え判定（main.js の isSupportedAt 相当。レイの代わりに 位置ハッシュ）
+  const staticHash = () => {
+    const h = new Map();
+    for (const b of blocks) {
+      if (b.state === 'gone' || b.state === 'dynamic') continue;
+      const p = b.body ? b.body.position : { x: b.home[0], y: b.home[1], z: b.home[2] };
+      const key = `${Math.round(p.x / V)}_${Math.round(p.y / V)}_${Math.round(p.z / V)}`;
+      h.set(key, b);
+    }
+    return h;
+  };
+  function isSupportedAt(block, hash) {
+    const p = block.body.position;
+    if (p.y < V * 1.1) return true;
+    const gx = Math.round(p.x / V + gxOffset);
+    const gy = Math.round((p.y - V / 2) / V);
+    const gz = Math.round(p.z / V + gzOffset);
+    if (gy >= 1 && gridMap.has(gridKey(gx, gy - 1, gz))) return true;
+    // ま下の セルに 静的な なにかが いるか
+    const cx = Math.round(p.x / V), cy = Math.round(p.y / V), cz = Math.round(p.z / V);
+    for (let dy = 1; dy <= 2; dy++) {
+      const below = hash.get(`${cx}_${cy - dy}_${cz}`);
+      if (below && below !== block) return true;
+    }
+    return false;
+  }
 
   function attachBody(block, dynamic) {
     if (block.body) return block.body;
@@ -96,6 +134,7 @@ function simulateBomb(spec) {
     body.addEventListener('sleep', (e) => {
       const b = e.target.__block;
       if (!b || b.state !== 'dynamic') return;
+      if (!isSupportedAt(b, staticHash())) { e.target.wakeUp(); return; }
       e.target.type = CANNON.Body.STATIC;
       e.target.mass = 0;
       e.target.updateMassProperties();
@@ -128,12 +167,10 @@ function simulateBomb(spec) {
     block.state = 'gone';
   }
 
-  // 凍結ブロック全員に静的ボディ（テストでは負荷を気にしない）
   for (const b of blocks) attachBody(b, false);
 
-  // 爆心：下のほうの層から 3 か所（中央 + 左右）
-  // 実プレイは装置 10 個以上なので、これでも控えめな検証
-  const lows = blocks.filter((b) => b.y0 > V * 0.8 && b.y0 < V * 3.5);
+  // 爆心：台座の うえ 2〜4層目から 3 か所（中央 + 左右）
+  const lows = blocks.filter((b) => b.y0 > V * 2.2 && b.y0 < V * 5.0);
   lows.sort((a, b2) => a.home[0] - b2.home[0]);
   const targets = [
     lows[Math.floor(lows.length * 0.2)],
@@ -156,16 +193,21 @@ function simulateBomb(spec) {
     removeBlock(target);
   }
 
-  // 6秒シミュレーション + 0.35秒ごとの接地チェック
+  // 6秒シミュレーション + 0.35秒ごとの支えチェック
   let maxDyn = 0;
   const t0 = Date.now();
   for (let step = 0; step < 360; step++) {
     world.step(1 / 60);
     maxDyn = Math.max(maxDyn, dynSet.size);
     if (step % 21 === 20) {
-      for (const key of findUngrounded(gridMap)) {
+      for (const key of findUnsupported(gridMap)) {
         const b = gridMap.get(key);
         if (b) makeDynamic(b);
+      }
+      const hash = staticHash();
+      for (const b of blocks) {
+        if (b.state !== 'rubble') continue;
+        if (!isSupportedAt(b, hash)) makeDynamic(b);
       }
     }
   }
@@ -181,7 +223,14 @@ function simulateBomb(spec) {
     else sum += Math.max(0, Math.min(b.y0, b.y0 - b.body.position.y));
   }
   const score = total > 0 ? sum / total : 0;
-  const floating = findUngrounded(gridMap).length;
+
+  // 浮遊チェック：凍結の宙吊り + がれきの空中固定
+  let floating = findUnsupported(gridMap).length;
+  const hash = staticHash();
+  for (const b of blocks) {
+    if (b.state !== 'rubble') continue;
+    if (!isSupportedAt(b, hash)) floating++;
+  }
 
   return { score, floating, maxDyn, simMs, count: blocks.length };
 }

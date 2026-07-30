@@ -59,36 +59,62 @@ export function keyToGxGyGz(key) {
   return [gx, gy, gz];
 }
 
-const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+/* ---- 支え判定（マグネット積み木モデル） ----
+   ・真下からの支え（積み上げ）は 無償で 上に伝わる
+   ・横づたい／ぶら下がり は「磁石が保持できる」SUPPORT_SLACK
+     ブロックぶんだけ 許される
+   これにより、クレーターの上に 横づたいで ぶら下がる大きな塊や、
+   シャンデリア状の宙吊りは 塊ごと 崩落する。 */
+export const SUPPORT_SLACK = 2;
 
-// 凍結ブロック集合（Map: gridKey -> なんでも）のうち、
-// 「地面（gy===0）から 6近傍の繋がりで届かない」キーの配列を返す。
-// = 支えを失って宙に浮いている塊。呼び出し側はこれを落下させる。
-export function findUngrounded(gridMap) {
-  const visited = new Set();
-  const stack = [];
+const SIDE_DIRS = [[1, 0, 0], [-1, 0, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+
+// 凍結ブロック集合（Map: gridKey -> なんでも）のうち、支えを失った
+// （= 地面から「上へは無償・横/下へは合計 slack 回まで」で届かない）
+// キーの配列を返す。呼び出し側はこれを落下させる。
+export function findUnsupported(gridMap, slack = SUPPORT_SLACK) {
+  const cost = new Map();
+  let frontier = [];
   for (const key of gridMap.keys()) {
-    if (((key / 4096) | 0) % 4096 === 0) {   // gy === 0
-      visited.add(key);
-      stack.push(key);
+    if (((key / 4096) | 0) % 4096 === 0) {   // gy === 0（地面の上）
+      cost.set(key, 0);
+      frontier.push(key);
     }
   }
-  while (stack.length) {
-    const k = stack.pop();
-    const [gx, gy, gz] = keyToGxGyGz(k);
-    for (const [dx, dy, dz] of DIRS) {
-      const ny = gy + dy;
-      if (ny < 0) continue;
-      const nk = gridKey(gx + dx, ny, gz + dz);
-      if (gridMap.has(nk) && !visited.has(nk)) {
-        visited.add(nk);
-        stack.push(nk);
+  for (let d = 0; d <= slack; d++) {
+    // まず「真上へ」の無償伝播を出し切る（同コストの閉包）
+    const stack = [...frontier];
+    const level = [...frontier];
+    while (stack.length) {
+      const k = stack.pop();
+      const [gx, gy, gz] = keyToGxGyGz(k);
+      const upKey = gridKey(gx, gy + 1, gz);
+      if (gridMap.has(upKey) && !cost.has(upKey)) {
+        cost.set(upKey, d);
+        stack.push(upKey);
+        level.push(upKey);
       }
     }
+    if (d === slack) break;
+    // 横・下へは +1 コスト
+    const next = [];
+    for (const k of level) {
+      const [gx, gy, gz] = keyToGxGyGz(k);
+      for (const [dx, dy, dz] of SIDE_DIRS) {
+        const ny = gy + dy;
+        if (ny < 0) continue;
+        const nk = gridKey(gx + dx, ny, gz + dz);
+        if (gridMap.has(nk) && !cost.has(nk)) {
+          cost.set(nk, d + 1);
+          next.push(nk);
+        }
+      }
+    }
+    frontier = next;
   }
   const out = [];
   for (const key of gridMap.keys()) {
-    if (!visited.has(key)) out.push(key);
+    if (!cost.has(key)) out.push(key);
   }
   return out;
 }

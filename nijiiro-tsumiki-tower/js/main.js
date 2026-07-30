@@ -16,7 +16,7 @@
 import * as THREE from '../lib/three.module.min.js';
 import * as CANNON from '../lib/cannon-es.js';
 import { buildStageSpec } from './voxels.js';
-import { PHYS, bombParams, bombEffect, gridKey, findUngrounded } from './demolition.js';
+import { PHYS, bombParams, bombEffect, gridKey, findUnsupported } from './demolition.js';
 import * as SFX from './audio.js';
 
 /* ============================ DOM ============================ */
@@ -699,7 +699,7 @@ function startStage(newStage, newSeed) {
   for (const bs of spec.blocks) {
     tmpMap.set(gridKey(bs.g[0], bs.g[1], bs.g[2]), bs);
   }
-  const orphans = new Set(findUngrounded(tmpMap));
+  const orphans = new Set(findUnsupported(tmpMap));
   const specBlocks = spec.blocks.filter(
     (bs) => !orphans.has(gridKey(bs.g[0], bs.g[1], bs.g[2])));
 
@@ -828,11 +828,36 @@ function onCollide(e) {
   }
 }
 
+// ---- 支えの ある場所か？（再凍結の 条件） ----
+// 真下に なにかが ある子だけ 凍結を ゆるす。宙に浮いたままの
+// 凍結（浮遊バグ）を ふせぐ
+const _rayFrom = new CANNON.Vec3();
+const _rayTo = new CANNON.Vec3();
+const _rayResult = new CANNON.RaycastResult();
+function isSupportedAt(body) {
+  const p = body.position;
+  if (p.y < V * 1.1) return true;                       // ほぼ地面
+  const gx = Math.round(p.x / V + gxOffset);
+  const gy = Math.round((p.y - V / 2) / V);
+  const gz = Math.round(p.z / V + gzOffset);
+  if (gy >= 1 && gridMap.has(gridKey(gx, gy - 1, gz))) return true;   // 凍結格子の上
+  // 静的な がれき等の上か、下向きレイで 確かめる
+  _rayFrom.set(p.x, p.y - V * 0.55, p.z);
+  _rayTo.set(p.x, p.y - V * 1.25, p.z);
+  _rayResult.reset();
+  world.raycastClosest(_rayFrom, _rayTo, {}, _rayResult);
+  return _rayResult.hasHit && _rayResult.body !== body;
+}
+
 function onBodySleep(e) {
   const block = e.target.__block;
   if (!block || block.state !== 'dynamic') return;
-  // おやすみ → がれきとして 再凍結（物理コストから除外）
   const body = block.body;
+  if (!isSupportedAt(body)) {
+    body.wakeUp();          // 支えが ないなら ねむらせない（落下を つづける）
+    return;
+  }
+  // おやすみ → がれきとして 再凍結（物理コストから除外）
   body.type = CANNON.Body.STATIC;
   body.mass = 0;
   body.updateMassProperties();
@@ -1514,19 +1539,27 @@ function tick(nowMs) {
       if (!effects[i].update(dt)) effects.splice(i, 1);
     }
 
-    // 接地チェック：支えを失った 塊を 落とす
-    if (connDirty && elapsed > connCheckAt &&
-        (state === ST.COLLAPSE || state === ST.RESULT)) {
+    // 支えチェック（0.35秒ごと）：
+    // 1. 支えを失った 凍結ブロックの塊を 落とす
+    // 2. 宙に浮いたまま 再凍結された がれきを 起こして 落とす
+    if (elapsed > connCheckAt && (state === ST.COLLAPSE || state === ST.RESULT)) {
       connCheckAt = elapsed + 0.35;
-      connDirty = false;
-      const lost = findUngrounded(gridMap);
-      let n = 0;
-      for (const key of lost) {
-        const b = gridMap.get(key);
-        if (b) { makeDynamic(b); n++; }
-        if (n > 700) break;
+      if (connDirty) {
+        connDirty = false;
+        const lost = findUnsupported(gridMap);
+        let n = 0;
+        for (const key of lost) {
+          const b = gridMap.get(key);
+          if (b) { makeDynamic(b); n++; }
+          if (n > 700) break;
+        }
+        if (lost.length > 700) connDirty = true;
       }
-      if (lost.length > 700) connDirty = true;
+      for (const b of blocks) {
+        if (b.state !== 'rubble') continue;
+        if (b.body.position.y < V * 1.1) continue;   // 地面ぎわは 速判定
+        if (!isSupportedAt(b.body)) makeDynamic(b);
+      }
     }
 
     // 出現アニメーション（したの だんから なみのように）
