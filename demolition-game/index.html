@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>ばくはつ！かいたいやさん</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💥</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="game-canvas"></canvas>
+
+  <!-- HUD (during play) -->
+  <div id="hud" class="hidden">
+    <div id="hud-top">
+      <button id="btn-home" class="icon-btn" aria-label="ホーム">🏠</button>
+      <div id="dust-meter">
+        <span class="meter-icon">💨</span>
+        <div class="meter-track"><div id="dust-fill"></div></div>
+      </div>
+      <button id="btn-mute" class="icon-btn" aria-label="おと">🔊</button>
+    </div>
+    <div id="msg-banner" class="hidden"></div>
+    <div id="tutor-hand" class="hidden">👆</div>
+  </div>
+
+  <!-- Title screen -->
+  <div id="scr-title" class="screen">
+    <div class="title-logo">
+      <div class="title-boom">💥</div>
+      <h1>ばくはつ！<br>かいたいやさん</h1>
+    </div>
+    <button id="btn-play" class="big-btn">▶ あそぶ</button>
+    <div class="title-hint">たっぷして ビルを かいたいしよう！</div>
+  </div>
+
+  <!-- Level select -->
+  <div id="scr-select" class="screen hidden">
+    <h2>すてーじを えらんでね</h2>
+    <div id="level-grid"></div>
+    <button id="btn-back-title" class="icon-btn corner-btn" aria-label="もどる">↩</button>
+  </div>
+
+  <!-- Result overlay -->
+  <div id="scr-result" class="screen overlay hidden">
+    <div class="panel">
+      <div id="result-title">やったね！</div>
+      <div id="result-stars"><span>☆</span><span>☆</span><span>☆</span></div>
+      <div id="result-comment"></div>
+      <div class="panel-btns">
+        <button id="btn-retry" class="big-btn alt">🔁 もういちど</button>
+        <button id="btn-next" class="big-btn">▶ つぎへ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gentle fail overlay -->
+  <div id="scr-fail" class="screen overlay hidden">
+    <div class="panel">
+      <div id="fail-title">あちゃー！</div>
+      <div id="fail-comment">おとなりに あたっちゃった！</div>
+      <div class="panel-btns">
+        <button id="btn-fail-retry" class="big-btn">🔁 もういちど！</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="lib/matter.min.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/levels.js"></script>
+<script src="js/physics.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/game.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
