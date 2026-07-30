@@ -114,13 +114,22 @@ button:active { transform: scale(0.92); }
 
 /* ---------- とうえらび ---------- */
 #select.on {
+  display: block;
+  background: radial-gradient(circle at 50% 20%, rgba(255,255,255,0.5), rgba(255,214,236,0.2) 70%);
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.selScroll {
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 3vh;
-  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
-  background: radial-gradient(circle at 50% 20%, rgba(255,255,255,0.5), rgba(255,214,236,0.2) 70%);
+  gap: 2.2vh;
+  padding: max(20px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom));
 }
 
 .selTitle {
@@ -129,14 +138,23 @@ button:active { transform: scale(0.92); }
   text-shadow: 0 2px 0 #fff;
 }
 
-#towerGrid {
+.selSub {
+  font-size: clamp(16px, 3.6vw, 24px);
+  color: #cb6a94;
+  background: rgba(255,255,255,0.7);
+  border-radius: 999px;
+  padding: 6px 18px;
+  box-shadow: 0 3px 0 #ffb1cf;
+}
+
+.cardGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(90px, 150px));
   gap: clamp(10px, 2.5vw, 22px);
   pointer-events: auto;
 }
 @media (orientation: portrait) {
-  #towerGrid { grid-template-columns: repeat(2, minmax(110px, 160px)); }
+  .cardGrid { grid-template-columns: repeat(2, minmax(110px, 160px)); }
 }
 
 .towerCard {

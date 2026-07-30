@@ -646,6 +646,952 @@
     }
   ];
 
+  /* =========================================================
+     いっぱいスポンジ（ボクセル）エンジン
+     - 数千個の小スポンジを InstancedMesh 1つで描画
+     - 縦の「柱」に分解して、しずみ(squash)・かたむき(shear)を柱単位で計算
+     - 柱同士は となり拡散で つながって ゆれる
+     - 接地していない柱（アーチのてっぺん等）は ささえ判定で 連鎖崩壊
+     ========================================================= */
+
+  /* --- 端末性能の自動判定（CPUベンチ + URL ?tier= 上書き） --- */
+  var VOXTIER = (function () {
+    var q = /[?&]tier=(high|mid|low)/.exec(location.search);
+    if (q) return q[1];
+    var m = new THREE.Matrix4(), p = new THREE.Vector3(), qt = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1);
+    var t0 = performance.now(), n = 0;
+    do {
+      for (var i = 0; i < 1000; i++) { p.set(i, i * 2, i * 3); s.set(1, 1 + i % 3, 1); m.compose(p, qt, s); }
+      n += 1000;
+    } while (performance.now() - t0 < 20);
+    var ops = n / Math.max(performance.now() - t0, 1);
+    if (ops > 20000) return 'high';
+    if (ops > 8000) return 'mid';
+    return 'low';
+  })();
+  var VOXCONF = {
+    high: { res: 1.15, cap: 3000, shadow: true },
+    mid: { res: 0.95, cap: 1700, shadow: true },
+    low: { res: 0.7, cap: 850, shadow: false }
+  }[VOXTIER];
+  var perfScale = 1;          // 実行中fpsが落ちたら 0.4 に（粒子減量）
+
+  /* --- ボクセルアート生成ヘルパ --- */
+  /* 2D シルエット test(u,v) を壁として立てる  u:-1..1(横) v:-1..1(縦) */
+  function genWall(W, H, D, test, colorOf) {
+    var cells = [];
+    for (var iy = 0; iy < H; iy++) {
+      for (var ix = 0; ix < W; ix++) {
+        var u = (ix + 0.5) / W * 2 - 1;
+        var v = (iy + 0.5) / H * 2 - 1;
+        if (!test(u, v)) continue;
+        for (var iz = 0; iz < D; iz++) cells.push({ ix: ix, iy: iy, iz: iz, c: colorOf(u, v, iz, D) });
+      }
+    }
+    return cells;
+  }
+
+  function heartTest(u, v) {
+    var x = u * 1.25, y = v * 1.3 + 0.12;
+    var a = x * x + y * y - 1;
+    return a * a * a - x * x * y * y * y < 0;
+  }
+  function starTest(u, v) {
+    var r = Math.sqrt(u * u + v * v);
+    if (r < 0.001) return true;
+    var th = Math.atan2(v, u) - Math.PI / 2;
+    var seg = Math.PI * 2 / 5;
+    var a = ((th % seg) + seg) % seg;
+    var t = Math.abs(a - seg / 2) / (seg / 2); // 0=山のあいだ 1=山のさき
+    var rmax = lerp(0.44, 1.0, t * t);
+    return r < rmax;
+  }
+  function ellipse(u, v, cx, cy, rx, ry, rot) {
+    var dx = u - cx, dy = v - cy;
+    if (rot) {
+      var c = Math.cos(rot), s = Math.sin(rot);
+      var tx = dx * c + dy * s; dy = -dx * s + dy * c; dx = tx;
+    }
+    return (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) < 1;
+  }
+
+  var VOXTOWERS = [
+    {
+      id: 'vheart', icon: '💖', label: 'はーと', kind: 'voxel', baseCell: 0.5,
+      gen: function (W, H, D) {
+        return genWall(W, H, D, heartTest, function (u, v, iz) {
+          var r = Math.sqrt(u * u + v * v);
+          if (iz === 0 && Math.random() < 0.06) return '#ffffff';
+          return ['#ff5f9b', '#ff77a9', '#ff98bd', '#ffb7cf'][Math.min(3, Math.floor((1 - r) * 4.2))];
+        });
+      }, dims: [27, 24, 4]
+    },
+    {
+      id: 'vstar', icon: '⭐', label: 'おほしさま', kind: 'voxel', baseCell: 0.5,
+      gen: function (W, H, D) {
+        return genWall(W, H, D, starTest, function (u, v, iz) {
+          var r = Math.sqrt(u * u + v * v);
+          if (r < 0.3) return '#fff6c9';
+          return ['#ffe38f', '#ffd86b', '#ffc94d', '#ffba36'][Math.floor(Math.min(0.99, r) * 4)];
+        });
+      }, dims: [30, 28, 4]
+    },
+    {
+      id: 'vrainbow', icon: '🌈', label: 'にじのはし', kind: 'voxel', baseCell: 0.55,
+      gen: function (W, H, D) {
+        var cells = [];
+        var R = W / 2;
+        var BANDS = ['#ff8f8f', '#ffbe8f', '#ffe38f', '#a6e6a1', '#8fd0ff', '#b9a8ff'];
+        var thick = Math.max(0.9, R / 11);
+        for (var iy = 0; iy < H; iy++) {
+          for (var ix = 0; ix < W; ix++) {
+            var x = ix - (W - 1) / 2, y = iy;
+            var r = Math.sqrt(x * x + y * y);
+            var bi = Math.floor((R - r) / thick);
+            if (r > R || bi < 0 || bi >= 6) continue;
+            for (var iz = 0; iz < D; iz++) cells.push({ ix: ix, iy: iy, iz: iz, c: BANDS[bi] });
+          }
+        }
+        // 足もとの くも
+        var feet = [[2, '#ffffff'], [W - 3, '#fff6f9']];
+        for (var f = 0; f < 2; f++) {
+          for (var iy2 = 0; iy2 < 3; iy2++) for (var dx = -2; dx <= 2; dx++) for (var iz2 = -1; iz2 <= D; iz2++) {
+            if (Math.abs(dx) + iy2 > 3 || Math.random() < 0.15) continue;
+            cells.push({ ix: feet[f][0] + dx, iy: iy2, iz: iz2 < 0 ? 0 : Math.min(iz2, D - 1), c: feet[f][1] });
+          }
+        }
+        return cells;
+      }, dims: [30, 16, 4]
+    },
+    {
+      id: 'vflower', icon: '🌸', label: 'おおきなおはな', kind: 'voxel', baseCell: 0.5,
+      gen: function (W, H, D) {
+        return genWall(W, H, D, function (u, v) {
+          var cy = 0.42;
+          if (ellipse(u, v, 0, cy, 0.24, 0.22)) return true;            // まんなか
+          for (var k = 0; k < 8; k++) {
+            var a = k * Math.PI / 4;
+            if (ellipse(u, v, Math.cos(a) * 0.5, cy + Math.sin(a) * 0.46, 0.3, 0.26, a)) return true;
+          }
+          if (Math.abs(u) < 0.07 && v < cy - 0.5 && v > -1) return true; // くき
+          if (ellipse(u, v, 0.3, -0.55, 0.24, 0.12, 0.6)) return true;   // はっぱ
+          if (ellipse(u, v, -0.3, -0.75, 0.24, 0.12, -0.6)) return true;
+          return false;
+        }, function (u, v, iz) {
+          var cy = 0.42;
+          if (ellipse(u, v, 0, cy, 0.24, 0.22)) return Math.random() < 0.25 ? '#ffb347' : '#ffd86b';
+          if (Math.abs(u) < 0.08 && v < cy - 0.4) return '#8fce7f';
+          if (v < -0.4 && Math.abs(u) > 0.1) return '#a6e6a1';
+          var d = Math.sqrt(u * u + (v - cy) * (v - cy));
+          return d < 0.55 ? '#ff98bd' : (d < 0.8 ? '#ffb7cf' : '#ffd3e2');
+        });
+      }, dims: [26, 29, 4]
+    },
+    {
+      id: 'vbutterfly', icon: '🦋', label: 'ちょうちょ', kind: 'voxel', baseCell: 0.5,
+      gen: function (W, H, D) {
+        return genWall(W, H, D, function (u, v) {
+          if (ellipse(u, v, 0, 0, 0.1, 0.42)) return true;                       // からだ
+          if (ellipse(u, v, 0.46, 0.3, 0.4, 0.34, 0.35)) return true;            // うわばね
+          if (ellipse(u, v, -0.46, 0.3, 0.4, 0.34, -0.35)) return true;
+          if (ellipse(u, v, 0.34, -0.38, 0.3, 0.26, -0.4)) return true;          // したばね
+          if (ellipse(u, v, -0.34, -0.38, 0.3, 0.26, 0.4)) return true;
+          if (Math.abs(Math.abs(u) - 0.16) < 0.045 && v > 0.42 && v < 0.75) return true; // しょっかく
+          return false;
+        }, function (u, v, iz) {
+          if (Math.abs(u) < 0.12) return '#b98a68';
+          var au = Math.abs(u);
+          if (ellipse(u, v, u > 0 ? 0.46 : -0.46, 0.3, 0.16, 0.13, 0)) return '#fff6c9'; // もよう
+          if (ellipse(u, v, u > 0 ? 0.34 : -0.34, -0.38, 0.1, 0.08, 0)) return '#ffffff';
+          if (v > 0) return au > 0.62 ? '#b9a8ff' : '#8fd0ff';
+          return au > 0.45 ? '#ff98bd' : '#ffbe8f';
+        });
+      }, dims: [30, 22, 4]
+    },
+    {
+      id: 'vrabbit', icon: '🐰', label: 'うさぎ', kind: 'voxel', baseCell: 0.5,
+      gen: function (W, H, D) {
+        return genWall(W, H, D, function (u, v) {
+          if (ellipse(u, v, 0, -0.35, 0.62, 0.55)) return true;                  // かお
+          if (ellipse(u, v, 0.3, 0.5, 0.17, 0.5)) return true;                   // みみ
+          if (ellipse(u, v, -0.3, 0.5, 0.17, 0.5)) return true;
+          return false;
+        }, function (u, v, iz, D2) {
+          if (iz === 0 || iz === D2 - 1) {
+            if (ellipse(u, v, 0.3, 0.52, 0.08, 0.34)) return '#ffb7cf';           // みみのうち
+            if (ellipse(u, v, -0.3, 0.52, 0.08, 0.34)) return '#ffb7cf';
+            if (ellipse(u, v, 0.3, -0.42, 0.1, 0.09)) return '#ff98bd';           // ほっぺ
+            if (ellipse(u, v, -0.3, -0.42, 0.1, 0.09)) return '#ff98bd';
+            if (ellipse(u, v, 0, -0.5, 0.06, 0.05)) return '#ff77a9';             // おはな
+          }
+          return Math.random() < 0.06 ? '#fff0f6' : '#ffffff';
+        });
+      }, dims: [24, 30, 4]
+    },
+    {
+      id: 'vcastle', icon: '🏰', label: 'おおきなおしろ', kind: 'voxel', baseCell: 0.55,
+      gen: function (W, H, D) {
+        var cells = [];
+        var S = W;                                     // 城壁の一辺（解像度に追従）
+        var WH = Math.max(4, Math.round(H * 0.38));    // 城壁の高さ
+        var TH = Math.max(WH + 2, Math.round(H * 0.62)); // すみの塔の高さ
+        var KH = Math.max(WH + 1, Math.round(H * 0.5));  // ほんまるの高さ
+        function push(ix, iy, iz, c) { cells.push({ ix: ix, iy: iy, iz: iz, c: c }); }
+        function wallColor(iy) { return iy % 2 ? '#ffd9e8' : '#ffeef3'; }
+        // 城壁（中空の四角リング・正面にもん）
+        for (var ix = 0; ix < S; ix++) for (var iz = 0; iz < S; iz++) {
+          var edge = ix < 2 || ix >= S - 2 || iz < 2 || iz >= S - 2;
+          if (!edge) continue;
+          var isGate = iz >= S - 2 && Math.abs(ix - (S - 1) / 2) < S * 0.12;
+          for (var iy = 0; iy < WH; iy++) {
+            if (isGate && iy < WH - 2) continue;
+            push(ix, iy, iz, wallColor(iy));
+          }
+          // ぎざぎざ
+          if ((ix + iz) % 2 === 0) push(ix, WH, iz, '#ffc9dd');
+        }
+        // すみの とう ＋ とんがりやね
+        var corners = [[0, 0], [0, S - 1], [S - 1, 0], [S - 1, S - 1]];
+        corners.forEach(function (co, ci) {
+          for (var dy = 0; dy < TH; dy++) for (var dx = -1; dx <= 1; dx++) for (var dz = -1; dz <= 1; dz++) {
+            push(co[0] + dx, dy, co[1] + dz, dy % 2 ? '#fff2f6' : '#ffe0ec');
+          }
+          var roofC = ci % 2 ? '#b9a8ff' : '#a5d8ff';
+          for (var ry = 0; ry < 3; ry++) {
+            for (var dx2 = -1; dx2 <= 1; dx2++) for (var dz2 = -1; dz2 <= 1; dz2++) {
+              if (Math.abs(dx2) + Math.abs(dz2) > (ry === 0 ? 2 : (ry === 1 ? 1 : 0))) continue;
+              push(co[0] + dx2, TH + ry, co[1] + dz2, roofC);
+            }
+          }
+        });
+        // まんなかの ほんまる
+        var c0 = (S - 1) / 2;
+        var kr = Math.max(2, Math.round(S * 0.17));
+        for (var dy2 = 0; dy2 < KH; dy2++) for (var dx3 = -kr; dx3 <= kr; dx3++) for (var dz3 = -kr; dz3 <= kr; dz3++) {
+          push(Math.round(c0 + dx3), dy2, Math.round(c0 + dz3), dy2 % 2 ? '#ffe0ec' : '#fff2f6');
+        }
+        for (var ry2 = 0; ry2 <= kr + 1; ry2++) {
+          var lim = kr + 1 - ry2;
+          for (var dx4 = -kr; dx4 <= kr; dx4++) for (var dz4 = -kr; dz4 <= kr; dz4++) {
+            if (Math.abs(dx4) + Math.abs(dz4) > lim) continue;
+            push(Math.round(c0 + dx4), KH + ry2, Math.round(c0 + dz4), '#c7b4ff');
+          }
+        }
+        return cells;
+      }, dims: [15, 16, 15]
+    },
+    {
+      id: 'vcake', icon: '🎂', label: 'ケーキ', kind: 'voxel', baseCell: 0.5,
+      gen: function (W, H, D) {
+        var cells = [];
+        var c0 = (W - 1) / 2;
+        var h1 = Math.max(3, Math.round(H * 0.27));
+        var h2 = Math.max(3, Math.round(H * 0.27));
+        var h3 = Math.max(2, Math.round(H * 0.2));
+        var tiers = [
+          { r: W / 2 - 0.5, y0: 0, h: h1, c1: '#ffe9b3', c2: '#ffd9e8' },
+          { r: W * 0.335, y0: h1, h: h2, c1: '#ffd3e2', c2: '#fff6f9' },
+          { r: W * 0.19, y0: h1 + h2, h: h3, c1: '#fff0d9', c2: '#ffc9dd' }
+        ];
+        tiers.forEach(function (tr) {
+          for (var iy = tr.y0; iy < tr.y0 + tr.h; iy++) {
+            for (var ix = 0; ix < W; ix++) for (var iz = 0; iz < W; iz++) {
+              var dx = ix - c0, dz = iz - c0;
+              var r = Math.sqrt(dx * dx + dz * dz);
+              if (r > tr.r) continue;
+              var top = iy === tr.y0 + tr.h - 1;
+              var rim = r > tr.r - 1.2;
+              var drip = rim && ((ix * 7 + iz * 13) % 5 < 2);
+              var c = top ? '#fffdf7' : (drip && iy === tr.y0 + tr.h - 2 ? '#fffdf7' : (iy % 2 ? tr.c1 : tr.c2));
+              cells.push({ ix: ix, iy: iy, iz: iz, c: c });
+              // さくらんぼ
+              if (top && rim && (ix * 11 + iz * 5) % 9 === 0) cells.push({ ix: ix, iy: iy + 1, iz: iz, c: '#ff5f6b' });
+            }
+          }
+        });
+        // ろうそく
+        var cTop = h1 + h2 + h3;
+        for (var cy = cTop; cy < cTop + 3; cy++) cells.push({ ix: Math.round(c0), iy: cy, iz: Math.round(c0), c: cy === cTop + 2 ? '#ffd86b' : '#ffffff' });
+        return cells;
+      }, dims: [20, 16, 20]
+    }
+  ];
+
+  /* --- ボクセル塔の構築 --- */
+  var voxGeo = null;
+  function buildVoxelTower(def) {
+    clearTower();
+    var res = VOXCONF.res;
+    // 個数上限に収まるように 解像度を落とす
+    var W, H, D, cells;
+    for (var tryN = 0; tryN < 5; tryN++) {
+      W = Math.max(8, Math.round(def.dims[0] * res));
+      H = Math.max(8, Math.round(def.dims[1] * res));
+      D = Math.max(2, Math.round(def.dims[2] * res));
+      cells = def.gen(W, H, D);
+      if (cells.length <= VOXCONF.cap) break;
+      res *= Math.pow(VOXCONF.cap / cells.length, 0.34);
+    }
+    var cell = def.baseCell * def.dims[0] / W; // 解像度が変わっても実寸を保つ
+
+    // かぶり除去
+    var seen = {};
+    cells = cells.filter(function (c) {
+      var k = c.ix + '_' + c.iy + '_' + c.iz;
+      if (seen[k]) return false;
+      seen[k] = 1; return true;
+    });
+    // 負のインデックスが出ないように 全体を平行移動
+    var sMinX = 1e9, sMinY = 1e9, sMinZ = 1e9;
+    cells.forEach(function (c) {
+      sMinX = Math.min(sMinX, c.ix); sMinY = Math.min(sMinY, c.iy); sMinZ = Math.min(sMinZ, c.iz);
+    });
+    cells.forEach(function (c) { c.ix -= sMinX; c.iy -= sMinY; c.iz -= sMinZ; });
+
+    var n = cells.length;
+    var minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9, maxIy = 0;
+    cells.forEach(function (c) {
+      minX = Math.min(minX, c.ix); maxX = Math.max(maxX, c.ix);
+      minZ = Math.min(minZ, c.iz); maxZ = Math.max(maxZ, c.iz);
+      maxIy = Math.max(maxIy, c.iy);
+    });
+    var ox = -(minX + maxX) / 2 * cell, oz = -(minZ + maxZ) / 2 * cell;
+
+    if (!voxGeo) voxGeo = new THREE.BoxGeometry(1, 1, 1);
+    var mat = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+    var mesh = new THREE.InstancedMesh(voxGeo, mat, n);
+    mesh.castShadow = VOXCONF.shadow;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    scene.add(mesh);
+
+    // グリッドと柱
+    var nx = maxX + 2, ny = maxIy + 2, nz = maxZ + 2;
+    var grid = new Int32Array(nx * ny * nz).fill(-1);
+    var gi = function (ix, iy, iz) {
+      if (ix < 0 || iy < 0 || iz < 0 || ix >= nx || iy >= ny || iz >= nz) return -1;
+      return (ix * ny + iy) * nz + iz;
+    };
+    var voxels = [];
+    var tmpC = new THREE.Color();
+    cells.forEach(function (c, i) {
+      var v = {
+        id: i, ix: c.ix, iy: c.iy, iz: c.iz,
+        wet: 0, st: 0, sq: 1, birth: c.iy * 0.055 + Math.random() * 0.35,
+        color: new THREE.Color(c.c)
+      };
+      // ちょっとだけ 色ゆらぎ
+      v.color.offsetHSL(rand(-0.008, 0.008), 0, rand(-0.02, 0.02));
+      voxels.push(v);
+      grid[gi(c.ix, c.iy, c.iz)] = i;
+      mesh.setColorAt(i, v.color);
+    });
+    mesh.instanceColor.needsUpdate = true;
+
+    // 柱 = 同じ(ix,iz)の 連続した縦の並び
+    var columns = [];
+    var colMap = {};
+    voxels.forEach(function (v) { colMap[v.ix + '_' + v.iz] = 1; });
+    Object.keys(colMap).forEach(function (key) {
+      var p = key.split('_');
+      var ix = +p[0], iz = +p[1];
+      var run = null;
+      for (var iy = 0; iy < ny; iy++) {
+        var id = grid[gi(ix, iy, iz)];
+        if (id >= 0) {
+          if (!run) {
+            run = {
+              ix: ix, iz: iz, baseIy: iy, vox: [], attLen: 0,
+              shear: new THREE.Vector2(), shearV: new THREE.Vector2(),
+              wetDir: new THREE.Vector2(), wobble: rand(0.8, 1.25),
+              wx: ox + ix * cell, wz: oz + iz * cell, pend: 0
+            };
+          }
+          run.vox.push(voxels[id]);
+          voxels[id].col = run;
+          voxels[id].inCol = run.vox.length - 1;
+        } else if (run) {
+          run.attLen = run.vox.length;
+          columns.push(run); run = null;
+        }
+      }
+      if (run) { run.attLen = run.vox.length; columns.push(run); }
+    });
+
+    // となりの柱（拡散用）
+    var colGrid = {};
+    columns.forEach(function (c) { colGrid[c.ix + '_' + c.iz + '_' + c.baseIy] = c; });
+    columns.forEach(function (c) {
+      c.nb = [];
+      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) {
+        // baseIy が近い柱を となりとみなす
+        for (var dy = -2; dy <= 2; dy++) {
+          var o = colGrid[(c.ix + d[0]) + '_' + (c.iz + d[1]) + '_' + (c.baseIy + dy)];
+          if (o) { c.nb.push(o); return; }
+        }
+      });
+    });
+
+    // おともだち（顔つきマスコット）
+    var halfW = (maxX - minX) / 2 * cell;
+    var friendCols = [];
+    var friendBlocks = [];
+    [[-halfW - 2.2, 2.2], [halfW + 2.2, 2.0], [0, halfW + 3.0]].forEach(function (fp, i) {
+      var b = makeBlock({ color: shuffleHue(PASTELS[(Math.random() * 7) | 0], 0.04), w: BW * rand(0.85, 1.1), d: BW * rand(0.85, 1.1) });
+      var col = { base: new THREE.Vector2(fp[0], fp[1]), blocks: [b] };
+      b.col = col; b.idx = 0;
+      friendCols.push(col);
+      friendBlocks.push(b);
+    });
+
+    G.tower = {
+      kind: 'voxel', def: def, cols: friendCols, blocks: friendBlocks,
+      starGiven: false, everCollapsed: false, napT: 0,
+      vox: {
+        mesh: mesh, voxels: voxels, columns: columns, cell: cell,
+        grid: grid, gi: gi, nx: nx, ny: ny, nz: nz, ox: ox, oz: oz,
+        freeList: [], dirtyColor: [], pending: [],
+        center: new THREE.Vector3(0, (maxIy * cell) / 2, 0),
+        maxAttY: maxIy * cell, supportT: 0,
+        comRest: new THREE.Vector2(), comCur: new THREE.Vector2(), attN: n,
+        napThresh: 4, // ずぶぬれ柱の生き残りは最大4セル（物理仕様）なので、それ以下なら「もう倒れた」扱い
+        sfxT: 0
+      }
+    };
+    // おともだちの登場
+    friendBlocks.forEach(function (b, i) {
+      b.state = 'returning';
+      b.retT = -i * 0.15 - 0.2;
+      b.retFrom = new THREE.Vector3(b.col.base.x, 12, b.col.base.y);
+      b.retFromQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(rand(-1, 1), rand(-1, 1), 0));
+    });
+    layoutAttached(0);
+
+    // カメラ
+    var wSize = Math.max(maxX - minX, maxZ - minZ) * cell;
+    cam.targetY = maxIy * cell * 0.45 + 0.5;
+    cam.radius = clamp(Math.max(wSize * 1.25, maxIy * cell * 1.5) + 7, 12, 26);
+    voxT0 = performance.now() / 1000;
+    SFX.pop();
+  }
+
+  /* --- ボクセル物理 --- */
+  var _vP = new THREE.Vector3(), _vQ = new THREE.Quaternion(), _vS = new THREE.Vector3(), _vM = new THREE.Matrix4(), _vE = new THREE.Euler();
+
+  function voxDetach(col, k, extra) {
+    var vx = G.tower.vox;
+    var dl = col.shear.length() || 1;
+    var dx = col.shear.x / dl, dz = col.shear.y / dl;
+    if (dl < 0.05) { var a = rand(0, Math.PI * 2); dx = Math.cos(a); dz = Math.sin(a); }
+    G.tower.everCollapsed = true;
+    for (var j = k; j < col.attLen; j++) {
+      var v = col.vox[j];
+      var hFrac = (j + 1) / col.vox.length;
+      v.st = 2;
+      // いまの見た目位置から出発
+      var f = Math.pow((j + 1) / col.vox.length, 1.15);
+      v.px = col.wx + col.shear.x * f;
+      v.py = GROUND_Y + (col.baseIy + j + 0.5) * vx.cell * 0.98;
+      v.pz = col.wz + col.shear.y * f;
+      v.vx_ = dx * (0.5 + 1.6 * hFrac) + col.shearV.x * 0.5 + rand(-0.5, 0.5) + (extra ? extra.x : 0);
+      v.vy_ = rand(0.2, 0.8);
+      v.vz_ = dz * (0.5 + 1.6 * hFrac) + col.shearV.y * 0.5 + rand(-0.5, 0.5) + (extra ? extra.z : 0);
+      v.ex = 0; v.ey = rand(0, 6.28); v.ez = 0;
+      v.ax = rand(-3, 3) * dz - rand(1, 2) * dz; v.ay = rand(-2, 2); v.az = rand(-3, 3) * dx;
+      v.settle = 0;
+      vx.freeList.push(v);
+      vx.grid[vx.gi(v.ix, v.iy, v.iz)] = -1;
+      vx.attN--;
+    }
+    col.attLen = k;
+    col.shear.multiplyScalar(0.3);
+    col.shearV.multiplyScalar(0.3);
+    vx.supportT = 0.05; // すぐ ささえ再チェック
+    // 音（まとめて鳴らしすぎない）
+    if (vx.sfxT <= 0) { SFX.wheee(); SFX.squish(0.5); vx.sfxT = 0.45; }
+  }
+
+  function simulateVox(dt, t) {
+    var tw = G.tower, vx = tw.vox;
+    var cell = vx.cell;
+    vx.sfxT -= dt;
+
+    // --- 重心オフセット（前フレームの見た目から） ---
+    var comOffX = 0, comOffZ = 0, comN = 0;
+
+    // --- 柱ごとの ばね ---
+    var cols = vx.columns;
+    for (var ci = 0; ci < cols.length; ci++) {
+      var col = cols[ci];
+      if (col.attLen <= 0) continue;
+      var len = col.vox.length;
+      var Hc = col.attLen * cell;
+
+      // ぬれ集計 と つぶれ（上から荷重を積む）
+      var wetSum = 0, load = 0;
+      for (var k = col.attLen - 1; k >= 0; k--) {
+        var v = col.vox[k];
+        if (v.wet > 0) { v.wet = Math.max(0, v.wet - dt * 0.004); v.dirty || (v.dirty = 1, vx.dirtyColor.push(v)); }
+        wetSum += v.wet;
+        var soft = lerp(0.02, 0.3, v.wet);
+        v.sq = clamp(1 - load * soft * 0.075 - v.wet * 0.08, 0.55, 1);
+        load += 1 + 2 * v.wet;
+      }
+      var wetAvg = wetSum / col.attLen;
+
+      // よこずれ ばね
+      var stiff = lerp(46, 7, wetAvg) * col.wobble;
+      var fx = col.wetDir.x * wetAvg * 3.4 * clamp(load / 8, 0.3, 1.4);
+      var fz = col.wetDir.y * wetAvg * 3.4 * clamp(load / 8, 0.3, 1.4);
+      // ずぶぬれの柱は ゆっくり ふらふら（つりあいで固まらないように）
+      if (wetAvg > 0.45) {
+        var dA = col.wobble * 9 + t * 0.7;
+        var dK = (wetAvg - 0.45) * 2.6 * clamp(Hc / 4, 0.3, 1.2);
+        fx += Math.cos(dA) * dK;
+        fz += Math.sin(dA) * dK;
+      }
+      fx += G.wind.x * (0.5 + 0.5 * clamp(Hc / 6, 0, 1)) * (1.25 - wetAvg) * 1.1;
+      fz += G.wind.y * (0.5 + 0.5 * clamp(Hc / 6, 0, 1)) * (1.25 - wetAvg) * 1.1;
+      var co = vx.comCur;
+      var coLen = Math.sqrt(co.x * co.x + co.y * co.y);
+      if (coLen > 0.2) {
+        fx += (co.x / coLen) * (coLen - 0.2) * 5.5 * clamp(Hc / 5, 0.3, 1.3);
+        fz += (co.y / coLen) * (coLen - 0.2) * 5.5 * clamp(Hc / 5, 0.3, 1.3);
+      }
+      // クッションのささえ
+      for (var cu = 0; cu < G.cushions.length; cu++) {
+        var cus = G.cushions[cu];
+        var ddx = cus.pos.x - col.wx, ddz = cus.pos.z - col.wz;
+        var ddl = Math.sqrt(ddx * ddx + ddz * ddz);
+        if (ddl > 0.3 && ddl < 3.0) {
+          var nnx = ddx / ddl, nnz = ddz / ddl;
+          var proj = col.shear.x * nnx + col.shear.y * nnz;
+          if (proj > 0.03) {
+            fx -= nnx * proj * 34 * (1 - ddl / 3.0);
+            fz -= nnz * proj * 34 * (1 - ddl / 3.0);
+            cus.press = Math.min(1, cus.press + dt * 2);
+          }
+        }
+      }
+      col.shearV.x += (fx - stiff * col.shear.x * (1 / Math.max(Hc, 0.5)) - 3.4 * col.shearV.x) * dt;
+      col.shearV.y += (fz - stiff * col.shear.y * (1 / Math.max(Hc, 0.5)) - 3.4 * col.shearV.y) * dt;
+      col.shearV.clampLength(0, 8);
+      col.shear.x += col.shearV.x * dt;
+      col.shear.y += col.shearV.y * dt;
+
+      // となりと つながって ゆれる（拡散）
+      if (col.nb.length) {
+        var ax2 = 0, az2 = 0;
+        for (var nbI = 0; nbI < col.nb.length; nbI++) { ax2 += col.nb[nbI].shear.x; az2 += col.nb[nbI].shear.y; }
+        ax2 /= col.nb.length; az2 /= col.nb.length;
+        var mix = Math.min(dt * 3.2, 1);
+        col.shear.x += (ax2 - col.shear.x) * mix * 0.35;
+        col.shear.y += (az2 - col.shear.y) * mix * 0.35;
+      }
+
+      // くずれ判定
+      var lim = Math.max(cell * 2.0, Hc * 0.24) * (1 - 0.45 * wetAvg) * col.wobble;
+      var shLen = col.shear.length();
+      // ずぶぬれで おもすぎる 背の高い柱は「くたっ」と ざくつ
+      var buckle = col.attLen >= 4 && wetAvg > 0.5 && col.vox[0].sq <= 0.6 && Math.random() < dt * 0.9;
+      if (buckle) {
+        voxDetach(col, Math.max(1 + (Math.random() * col.attLen * 0.5 | 0), col.baseIy === 0 ? 1 : 0));
+      } else if (shLen > lim && col.attLen > 0) {
+        // いちばん ぬれている あたりで おれる
+        var bk = 0, bw = -1;
+        for (var k2 = 0; k2 < col.attLen; k2++) {
+          var sc = col.vox[k2].wet + k2 / col.attLen * 0.3 + Math.random() * 0.2;
+          if (sc > bw) { bw = sc; bk = k2; }
+        }
+        voxDetach(col, Math.max(bk, col.baseIy === 0 ? 1 : 0));
+      } else if (shLen > lim * 0.55) {
+        creakLevel = Math.max(creakLevel, clamp((shLen - lim * 0.55) / (lim * 0.45), 0, 1) * 0.8);
+      }
+    }
+
+    // --- ささえ再チェック（宙に浮いた柱は 連鎖でくずれる） ---
+    vx.supportT -= dt;
+    if (vx.supportT <= 0) {
+      vx.supportT = 0.22;
+      for (var ci2 = 0; ci2 < cols.length; ci2++) {
+        var c2 = cols[ci2];
+        if (c2.attLen <= 0 || c2.baseIy === 0 || c2.pend > 0) continue;
+        var supported = vx.grid[vx.gi(c2.ix, c2.baseIy - 1, c2.iz)] >= 0;
+        if (!supported) {
+          var latN = 0;
+          if (vx.grid[vx.gi(c2.ix + 1, c2.baseIy, c2.iz)] >= 0) latN++;
+          if (vx.grid[vx.gi(c2.ix - 1, c2.baseIy, c2.iz)] >= 0) latN++;
+          if (vx.grid[vx.gi(c2.ix, c2.baseIy, c2.iz + 1)] >= 0) latN++;
+          if (vx.grid[vx.gi(c2.ix, c2.baseIy, c2.iz - 1)] >= 0) latN++;
+          var wetHere = c2.vox[0].wet;
+          if (latN === 0 || (latN <= 1 && wetHere > 0.4) || (wetHere > 0.75 && Math.random() < 0.5)) {
+            c2.pend = rand(0.06, 0.4); // ちょっと ためて 連鎖のドラマ
+          }
+        }
+      }
+    }
+    for (var ci3 = 0; ci3 < cols.length; ci3++) {
+      var c3 = cols[ci3];
+      if (c3.pend > 0) {
+        c3.pend -= dt;
+        if (c3.pend <= 0 && c3.attLen > 0) { voxDetach(c3, 0); c3.pend = 0; }
+      }
+    }
+
+    // --- 自由落下ボクセル ---
+    var fl = vx.freeList;
+    // 空間ハッシュ（じめん付近の 反発用）
+    var hash = {};
+    var hc = cell * 1.15;
+    function hkey(x, z) { return ((x / hc) | 0) * 100000 + ((z / hc) | 0); }
+    for (var fi0 = 0; fi0 < fl.length; fi0++) {
+      var v0 = fl[fi0];
+      if (v0.py < cell * 2.5) {
+        var kk = hkey(v0.px, v0.pz);
+        (hash[kk] || (hash[kk] = [])).push(v0);
+      }
+    }
+    for (var fi = fl.length - 1; fi >= 0; fi--) {
+      var v2 = fl[fi];
+      v2.vy_ -= GRAV * dt;
+      var drag = Math.pow(0.88, dt);
+      v2.vx_ *= drag; v2.vz_ *= drag;
+      v2.px += v2.vx_ * dt; v2.py += v2.vy_ * dt; v2.pz += v2.vz_ * dt;
+      v2.ex += v2.ax * dt; v2.ey += v2.ay * dt; v2.ez += v2.az * dt;
+      v2.sq = v2.sq + (1 - v2.sq) * Math.min(dt * 7, 1);
+
+      // ちかくの粒と ふんわり反発
+      if (v2.py < cell * 2.2) {
+        var gx0 = (v2.px / hc) | 0, gz0 = (v2.pz / hc) | 0;
+        for (var ha = -1; ha <= 1; ha++) for (var hb = -1; hb <= 1; hb++) {
+          var arr = hash[(gx0 + ha) * 100000 + (gz0 + hb)];
+          if (!arr) continue;
+          for (var hi2 = 0; hi2 < arr.length; hi2++) {
+            var o2 = arr[hi2];
+            if (o2 === v2) continue;
+            var dxr = v2.px - o2.px, dzr = v2.pz - o2.pz;
+            var dr = Math.sqrt(dxr * dxr + dzr * dzr);
+            if (dr > 0.001 && dr < cell * 0.95) {
+              var pu = (cell * 0.95 - dr) * 1.6 * dt;
+              v2.px += dxr / dr * pu; v2.pz += dzr / dr * pu;
+            }
+          }
+        }
+      }
+
+      // じめん
+      var half = cell * 0.5 * v2.sq;
+      if (v2.py - half < GROUND_Y && v2.vy_ < 0) {
+        v2.py = GROUND_Y + half;
+        var spd = -v2.vy_;
+        var onCu = null;
+        for (var cui = 0; cui < G.cushions.length; cui++) {
+          var cdx2 = v2.px - G.cushions[cui].pos.x, cdz2 = v2.pz - G.cushions[cui].pos.z;
+          if (cdx2 * cdx2 + cdz2 * cdz2 < 2.1) { onCu = G.cushions[cui]; break; }
+        }
+        var rest = onCu ? 0.7 : lerp(0.35, 0.05, v2.wet);
+        v2.vy_ = spd * rest;
+        v2.vx_ *= 0.7; v2.vz_ *= 0.7;
+        v2.ax *= 0.5; v2.ay *= 0.5; v2.az *= 0.5;
+        if (spd > 1.5) {
+          v2.sq = 0.55;
+          if (onCu) { onCu.press = 1; if (vx.sfxT <= 0 && Math.random() < 0.4) { SFX.boing(0.4); vx.sfxT = 0.3; } }
+          else if (vx.sfxT <= 0 && Math.random() < 0.25) {
+            if (v2.wet > 0.5) SFX.splat(); else SFX.squish(0.35);
+            vx.sfxT = 0.3;
+          }
+          if (Math.random() < 0.25 * perfScale) {
+            spawnP(TEX.dot(v2.wet > 0.5 ? '#8ec9ff' : '#ffffff', true), {
+              pos: new THREE.Vector3(v2.px, GROUND_Y + 0.1, v2.pz),
+              vel: new THREE.Vector3(rand(-1, 1), rand(0.8, 1.8), rand(-1, 1)),
+              grav: 5, life: 0.5, size: 0.15, size1: 0.04
+            });
+          }
+        }
+      }
+
+      // ねむる
+      var slow2 = v2.vx_ * v2.vx_ + v2.vy_ * v2.vy_ + v2.vz_ * v2.vz_ < 0.05;
+      if (slow2 && v2.py < GROUND_Y + half + 0.1) {
+        v2.settle += dt;
+        v2.ex = lerp(v2.ex, 0, Math.min(dt * 3, 1));
+        v2.ez = lerp(v2.ez, 0, Math.min(dt * 3, 1));
+        if (v2.settle > 0.7) {
+          v2.st = 3;
+          v2.sq = 1;
+          // 最終の見た目を書き込んで 以後は静止
+          _vP.set(v2.px, GROUND_Y + cell * 0.5, v2.pz);
+          _vQ.setFromEuler(_vE.set(0, v2.ey, 0));
+          _vS.set(1 + 0.08 * v2.wet, 1, 1 + 0.08 * v2.wet);
+          _vM.compose(_vP, _vQ, _vS);
+          vx.mesh.setMatrixAt(v2.id, _vM);
+          fl.splice(fi, 1);
+          continue;
+        }
+      } else v2.settle = 0;
+    }
+    // 動きすぎ防止：多すぎたら 古い子から ねかせる
+    if (fl.length > 700) {
+      for (var ov = 0; ov < fl.length - 700; ov++) fl[ov].settle = 10;
+    }
+
+    // --- 行列の書き込み ---
+    var maxAttY = 0;
+    var comX = 0, comZ = 0, homeX = 0, homeZ = 0;
+    comN = 0;
+    for (var ci4 = 0; ci4 < cols.length; ci4++) {
+      var c4 = cols[ci4];
+      if (c4.attLen <= 0) continue;
+      var y = GROUND_Y + c4.baseIy * cell;
+      var lenF = c4.vox.length;
+      var HcF = Math.max(c4.attLen * cell, 0.001);
+      _vQ.setFromEuler(_vE.set(
+        clamp(c4.shear.y / HcF, -0.4, 0.4) * 0.7, 0,
+        clamp(-c4.shear.x / HcF, -0.4, 0.4) * 0.7
+      ));
+      for (var k3 = 0; k3 < c4.attLen; k3++) {
+        var v3 = c4.vox[k3];
+        var h3 = cell * v3.sq;
+        y += h3;
+        var f3 = Math.pow((k3 + 1) / lenF, 1.15);
+        var px3 = c4.wx + c4.shear.x * f3;
+        var pz3 = c4.wz + c4.shear.y * f3;
+        var sw3 = (1 + (1 - v3.sq) * 0.5 + 0.08 * v3.wet) * cell * 0.96;
+        var sy3 = v3.sq * cell * 0.96;
+        if (v3.st === 0) {
+          var pop3 = clamp((t - voxT0 - v3.birth) / 0.4, 0, 1);
+          pop3 = 1 - Math.pow(1 - pop3, 3);
+          if (pop3 >= 1) v3.st = 1;
+          sw3 *= pop3; sy3 *= pop3;
+          if (sy3 < 0.001) { sw3 = 0.001; sy3 = 0.001; }
+        }
+        _vP.set(px3, y - h3 / 2, pz3);
+        _vS.set(sw3, sy3, sw3);
+        _vM.compose(_vP, _vQ, _vS);
+        vx.mesh.setMatrixAt(v3.id, _vM);
+        comX += px3; comZ += pz3; homeX += c4.wx; homeZ += c4.wz; comN++;
+        if (y > maxAttY) maxAttY = y;
+      }
+    }
+    // 自由落下ぶん
+    for (var fi2 = 0; fi2 < fl.length; fi2++) {
+      var v4 = fl[fi2];
+      _vP.set(v4.px, v4.py, v4.pz);
+      _vQ.setFromEuler(_vE.set(v4.ex, v4.ey, v4.ez));
+      var swF = (1 + (1 - v4.sq) * 0.5) * cell * 0.96;
+      _vS.set(swF, v4.sq * cell * 0.96, swF);
+      _vM.compose(_vP, _vQ, _vS);
+      vx.mesh.setMatrixAt(v4.id, _vM);
+    }
+    vx.mesh.instanceMatrix.needsUpdate = true;
+    vx.maxAttY = maxAttY;
+
+    // 重心オフセット更新（いま積まれている子たちの「おうち」基準）
+    if (comN > 0) {
+      vx.comCur.set(comX / comN - homeX / comN, comZ / comN - homeZ / comN);
+    } else vx.comCur.set(0, 0);
+
+    // ねている子は とてもゆっくり かわく（毎フレーム少しずつ順番に見る）
+    var vAll = vx.voxels;
+    for (var ds = 0; ds < 80 && vAll.length; ds++) {
+      vx.dryIdx = ((vx.dryIdx || 0) + 1) % vAll.length;
+      var dvv = vAll[vx.dryIdx];
+      if (dvv.st === 3 && dvv.wet > 0) {
+        dvv.wet = Math.max(0, dvv.wet - 0.012 * (vAll.length / 80) * dt);
+        if (!dvv.dirty) { dvv.dirty = 1; vx.dirtyColor.push(dvv); }
+      }
+    }
+
+    // 色の更新
+    if (vx.dirtyColor.length) {
+      for (var dci = 0; dci < vx.dirtyColor.length; dci++) {
+        var dv = vx.dirtyColor[dci];
+        dv.dirty = 0;
+        tmpWetColor.copy(dv.color);
+        tmpWetDeep.copy(dv.color).multiplyScalar(0.5).lerp(tmpWetBlue, 0.2);
+        tmpWetColor.lerp(tmpWetDeep, dv.wet * 0.8);
+        vx.mesh.setColorAt(dv.id, tmpWetColor);
+      }
+      vx.dirtyColor.length = 0;
+      vx.mesh.instanceColor.needsUpdate = true;
+    }
+  }
+  var tmpWetColor = new THREE.Color(), tmpWetDeep = new THREE.Color(), tmpWetBlue = new THREE.Color('#3a5f8a');
+  var voxT0 = 0; // 登場アニメの基準時刻
+
+  /* --- ボクセルへの水・乾燥 --- */
+  function pickVox(cx, cy) {
+    if (!G.tower || G.tower.kind !== 'voxel') return null;
+    ndc.set((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    var hits = raycaster.intersectObject(G.tower.vox.mesh, false);
+    if (!hits.length) return null;
+    return { vi: hits[0].instanceId, point: hits[0].point, dist: hits[0].distance };
+  }
+
+  function wetVoxel(v, amount, hitPoint) {
+    var vx = G.tower.vox;
+    var before = v.wet;
+    v.wet = clamp(v.wet + amount, 0, 1);
+    if (v.wet !== before && !v.dirty) { v.dirty = 1; vx.dirtyColor.push(v); }
+    if (v.col && hitPoint) {
+      var dxw = hitPoint.x - v.col.wx, dzw = hitPoint.z - v.col.wz;
+      var dlw = Math.sqrt(dxw * dxw + dzw * dzw);
+      if (dlw > 0.1) {
+        v.col.wetDir.x = lerp(v.col.wetDir.x, dxw / dlw, 0.12);
+        v.col.wetDir.y = lerp(v.col.wetDir.y, dzw / dlw, 0.12);
+      }
+    }
+  }
+
+  function applyWaterVox(hit, rate, dt) {
+    var vx = G.tower.vox;
+    var v = vx.voxels[hit.vi];
+    if (v.st === 1 || v.st === 0) {
+      wetVoxel(v, rate * dt, hit.point);
+      // まわりと したに しみる
+      var dirs = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]];
+      for (var d = 0; d < dirs.length; d++) {
+        var id2 = vx.grid[vx.gi(v.ix + dirs[d][0], v.iy + dirs[d][1], v.iz + dirs[d][2])];
+        if (id2 >= 0) wetVoxel(vx.voxels[id2], rate * dt * 0.55, hit.point);
+      }
+      var below = vx.grid[vx.gi(v.ix, v.iy - 1, v.iz)];
+      if (below >= 0) wetVoxel(vx.voxels[below], rate * dt * 0.5, null);
+    } else if (v.st === 3) {
+      wetVoxel(v, rate * dt, null);
+    }
+    if (Math.random() < dt * 18 * perfScale) {
+      spawnP(TEX.dot('#aaddff', true), {
+        pos: hit.point.clone(),
+        vel: new THREE.Vector3(rand(-1, 1), rand(0.5, 1.5), rand(-1, 1)),
+        grav: 5, life: 0.5, size: 0.13, size1: 0.04
+      });
+    }
+    addPuddle(hit.point.x, hit.point.z, rate * dt * 0.7);
+  }
+
+  function applyDryVox(hit, dt) {
+    var vx = G.tower.vox;
+    var v = vx.voxels[hit.vi];
+    var did = false;
+    var around = [[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]];
+    for (var d = 0; d < around.length; d++) {
+      var id2 = vx.grid[vx.gi(v.ix + around[d][0], v.iy + around[d][1], v.iz + around[d][2])];
+      if (id2 >= 0) {
+        var v2 = vx.voxels[id2];
+        if (v2.wet > 0) {
+          v2.wet = Math.max(0, v2.wet - dt * 0.55);
+          if (!v2.dirty) { v2.dirty = 1; vx.dirtyColor.push(v2); }
+          did = true;
+        }
+      }
+    }
+    if (v.st === 3 && v.wet > 0) {
+      v.wet = Math.max(0, v.wet - dt * 0.55);
+      if (!v.dirty) { v.dirty = 1; vx.dirtyColor.push(v); }
+      did = true;
+    }
+    if (did && Math.random() < dt * 10 * perfScale) {
+      spawnP(TEX.dot('#ffffff', true), {
+        pos: hit.point.clone().add(new THREE.Vector3(rand(-0.2, 0.2), 0.15, rand(-0.2, 0.2))),
+        vel: new THREE.Vector3(rand(-0.2, 0.2), rand(0.7, 1.4), rand(-0.2, 0.2)),
+        grav: -0.5, life: 1, size: 0.22, size1: 0.6, opacity: 0.7
+      });
+      SFX.steam();
+    }
+  }
+
+  /* --- ボクセルの おやすみ判定 --- */
+  function updateNapVox(dt) {
+    var tw = G.tower, vx = tw.vox;
+    if (tw.starGiven || !tw.everCollapsed) return;
+    // たかいところに のこっている柱が あるか
+    var high = 0;
+    for (var i = 0; i < vx.columns.length; i++) {
+      var c = vx.columns[i];
+      if (c.attLen > 0 && c.baseIy + c.attLen - 1 >= vx.napThresh) high++;
+    }
+    if (high > 0 || vx.freeList.length > 0) { tw.napT = 0; return; }
+    tw.napT += dt;
+    if (tw.napT > 1.2) {
+      // のこった みじかい柱たちも すやすや（波のように ねていく）
+      var slept = 0, remain = 0;
+      for (var i2 = 0; i2 < vx.columns.length; i2++) {
+        var c2 = vx.columns[i2];
+        if (c2.attLen <= 0) continue;
+        remain++;
+        if (slept < 10) {
+          for (var k = 0; k < c2.attLen; k++) {
+            var v = c2.vox[k];
+            v.st = 3;
+            _vP.set(c2.wx, GROUND_Y + (c2.baseIy + k + 0.5) * vx.cell, c2.wz);
+            _vQ.identity();
+            _vS.set(vx.cell * 0.96, vx.cell * 0.96, vx.cell * 0.96);
+            _vM.compose(_vP, _vQ, _vS);
+            vx.mesh.setMatrixAt(v.id, _vM);
+            vx.grid[vx.gi(v.ix, v.iy, v.iz)] = -1;
+          }
+          vx.mesh.instanceMatrix.needsUpdate = true;
+          c2.attLen = 0;
+          slept++;
+          if (Math.random() < 0.4) {
+            spawnP(TEX.sparkle('#fff2b0'), {
+              pos: new THREE.Vector3(c2.wx, GROUND_Y + 1, c2.wz),
+              vel: new THREE.Vector3(0, 0.6, 0), life: 0.8, size: 0.3, size1: 0.04
+            });
+          }
+        }
+      }
+      if (remain === 0) {
+        tw.starGiven = true;
+        celebrate();
+      }
+    }
+  }
+
+  /* --- ボクセル塔の たてなおし --- */
+  function rebuildVoxelTower() {
+    var tw = G.tower, vx = tw.vox;
+    tw.starGiven = false;
+    tw.everCollapsed = false;
+    tw.napT = 0;
+    voxT0 = performance.now() / 1000;
+    // 柱の復元
+    vx.freeList.length = 0;
+    vx.pending.length = 0;
+    vx.grid.fill(-1);
+    vx.columns.forEach(function (c) {
+      c.attLen = c.vox.length;
+      c.shear.set(0, 0); c.shearV.set(0, 0);
+      c.wetDir.set(0, 0); c.pend = 0;
+      c.wobble = rand(0.8, 1.25);
+    });
+    vx.voxels.forEach(function (v) {
+      v.st = 0; v.sq = 1; v.settle = 0;
+      v.birth = v.iy * 0.055 + Math.random() * 0.35;
+      if (v.wet > 0) { v.wet = 0; if (!v.dirty) { v.dirty = 1; vx.dirtyColor.push(v); } }
+      vx.grid[vx.gi(v.ix, v.iy, v.iz)] = v.id;
+    });
+    vx.attN = vx.voxels.length;
+    // おともだちも もどす
+    tw.blocks.forEach(function (b, i) {
+      b.wet = 0; b.dirty = true; b.wetDir.set(0, 0);
+      b.squash = 1; b.squashV = 0;
+      b.shear.set(0, 0); b.shearV.set(0, 0);
+      b.faceStyle = Math.random() * 3 | 0; b.expr = '';
+      refreshWetLook(b);
+      b.state = 'returning';
+      b.retT = -i * 0.1;
+      b.retFrom = b.mesh.position.clone();
+      b.retFromQ = b.mesh.quaternion.clone();
+      b.landed = false; b.napTimer = 0;
+      setExpr(b, 'joy');
+    });
+    layoutAttached(0);
+    SFX.chime();
+  }
+
   /* ================= ゲーム状態 ================= */
   var G = {
     screen: 'title',           // title | select | play
@@ -671,6 +1617,11 @@
     G.tower.blocks.forEach(function (b) {
       scene.remove(b.mesh);
     });
+    if (G.tower.kind === 'voxel' && G.tower.vox) {
+      scene.remove(G.tower.vox.mesh);
+      G.tower.vox.mesh.dispose();
+      G.tower.vox.mesh.material.dispose();
+    }
     G.tower = null;
   }
 
@@ -863,7 +1814,12 @@
     simulateFree(dt);
     simulateAsleep(dt, t);
     simulateReturning(dt);
-    updateNap(dt);
+    if (G.tower.kind === 'voxel') {
+      simulateVox(dt, t);
+      updateNapVox(dt);
+    } else {
+      updateNap(dt);
+    }
   }
 
   function detachAbove(col, att, k) {
@@ -1109,6 +2065,7 @@
     var c = new THREE.Vector3();
     var n = 0;
     if (G.tower) {
+      if (G.tower.kind === 'voxel') return G.tower.vox.center.clone();
       G.tower.blocks.forEach(function (b) { c.add(b.mesh.position); n++; });
       if (n) c.multiplyScalar(1 / n);
     }
@@ -1206,7 +2163,7 @@
     if (hits.length) {
       var m = hits[0].object;
       for (var i = 0; i < G.tower.blocks.length; i++) {
-        if (G.tower.blocks[i].mesh === m) return { block: G.tower.blocks[i], point: hits[0].point };
+        if (G.tower.blocks[i].mesh === m) return { block: G.tower.blocks[i], point: hits[0].point, dist: hits[0].distance };
       }
     }
     return null;
@@ -1255,11 +2212,13 @@
 
   function applyWater(cx, cy, dt) {
     var hit = pickBlock(cx, cy);
+    var vhit = pickVox(cx, cy);
+    if (hit && vhit) { if (vhit.dist < hit.dist) hit = null; else vhit = null; }
     pourHold = Math.min(pourHold + dt, 2);
     var rate = 0.35 + pourHold * 0.45; // ながおしで だんだん たっぷり
     SFX.pour(clamp(0.4 + pourHold * 0.3, 0, 1));
 
-    var target = hit ? hit.point : pickGround(cx, cy);
+    var target = hit ? hit.point : (vhit ? vhit.point : pickGround(cx, cy));
     if (!target) { can.visible = false; return; }
 
     // じょうろの位置：ターゲット上空、カメラの右側から注ぐ
@@ -1315,6 +2274,8 @@
       }
       if (before < 0.99 && b.wet >= 0.99) SFX.squish(0.5);
       addPuddle(b.mesh.position.x, b.mesh.position.z, rate * dt * 0.8);
+    } else if (vhit) {
+      applyWaterVox(vhit, rate, dt);
     } else if (target) {
       addPuddle(target.x, target.z, rate * dt);
     }
@@ -1322,12 +2283,15 @@
 
   function applyDry(cx, cy, dt) {
     var hit = pickBlock(cx, cy);
-    var target = hit ? hit.point : pickGround(cx, cy);
+    var vhit = pickVox(cx, cy);
+    if (hit && vhit) { if (vhit.dist < hit.dist) hit = null; else vhit = null; }
+    var target = hit ? hit.point : (vhit ? vhit.point : pickGround(cx, cy));
     if (!target) { sunSprite.visible = false; return; }
     sunSprite.visible = true;
     sunSprite.position.copy(target).add(new THREE.Vector3(0, 1.6, 0));
     sunSprite.material.rotation += dt * 1.2;
 
+    if (vhit) applyDryVox(vhit, dt);
     if (hit) {
       var b = hit.block;
       if (b.wet > 0) {
@@ -1416,6 +2380,7 @@
     var mode = 'tool';
     if (tool !== TOOL.WIND) {
       var hitB = pickBlock(e.clientX, e.clientY);
+      var hitV = pickVox(e.clientX, e.clientY);
       var hitG = pickGround(e.clientX, e.clientY);
       var nearTower = false;
       if (hitG && G.tower) {
@@ -1423,8 +2388,9 @@
           var base = G.tower.cols[i].base;
           if (Math.hypot(hitG.x - base.x, hitG.z - base.y) < 7) { nearTower = true; break; }
         }
+        if (G.tower.kind === 'voxel' && Math.hypot(hitG.x, hitG.z) < 11) nearTower = true;
       }
-      if (!hitB && !(nearTower || tool === TOOL.CUSHION && hitG)) mode = 'cam';
+      if (!hitB && !hitV && !(nearTower || tool === TOOL.CUSHION && hitG)) mode = 'cam';
     }
     toolTouch = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, mode: mode, downT: performance.now(), moved: 0 };
     pourHold = 0;
@@ -1487,7 +2453,11 @@
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
   window.addEventListener('pointercancel', onUp);
-  document.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+  document.addEventListener('touchmove', function (e) {
+    // とうえらび画面のスクロールだけは ゆるす
+    if (e.target && e.target.closest && e.target.closest('.selScroll')) return;
+    e.preventDefault();
+  }, { passive: false });
   document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
   window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
@@ -1522,17 +2492,21 @@
 
   /* タイトル・セレクト画面の生成 */
   (function buildSelect() {
-    var grid = $('#towerGrid');
-    TOWERS.forEach(function (def) {
-      var card = document.createElement('button');
-      card.className = 'towerCard';
-      card.innerHTML = '<span class="tIcon">' + def.icon + '</span><span class="tLabel">' + def.label + '</span>';
-      card.addEventListener('pointerup', function () {
-        SFX.unlock(); SFX.ting(3);
-        startPlay(def);
+    function fill(gridSel, defs) {
+      var grid = $(gridSel);
+      defs.forEach(function (def) {
+        var card = document.createElement('button');
+        card.className = 'towerCard';
+        card.innerHTML = '<span class="tIcon">' + def.icon + '</span><span class="tLabel">' + def.label + '</span>';
+        card.addEventListener('pointerup', function () {
+          SFX.unlock(); SFX.ting(3);
+          startPlay(def);
+        });
+        grid.appendChild(card);
       });
-      grid.appendChild(card);
-    });
+    }
+    fill('#towerGrid', TOWERS);
+    fill('#voxGrid', VOXTOWERS);
   })();
 
   function startPlay(def) {
@@ -1542,7 +2516,8 @@
     G.cushions = [];
     G.windTarget.set(0, 0);
     G.wind.set(0, 0);
-    buildTower(def);
+    if (def.kind === 'voxel') buildVoxelTower(def);
+    else buildTower(def);
     pulseRebuild(false);
     updateStarUI(false);
   }
@@ -1561,7 +2536,8 @@
     if (!G.tower) return;
     SFX.ting(5);
     pulseRebuild(false);
-    rebuildTower();
+    if (G.tower.kind === 'voxel') rebuildVoxelTower();
+    else rebuildTower();
   });
 
   function rebuildTower() {
@@ -1662,19 +2638,36 @@
   window.addEventListener('orientationchange', function () { setTimeout(resize, 300); });
   resize();
 
+  var fpsAcc = 0, fpsN = 0;
   function frame(nowMs) {
     requestAnimationFrame(frame);
-    var dt = Math.min((nowMs - lastT) / 1000, 0.033);
+    var rawDt = (nowMs - lastT) / 1000;
+    var dt = Math.min(rawDt, 0.033);
     lastT = nowMs;
     var t = nowMs / 1000;
+
+    // パフォーマンス見はり：かくつく端末では 粒子と影を自動でひかえめに
+    fpsAcc += rawDt; fpsN++;
+    if (fpsAcc > 3) {
+      var avgFps = fpsN / fpsAcc;
+      if (avgFps < 20 && perfScale > 0.5) {
+        perfScale = 0.4;
+        if (G.tower && G.tower.kind === 'voxel') G.tower.vox.mesh.castShadow = false;
+      }
+      fpsAcc = 0; fpsN = 0;
+    }
 
     // カメラ：塔がひくくなったら、ゆっくり目線もおりる
     if (G.screen === 'play' && G.tower) {
       var hi = 1.5;
-      G.tower.blocks.forEach(function (b) {
-        if (b.state === 'attached' || b.state === 'asleep') hi = Math.max(hi, b.mesh.position.y);
-        else if (b.state === 'returning' && b.homePos) hi = Math.max(hi, b.homePos.y);
-      });
+      if (G.tower.kind === 'voxel') {
+        hi = Math.max(hi, G.tower.vox.maxAttY);
+      } else {
+        G.tower.blocks.forEach(function (b) {
+          if (b.state === 'attached' || b.state === 'asleep') hi = Math.max(hi, b.mesh.position.y);
+          else if (b.state === 'returning' && b.homePos) hi = Math.max(hi, b.homePos.y);
+        });
+      }
       var desired = clamp(hi * 0.5 + 1.2, 1.9, 8.5);
       cam.targetY = lerp(cam.targetY, desired, Math.min(dt * 0.8, 1));
     }
@@ -1727,8 +2720,9 @@
 
   /* 開発・自動テスト用フック（ゲームには影響しない） */
   window.__SPONGE__ = {
+    tier: VOXTIER,
     state: function () {
-      return {
+      var out = {
         screen: G.screen,
         stars: G.stars,
         blocks: G.tower ? G.tower.blocks.map(function (b) {
@@ -1739,6 +2733,60 @@
           };
         }) : []
       };
+      if (G.tower && G.tower.kind === 'voxel') {
+        var vx = G.tower.vox;
+        var att = 0, free = vx.freeList.length, asleep = 0, asm = 0;
+        vx.voxels.forEach(function (v) {
+          if (v.st === 0) asm++;
+          else if (v.st === 1) att++;
+          else if (v.st === 3) asleep++;
+        });
+        out.vox = { total: vx.voxels.length, assembling: asm, attached: att, free: free, asleep: asleep, cell: +vx.cell.toFixed(3) };
+      }
+      return out;
+    },
+    /* テスト用：ぬれ具合の合計 */
+    wetSum: function () {
+      if (!G.tower) return 0;
+      if (G.tower.kind === 'voxel') {
+        var s = 0;
+        G.tower.vox.voxels.forEach(function (v) { s += v.wet; });
+        return +s.toFixed(2);
+      }
+      var s2 = 0;
+      G.tower.blocks.forEach(function (b) { s2 += b.wet; });
+      return +s2.toFixed(2);
+    },
+    /* テスト用：のこっている柱の内訳 */
+    cols: function () {
+      if (!G.tower || G.tower.kind !== 'voxel') return [];
+      return G.tower.vox.columns.filter(function (c) { return c.attLen > 0; }).map(function (c) {
+        return { ix: c.ix, iz: c.iz, baseIy: c.baseIy, attLen: c.attLen, top: c.baseIy + c.attLen - 1, wet0: +c.vox[0].wet.toFixed(2), shear: +c.shear.length().toFixed(2), pend: c.pend };
+      });
+    },
+    /* テスト用：ぜんぶ ぬらす */
+    wetAll: function (amount) {
+      if (!G.tower) return;
+      if (G.tower.kind === 'voxel') {
+        var vx = G.tower.vox;
+        vx.voxels.forEach(function (v) {
+          if (v.st <= 1) {
+            v.wet = clamp(v.wet + amount, 0, 1);
+            if (!v.dirty) { v.dirty = 1; vx.dirtyColor.push(v); }
+          }
+        });
+        vx.columns.forEach(function (c) {
+          if (c.attLen > 0) c.wetDir.set(rand(-1, 1), rand(-1, 1)).normalize();
+        });
+      } else {
+        G.tower.blocks.forEach(function (b) {
+          if (b.state === 'attached') {
+            b.wet = clamp(b.wet + amount, 0, 1);
+            b.dirty = true;
+            if (b.wetDir.lengthSq() < 0.01) b.wetDir.set(rand(-1, 1), rand(-1, 1)).normalize();
+          }
+        });
+      }
     }
   };
 })();
