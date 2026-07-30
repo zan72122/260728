@@ -34,17 +34,18 @@
       neighbors: [],
       sockets: [{ b: 0, col: 0.5, row: 0 }, { b: 0, col: 0.5, row: 4 }],
       zone: { l: -320, r: 320 },
-      dustGreen: 60,
+      dustGreen: 80,
       hintPlace: 'ひかるところを たっぷ！',
       hintBoom: 'したから じゅんばんに！',
     },
     {
       id: 3, name: 'となりにおうち', emoji: '🏡',
       buildings: [{ x: -70, cols: 3, rows: 6, palette: PALETTES.coral }],
-      neighbors: [{ x: 250, w: 170, h: 140, color: '#ffe0a3', roof: '#e07a5f' }],
+      neighbors: [{ x: 270, w: 170, h: 140, color: '#ffe0a3', roof: '#e07a5f' }],
       sockets: [{ b: 0, col: 0, row: 0 }, { b: 0, col: 0, row: 3 }],
       zone: { l: -460, r: 118 },
       dustGreen: 60,
+      clearRatio: 0.5, /* がれきの山を少しゆるめに許容 */
       hintPlace: 'ひかるところを たっぷ！',
       hintBoom: 'おうちの ないほうへ たおそう！',
     },
@@ -66,8 +67,8 @@
       id: 5, name: 'はさまれビル', emoji: '🏬',
       buildings: [{ x: 0, cols: 2, rows: 8, palette: PALETTES.lemon }],
       neighbors: [
-        { x: -210, w: 160, h: 205, color: "#d9f2c8", roof: "#5a9367" },
-        { x: 210, w: 160, h: 205, color: "#ffd9e8", roof: "#c05780" },
+        { x: -225, w: 160, h: 205, color: "#d9f2c8", roof: "#5a9367" },
+        { x: 225, w: 160, h: 205, color: "#ffd9e8", roof: "#c05780" },
       ],
       sockets: [{ b: 0, col: 0.5, row: 0 }, { b: 0, col: 0.5, row: 4 }],
       zone: { l: -128, r: 128 },
@@ -85,11 +86,12 @@
         { b: 0, col: 1.5, row: 6 },
       ],
       zone: { l: -440, r: 260 },
-      dustGreen: 100,
+      dustGreen: 110,
+      clearRatio: 0.5, /* がれきの山を少しゆるめに許容 */
       hintPlace: 'ひかるところを たっぷ！',
       hintBoom: 'したから じゅんばんに ゆっくり！',
     },
   ];
 
-  window.GameLevels = { LEVELS, B, GROUND_Y: 600 };
+  window.GameLevels = { LEVELS, PALETTES, B, GROUND_Y: 600 };
 })();

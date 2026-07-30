@@ -44,43 +44,53 @@
       state.neighbors.push({ spec: n, body, hit: false });
     });
 
-    /* 解体する建物：ブロックの積み上げ（起爆までは static で安定） */
-    level.buildings.forEach((spec, bi) => {
-      const blocks = [];
+    /* ブロック1個を生成して登録する。
+     * 動的ボディとして作ってから凍結する（生成時 isStatic:true だと
+     * setStatic(false) で質量が復元されず物理が壊れるため） */
+    function makeBlock(spec, bi, col, row, palette) {
       const left = spec.x - (spec.cols * B) / 2;
-      for (let row = 0; row < spec.rows; row++) {
-        for (let col = 0; col < spec.cols; col++) {
-          const x = left + col * B + B / 2;
-          const y = GROUND_Y - B / 2 - row * B;
-          /* 動的ボディとして作ってから凍結する（生成時 isStatic:true だと
-           * setStatic(false) で質量が復元されず物理が壊れるため） */
-          const body = Bodies.rectangle(x, y, B, B, {
-            friction: 0.9, frictionStatic: 5, restitution: 0.02,
-            label: 'block',
-          });
-          Body.setStatic(body, true);
-          body.plugin.meta = {
-            bi, col, row,
-            window: (row + col) % 2 === 0 && row > 0,
-            removed: false,
-          };
-          Composite.add(engine.world, body);
-          blocks.push(body);
-        }
-      }
-      state.buildings.push({ spec, blocks });
-    });
+      const x = left + col * B + B / 2;
+      const y = GROUND_Y - B / 2 - row * B;
+      const body = Bodies.rectangle(x, y, B, B, {
+        friction: 0.9, frictionStatic: 5, restitution: 0.02,
+        label: 'block',
+      });
+      Body.setStatic(body, true);
+      body.plugin.meta = {
+        bi, col, row, palette,
+        window: (row + col) % 2 === 0 && row > 0,
+        removed: false,
+      };
+      Composite.add(engine.world, body);
+      return body;
+    }
 
-    /* 爆破装置ソケットのワールド座標 */
-    level.sockets.forEach((s, i) => {
+    /* 解体する建物：ブロックの積み上げ */
+    if (level.customBlocks) {
+      /* 建築モード：任意配置のブロックリストから生成 */
+      const spec = level.buildings[0];
+      const blocks = level.customBlocks.map((cb) =>
+        makeBlock(spec, 0, cb.col, cb.row, cb.palette));
+      state.buildings.push({ spec, blocks });
+    } else {
+      level.buildings.forEach((spec, bi) => {
+        const blocks = [];
+        for (let row = 0; row < spec.rows; row++) {
+          for (let col = 0; col < spec.cols; col++) {
+            blocks.push(makeBlock(spec, bi, col, row, null));
+          }
+        }
+        state.buildings.push({ spec, blocks });
+      });
+    }
+
+    /* おすすめポイント（ヒント）のワールド座標 */
+    level.sockets.forEach((s) => {
       const spec = level.buildings[s.b];
       const left = spec.x - (spec.cols * B) / 2;
       state.sockets.push({
-        index: i,
         x: left + s.col * B + B / 2,
         y: GROUND_Y - B / 2 - s.row * B,
-        status: 'empty', /* empty → armed → lit → done */
-        fuseT: 0,
       });
     });
 
@@ -152,6 +162,7 @@
       for (const blk of state.toCrumble) {
         if (blk.plugin.meta && !blk.plugin.meta.removed) {
           blk.plugin.meta.removed = true;
+          blk.plugin.meta.removedBy = 'crumble';
           Composite.remove(state.engine.world, blk);
           if (state.onCrumble) state.onCrumble(blk.position.x, blk.position.y, blk);
         }
@@ -169,8 +180,8 @@
   }
   physics.activeBlocks = activeBlocks;
 
-  /* 起爆：近傍ブロックを破壊し、周辺を吹き飛ばす */
-  physics.detonate = function (state, socket) {
+  /* 起爆：pos（ワールド座標）の近傍ブロックを破壊し、周辺を吹き飛ばす */
+  physics.detonate = function (state, pos) {
     if (!state.awake) {
       state.awake = true;
       for (const blk of activeBlocks(state)) Body.setStatic(blk, false);
@@ -178,11 +189,12 @@
     let destroyed = 0;
     for (const blk of activeBlocks(state)) {
       Sleeping.set(blk, false);
-      const dx = blk.position.x - socket.x;
-      const dy = blk.position.y - socket.y;
+      const dx = blk.position.x - pos.x;
+      const dy = blk.position.y - pos.y;
       const d = Math.hypot(dx, dy);
       if (d < DESTROY_R) {
         blk.plugin.meta.removed = true;
+        blk.plugin.meta.removedBy = 'blast';
         Composite.remove(state.engine.world, blk);
         destroyed++;
       } else if (d < PUSH_R) {
@@ -195,7 +207,6 @@
         Body.setAngularVelocity(blk, (Math.random() - 0.5) * 0.25);
       }
     }
-    socket.status = 'done';
     return destroyed;
   };
 

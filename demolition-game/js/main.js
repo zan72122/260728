@@ -10,7 +10,7 @@
   const canvas = document.getElementById('game-canvas');
   window.GameRender.init(canvas);
 
-  let scene = 'title'; /* title | select | play */
+  let scene = 'title'; /* title | select | play | build */
   let currentLevel = null;
   let backdrop = null; /* タイトル/選択画面の背景用3Dシーン */
 
@@ -34,23 +34,37 @@
 
   /* ---------- シーン切り替え ---------- */
   function gotoTitle() {
-    if (scene === 'play') { backdrop = null; showBackdrop(); }
     scene = 'title';
     game.stop();
+    window.GameBuild.exit();
+    showBackdrop();
     ui.hide('hud');
     ui.showOnly('scr-title');
   }
 
   function gotoSelect() {
-    if (scene === 'play') { backdrop = null; showBackdrop(); }
     scene = 'select';
     game.stop();
+    window.GameBuild.exit();
+    showBackdrop();
     ui.hide('hud');
     ui.buildLevelGrid(LEVELS, stars, (lv) => {
       audio.play('tap');
       startLevel(lv);
+    }, () => {
+      audio.play('tap');
+      gotoBuild();
     });
     ui.showOnly('scr-select');
+  }
+
+  function gotoBuild() {
+    scene = 'build';
+    game.stop();
+    ui.showOnly(null);
+    ui.show('hud');
+    ui.setDust(0, 60);
+    window.GameBuild.enter();
   }
 
   function startLevel(level) {
@@ -61,7 +75,13 @@
     game.start(level);
   }
 
+  window.GameBuild.onStartDemolition = (level) => startLevel(level);
+
   game.events.onCleared = (earned, comment) => {
+    if (currentLevel.sandbox) {
+      setTimeout(() => ui.showSandboxResult(comment), 700);
+      return;
+    }
     const prev = stars[currentLevel.id] || 0;
     if (earned > prev) { stars[currentLevel.id] = earned; saveStars(); }
     const hasNext = LEVELS.some((lv) => lv.id === currentLevel.id + 1);
@@ -92,13 +112,25 @@
   });
   onTap('btn-back-title', () => { audio.play('tap'); gotoTitle(); });
   onTap('btn-home', () => { audio.play('tap'); gotoSelect(); });
-  onTap('btn-retry', () => { audio.play('tap'); startLevel(currentLevel); });
+  onTap('btn-retry', () => {
+    audio.play('tap');
+    if (currentLevel && currentLevel.sandbox) gotoBuild(); /* もういちど たてる */
+    else startLevel(currentLevel);
+  });
   onTap('btn-fail-retry', () => { audio.play('tap'); startLevel(currentLevel); });
   onTap('btn-next', () => {
     audio.play('tap');
+    if (currentLevel && currentLevel.sandbox) { /* さいしょから */
+      window.GameBuild.layout.clear();
+      gotoBuild();
+      return;
+    }
     const next = LEVELS.find((lv) => lv.id === currentLevel.id + 1);
     if (next) startLevel(next); else gotoSelect();
   });
+  onTap('btn-go', () => game.startBoom());
+  onTap('btn-build-done', () => { audio.play('tap'); window.GameBuild.startDemolition(); });
+  onTap('btn-build-clear', () => window.GameBuild.clearAll());
   onTap('btn-mute', () => {
     audio.setMuted(!audio.muted);
     ui.setMuteIcon(audio.muted);
@@ -109,6 +141,7 @@
     e.preventDefault();
     audio.unlock();
     if (scene === 'play') game.tap(e.clientX, e.clientY);
+    else if (scene === 'build') window.GameBuild.tap(e.clientX, e.clientY);
   });
 
   /* スクロール・ダブルタップズームの抑止 */
@@ -125,6 +158,8 @@
     if (scene === 'play') {
       game.update(dt, time);
       game.draw(time);
+    } else if (scene === 'build' && window.GameBuild.pstate) {
+      window.GameRender.render(window.GameBuild.pstate, time, { showSockets: false, pulseBombs: false });
     } else if (backdrop) {
       window.GameRender.render(backdrop, time, { showSockets: false, pulseBombs: false });
     }

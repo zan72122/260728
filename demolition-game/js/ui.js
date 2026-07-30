@@ -12,7 +12,8 @@
   ui.init = function () {
     ['hud', 'dust-fill', 'msg-banner', 'tutor-hand', 'scr-title', 'scr-select',
      'scr-result', 'scr-fail', 'level-grid', 'result-title', 'result-stars',
-     'result-comment', 'btn-mute', 'btn-next'].forEach((id) => {
+     'result-comment', 'btn-mute', 'btn-next', 'btn-go', 'btn-retry',
+     'build-bar', 'palette-row', 'btn-build-done', 'dust-meter'].forEach((id) => {
       ui.els[id] = $(id);
     });
   };
@@ -57,8 +58,38 @@
     el.classList.remove('hidden');
   };
   ui.hideHand = function () { ui.els['tutor-hand'].classList.add('hidden'); };
+  ui.handAtGo = function () {
+    const r = ui.els['btn-go'].getBoundingClientRect();
+    if (r.width > 0) ui.handAt(r.left + r.width / 2 + 24, r.top + 6);
+  };
 
-  ui.buildLevelGrid = function (levels, stars, onPick) {
+  /* 「ばくは かいし！」ボタン */
+  ui.showGo = function () { ui.els['btn-go'].classList.remove('hidden'); };
+  ui.hideGo = function () { ui.els['btn-go'].classList.add('hidden'); };
+
+  /* ---------- 建築モードのツールバー ---------- */
+  ui.showBuildBar = function (palettes, selIdx, onPick) {
+    const row = ui.els['palette-row'];
+    row.innerHTML = '';
+    palettes.forEach((p, i) => {
+      const dot = document.createElement('button');
+      dot.className = 'pal-dot' + (i === selIdx ? ' sel' : '');
+      dot.style.background = p.wall;
+      dot.setAttribute('aria-label', 'いろ' + (i + 1));
+      dot.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        row.querySelectorAll('.pal-dot').forEach((d) => d.classList.remove('sel'));
+        dot.classList.add('sel');
+        onPick(i);
+      });
+      row.appendChild(dot);
+    });
+    ui.els['build-bar'].classList.remove('hidden');
+  };
+  ui.hideBuildBar = function () { ui.els['build-bar'].classList.add('hidden'); };
+  ui.setBuildDoneEnabled = function (on) { ui.els['btn-build-done'].disabled = !on; };
+
+  ui.buildLevelGrid = function (levels, stars, onPick, onBuild) {
     const grid = ui.els['level-grid'];
     grid.innerHTML = '';
     levels.forEach((lv) => {
@@ -74,9 +105,28 @@
       btn.addEventListener('pointerdown', (e) => { e.preventDefault(); onPick(lv); });
       grid.appendChild(btn);
     });
+    /* じぶんでつくる（建築モード） */
+    if (onBuild) {
+      const btn = document.createElement('button');
+      btn.className = 'level-btn';
+      btn.id = 'btn-build-mode';
+      btn.innerHTML =
+        '<span class="lv-emoji">🛠️</span>' +
+        '<span class="lv-name">じぶんで つくる</span>' +
+        '<span class="lv-stars">🧱💥</span>';
+      btn.addEventListener('pointerdown', (e) => { e.preventDefault(); onBuild(); });
+      grid.appendChild(btn);
+    }
   };
 
+  function setResultButtons(retryLabel, nextLabel) {
+    ui.els['btn-retry'].textContent = retryLabel;
+    ui.els['btn-next'].textContent = nextLabel;
+  }
+
   ui.showResult = function (stars, comment, hasNext) {
+    setResultButtons('🔁 もういちど', '▶ つぎへ');
+    ui.els['result-stars'].style.display = '';
     ui.els['result-title'].textContent = stars >= 3 ? 'すごーい！' : 'やったね！';
     ui.els['result-comment'].textContent = comment;
     ui.els['btn-next'].style.display = hasNext ? '' : 'none';
@@ -91,6 +141,16 @@
         }, 350 + i * 420);
       }
     });
+    ui.showOnly('scr-result');
+  };
+
+  /* 建築モードのごほうびエンド（星なし） */
+  ui.showSandboxResult = function (comment) {
+    setResultButtons('🔨 もういちど たてる', '🆕 さいしょから');
+    ui.els['result-stars'].style.display = 'none';
+    ui.els['result-title'].textContent = 'ドッカーン！';
+    ui.els['result-comment'].textContent = comment;
+    ui.els['btn-next'].style.display = '';
     ui.showOnly('scr-result');
   };
 

@@ -10,8 +10,9 @@
 
   let renderer, scene, camera;
   let levelGroup = null, fxGroup = null;
-  let blockMeshes = [], socketNodes = [], neighborNodes = [], cloudNodes = [];
-  const fxMap = new Map(); /* パーティクル → Object3D */
+  let blockMeshes = [], hintNodes = [], neighborNodes = [], cloudNodes = [];
+  const fxMap = new Map();   /* パーティクル → Object3D */
+  const bombMap = new Map(); /* 爆弾 → 3Dグループ（ブロックに追従） */
   let fitInfo = null;
 
   const ty = (my) => GROUND_Y - my; /* matter y → three y */
@@ -349,6 +350,20 @@
     };
   };
 
+  /* 画面座標 → z=0 平面上のワールド座標（matter系） */
+  R.worldFromScreen = function (sx, sy) {
+    const v = new THREE.Vector3(
+      (sx / window.innerWidth) * 2 - 1,
+      -(sy / window.innerHeight) * 2 + 1,
+      0.5
+    );
+    v.unproject(camera);
+    const dir = v.sub(camera.position).normalize();
+    const t = -camera.position.z / dir.z;
+    const p = camera.position.clone().addScaledVector(dir, t);
+    return { x: p.x, y: GROUND_Y - p.y };
+  };
+
   /* ---------- シーン構築 ---------- */
   function seeded(i) { /* 決定的な擬似乱数 */
     const x = Math.sin(i * 127.1 + 311.7) * 43758.5453;
@@ -563,10 +578,11 @@
     if (levelGroup) { scene.remove(levelGroup); }
     if (fxGroup) { scene.remove(fxGroup); }
     fxMap.clear();
+    bombMap.clear();
     levelGroup = new THREE.Group();
     fxGroup = new THREE.Group();
     blockMeshes = [];
-    socketNodes = [];
+    hintNodes = [];
     neighborNodes = [];
     cloudNodes = [];
 
@@ -582,7 +598,8 @@
     for (const bld of state.buildings) {
       for (const blk of bld.blocks) {
         const meta = blk.plugin.meta;
-        const mesh = new THREE.Mesh(blockGeo(), blockMats(bld.spec.palette, meta.window));
+        const pal = meta.palette || bld.spec.palette;
+        const mesh = new THREE.Mesh(blockGeo(), blockMats(pal, meta.window));
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         mesh.userData.body = blk;
@@ -591,16 +608,31 @@
       }
     }
 
-    /* ソケット & 爆弾 */
+    /* おすすめポイント（ヒント）の光るリング */
     for (const s of state.sockets) {
       const marker = makeSocketMarker();
       marker.position.set(s.x, ty(s.y), B / 2 + 14);
-      const bomb = makeBombGroup();
-      bomb.position.set(s.x, ty(s.y) - 6, B / 2 + 12);
-      bomb.visible = false;
       levelGroup.add(marker);
-      levelGroup.add(bomb);
-      socketNodes.push({ marker, bomb, socket: s });
+      hintNodes.push({ marker, hint: s });
+    }
+
+    /* 建築モードのマス目ガイド */
+    if (state.level.buildGrid) {
+      const gg = state.level.buildGrid;
+      const spec = state.level.buildings[0];
+      const left = spec.x - (spec.cols * B) / 2;
+      const dotMat = cachedMat('gridDot', () => new THREE.SpriteMaterial({
+        map: softTex(), color: 0xffffff, transparent: true,
+        opacity: 0.28, depthWrite: false,
+      }));
+      for (let r = 0; r < gg.rows; r++) {
+        for (let c = 0; c < gg.cols; c++) {
+          const dot = new THREE.Sprite(dotMat);
+          dot.position.set(left + c * B + B / 2, ty(GROUND_Y - B / 2 - r * B), 10);
+          dot.scale.set(10, 10, 1);
+          levelGroup.add(dot);
+        }
+      }
     }
 
     /* たいよう と くも */
@@ -714,28 +746,52 @@
       mesh.rotation.z = -body.angle;
     }
 
-    /* ソケット */
-    for (const node of socketNodes) {
-      const s = node.socket;
-      node.marker.visible = s.status === 'empty' && opts.showSockets;
+    /* おすすめポイント（爆弾がのっているところは消す） */
+    const bombs = opts.bombs || [];
+    for (const node of hintNodes) {
+      const s = node.hint;
+      const covered = bombs.some((b) =>
+        b.status !== 'done' &&
+        Math.hypot(b.host.position.x - s.x, b.host.position.y - s.y) < B * 0.7);
+      node.marker.visible = !!opts.showSockets && !covered;
       if (node.marker.visible) {
         const pulse = 1 + Math.sin(time * 5) * 0.18;
         node.marker.userData.ring.scale.set(70 * pulse, 70 * pulse, 1);
       }
-      node.bomb.visible = s.status === 'armed' || s.status === 'lit';
-      if (node.bomb.visible) {
-        const spark = node.bomb.userData.spark;
-        spark.visible = s.status === 'lit';
-        if (spark.visible) {
-          const ss = 24 + Math.sin(time * 32) * 10;
-          spark.scale.set(ss, ss, 1);
-        }
-        if (s.status === 'armed' && opts.pulseBombs) {
-          const k = 1 + Math.sin(time * 5) * 0.08;
-          node.bomb.scale.set(k, k, k);
-        } else {
-          node.bomb.scale.set(1, 1, 1);
-        }
+    }
+
+    /* 爆弾：ブロックに貼り付いて一緒に動く */
+    const liveBombs = new Set();
+    for (const b of bombs) {
+      if (b.status === 'done') continue;
+      liveBombs.add(b);
+      let grp = bombMap.get(b);
+      if (!grp) {
+        grp = makeBombGroup();
+        levelGroup.add(grp);
+        bombMap.set(b, grp);
+      }
+      const host = b.host;
+      const w = window.GameCore.bombWorldPos(b);
+      grp.position.set(w.x, ty(w.y) - 6, B / 2 + 12);
+      grp.rotation.z = -host.angle;
+      const spark = grp.userData.spark;
+      spark.visible = b.status === 'lit';
+      if (spark.visible) {
+        const ss = 24 + Math.sin(time * 32) * 10;
+        spark.scale.set(ss, ss, 1);
+      }
+      if (b.status === 'armed' && opts.pulseBombs) {
+        const k = 1 + Math.sin(time * 5) * 0.08;
+        grp.scale.set(k, k, k);
+      } else {
+        grp.scale.set(1, 1, 1);
+      }
+    }
+    for (const [b, grp] of bombMap) {
+      if (!liveBombs.has(b)) {
+        levelGroup.remove(grp);
+        bombMap.delete(b);
       }
     }
 
