@@ -189,8 +189,8 @@
     if (!pr) return;
     pr.grow = Math.min(1.6, pr.grow + dt * 0.85);
     pr.mesh.scale.setScalar(pr.grow);
-    pr.top.mass = 0.25 + pr.grow * 1.4;
-    pr.pancake.sticky = Math.min(1, pr.pancake.sticky + dt * 0.5);
+    pr.top.mass = 0.25 + pr.grow * 2.2;
+    pr.pancake.sticky = Math.min(0.9, pr.pancake.sticky + dt * 0.45);
     pr.pancake.recomputeCom();
     if (Math.random() < 0.2) {
       pr.mesh.getWorldPosition(_v);
@@ -229,7 +229,7 @@
     const dir = new V2(p.mesh.position.x - hit.point.x, p.mesh.position.z - hit.point.z);
     if (dir.lengthSq() < 0.001) dir.set(PT.rand(-1, 1), PT.rand(-1, 1));
     dir.normalize();
-    PT.Physics.poke(p, dir, 3.0);
+    PT.Physics.poke(p, dir, 3.2);
     PT.Audio.squish(PT.rand(0.8, 1.3));
     PT.FX.hearts(hit.point, 2);
   }

@@ -102,8 +102,22 @@
       }
     };
     P.on.detach = (mode, count) => {
-      PT.Audio.plop(mode === 'topple' ? 0.6 : 1.2, 0.3);
-      if (mode === 'topple' && count >= 3) PT.Audio.note(180, { type: 'sine', gain: 0.2, dur: 0.5 });
+      PT.Audio.plop(mode === 'tip' ? 0.6 : 1.2, 0.3);
+      if (mode === 'tip' && count >= 3) PT.Audio.note(180, { type: 'sine', gain: 0.2, dur: 0.5 });
+    };
+    P.on.microSlip = () => {
+      const now = performance.now();
+      if (now - G.lastCreak > 260) {
+        G.lastCreak = now;
+        PT.Audio.creak();
+      }
+    };
+    P.on.collide = (impact, pos) => {
+      PT.Audio.plop(PT.clamp(1.6 - impact * 0.08, 0.6, 1.4), PT.clamp(impact * 0.035, 0.12, 0.35));
+      if (impact > 5) {
+        _v.set(pos.x, pos.y, pos.z);
+        PT.FX.burst(_v, { n: 4, map: PT.FX.textures.dotWhite, speed: 2, life: 0.4, size: 0.3 });
+      }
     };
     P.on.serve = (p, plate) => {
       const n = p.type === 'rainbow' ? 3 : 1;
@@ -173,9 +187,10 @@
       -(clientY / window.innerHeight) * 2 + 1
     );
     raycaster.setFromCamera(_p2, PT.World.camera);
-    // まず塔を優先して当てる（散らばったパンケーキに邪魔されない）
+    // まず塔（と倒れかけ）を優先して当てる（散らばったパンケーキに邪魔されない）
     const stackMeshes = [];
     PT.Physics.stack.forEach((p) => { if (p.visibleNow) stackMeshes.push(p.bodyMesh); });
+    PT.Physics.tipGroups.forEach((g) => g.pancakes.forEach((p) => stackMeshes.push(p.bodyMesh)));
     let hits = raycaster.intersectObjects(stackMeshes, false);
     if (!hits.length) {
       const meshes = [];
@@ -293,24 +308,25 @@
       }
     }
 
-    // すべり中の顔
+    // すべり中の顔（下の層との相対速度で判定）
     const st = PT.Physics.stack;
     for (let i = 0; i < st.length; i++) {
       const p = st[i];
-      if (p.slideV.lengthSq() > 0.8) p.setFace('wee');
-      else if (p.faceKind === 'wee') p.setFace('normal');
+      if (p.relSpeed > 0.8) p.setFace('wee');
+      else if (p.faceKind === 'wee' && p.relSpeed < 0.25) p.setFace('normal');
     }
 
     // 着地済みのぷにぷに
     const lp = PT.Physics.landedPancakes;
     for (let i = 0; i < lp.length; i++) {
       const p = lp[i];
-      if (Math.abs(p.squash) > 0.002 || Math.abs(p.squashV) > 0.002) {
-        p.squashV += (-p.squash * 60 - p.squashV * 9) * dt;
-        p.squash = PT.clamp(p.squash + p.squashV * dt, -0.5, 0.6);
-        const s = p.squash;
-        p.mesh.scale.set(1 + s * 0.3, Math.max(0.3, 1 - s * 0.45), 1 + s * 0.3);
-      }
+      const active = Math.abs(p.squash) > 0.002 || Math.abs(p.squashV) > 0.002 || p.jiggleAmp > 0.01;
+      if (!active) continue;
+      p.squashV += (-p.squash * 60 - p.squashV * 9) * dt;
+      p.squash = PT.clamp(p.squash + p.squashV * dt, -0.5, 0.6);
+      const s = p.squash;
+      p.mesh.scale.set(1 + s * 0.3, Math.max(0.3, 1 - s * 0.45), 1 + s * 0.3);
+      p.updateDeform(dt);
     }
 
     // ぐらぐら警告のかわいい音
