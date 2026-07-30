@@ -1,13 +1,14 @@
 /* ============================================================
    にじいろつみきタワー — main.js
-   ⭐ぽんっ（きえる＝したにくずれる）
-   💗ふわ〜（ふうせんになって うえにうかぶ）
-   🌈つるん（つるつるになって よこにすべる）
+   こわし装置：
+   💣 ばくだん …… ドカーン！と まわりを ふきとばす
+   💨 せんぷうき … ビュオーッと よこから おしたおす
+   🔨 ハンマー …… ゴツン！と ねらった こを たたきとばす
    ============================================================ */
 
 import * as THREE from '../lib/three.module.min.js';
 import * as CANNON from '../lib/cannon-es.js';
-import { buildTowerSpec, PHYS, U } from './towers.js';
+import { buildTowerSpec, PHYS, U, BOMB } from './towers.js';
 import * as SFX from './audio.js';
 
 /* ============================ DOM ============================ */
@@ -24,6 +25,8 @@ const resultCard = $('resultCard'), resultChara = $('resultChara'),
 const retryBtn = $('retryBtn'), nextBtn = $('nextBtn');
 const confettiEl = $('confetti');
 const titleEl = $('title'), startBtn = $('startBtn');
+
+const DEVICE_EMOJI = { bomb: '💣', fan: '💨', hammer: '🔨' };
 
 /* ========================== レンダラー ========================== */
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -48,6 +51,10 @@ sun.shadow.camera.top = 14;  sun.shadow.camera.bottom = -4;
 sun.shadow.camera.far = 40;
 sun.shadow.bias = -0.0005;
 scene.add(sun);
+
+// 💣 ばくはつの ひかり（つかいまわし）
+const boomLight = new THREE.PointLight(0xffb066, 0, 16, 1.6);
+scene.add(boomLight);
 
 /* ========================= じめん ========================= */
 {
@@ -141,18 +148,29 @@ const faceMat = new THREE.MeshBasicMaterial({
 });
 function setFaces(mode) { faceMat.map = faceTex[mode]; }
 
-// ---- シール（しろい ふちどりの まる + アイコン） ----
-function stickerBase(ctx, s) {
-  ctx.clearRect(0, 0, s, s);
-  ctx.beginPath();
-  ctx.arc(s / 2, s / 2, s * 0.46, 0, Math.PI * 2);
-  ctx.fillStyle = '#ffffff';
-  ctx.fill();
-  ctx.lineWidth = s * 0.04;
-  ctx.strokeStyle = '#ffc3de';
-  ctx.stroke();
-}
-function drawStar(ctx, cx, cy, r, color) {
+// ---- 🔨 の まと（赤白の同心円ターゲット） ----
+const targetTex = makeCanvas(256, (c, s) => {
+  c.clearRect(0, 0, s, s);
+  const rings = [
+    [0.46, '#ffffff'], [0.38, '#ff5a54'], [0.28, '#ffffff'],
+    [0.19, '#ff5a54'], [0.09, '#ffffff'],
+  ];
+  for (const [r, col] of rings) {
+    c.beginPath();
+    c.arc(s / 2, s / 2, s * r, 0, Math.PI * 2);
+    c.fillStyle = col;
+    c.fill();
+  }
+  c.beginPath();
+  c.arc(s / 2, s / 2, s * 0.46, 0, Math.PI * 2);
+  c.lineWidth = s * 0.03;
+  c.strokeStyle = '#d94040';
+  c.stroke();
+});
+const targetGeo = new THREE.PlaneGeometry(1, 1);
+
+// ---- パーティクル テクスチャ ----
+function drawStarShape(ctx, cx, cy, r, color) {
   ctx.beginPath();
   for (let i = 0; i < 10; i++) {
     const rad = i % 2 === 0 ? r : r * 0.46;
@@ -163,41 +181,7 @@ function drawStar(ctx, cx, cy, r, color) {
   ctx.fillStyle = color;
   ctx.fill();
 }
-function drawHeart(ctx, cx, cy, r, color) {
-  ctx.beginPath();
-  ctx.moveTo(cx, cy + r * 0.85);
-  ctx.bezierCurveTo(cx - r * 1.5, cy - r * 0.25, cx - r * 0.7, cy - r * 1.1, cx, cy - r * 0.35);
-  ctx.bezierCurveTo(cx + r * 0.7, cy - r * 1.1, cx + r * 1.5, cy - r * 0.25, cx, cy + r * 0.85);
-  ctx.fillStyle = color;
-  ctx.fill();
-}
-const stickerTex = {
-  star: makeCanvas(256, (c, s) => {
-    stickerBase(c, s);
-    drawStar(c, s / 2, s / 2 + s * 0.02, s * 0.3, '#ffcf3f');
-  }),
-  heart: makeCanvas(256, (c, s) => {
-    stickerBase(c, s);
-    drawHeart(c, s / 2, s / 2, s * 0.27, '#ff6fa5');
-  }),
-  rainbow: makeCanvas(256, (c, s) => {
-    stickerBase(c, s);
-    const cols = ['#ff6f9c', '#ffab5c', '#ffe14d', '#7ed37e', '#5bbcf0', '#9a8cf5'];
-    c.lineCap = 'round';
-    cols.forEach((col, i) => {
-      c.beginPath();
-      c.arc(s / 2, s * 0.66, s * 0.34 - i * s * 0.045, Math.PI, Math.PI * 2);
-      c.strokeStyle = col;
-      c.lineWidth = s * 0.038;
-      c.stroke();
-    });
-  }),
-};
-const stickerGeo = new THREE.PlaneGeometry(1, 1);
-
-// ---- パーティクル テクスチャ ----
-const texStarP = makeCanvas(64, (c, s) => drawStar(c, s / 2, s / 2, s * 0.44, '#fff2a8'));
-const texHeartP = makeCanvas(64, (c, s) => drawHeart(c, s / 2, s / 2, s * 0.36, '#ffb3cf'));
+const texStarP = makeCanvas(64, (c, s) => drawStarShape(c, s / 2, s / 2, s * 0.44, '#fff2a8'));
 const texSpark = makeCanvas(64, (c, s) => {
   const g = c.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
   g.addColorStop(0, 'rgba(255,255,255,1)');
@@ -205,6 +189,18 @@ const texSpark = makeCanvas(64, (c, s) => {
   g.addColorStop(1, 'rgba(255,255,255,0)');
   c.fillStyle = g;
   c.fillRect(0, 0, s, s);
+});
+const texSmoke = makeCanvas(64, (c, s) => {
+  const g = c.createRadialGradient(s / 2, s / 2, s * 0.1, s / 2, s / 2, s / 2);
+  g.addColorStop(0, 'rgba(255,255,255,0.9)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.45)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, s, s);
+});
+const texChip = makeCanvas(64, (c, s) => {
+  c.fillStyle = '#ffffff';
+  c.fillRect(s * 0.18, s * 0.18, s * 0.64, s * 0.64);
 });
 
 // ---- おはな（かざり） ----
@@ -293,8 +289,10 @@ class ParticlePool {
   }
 }
 const pStars = new ParticlePool(texStarP, 120, THREE.AdditiveBlending, 0.34);
-const pHearts = new ParticlePool(texHeartP, 90, THREE.NormalBlending, 0.3);
-const pSparks = new ParticlePool(texSpark, 160, THREE.AdditiveBlending, 0.26);
+const pSparks = new ParticlePool(texSpark, 180, THREE.AdditiveBlending, 0.26);
+const pFire = new ParticlePool(texSpark, 90, THREE.AdditiveBlending, 0.62);
+const pSmoke = new ParticlePool(texSmoke, 70, THREE.NormalBlending, 1.15);
+const pDebris = new ParticlePool(texChip, 90, THREE.NormalBlending, 0.2);
 
 function burstStar(p, n = 14) {
   for (let i = 0; i < n; i++) {
@@ -310,21 +308,77 @@ function burstStar(p, n = 14) {
       0.4 + Math.random() * 0.4, 1, 1, 1);
   }
 }
-function burstHeart(p, n = 10, up = 1.6) {
-  for (let i = 0; i < n; i++) {
-    const a = Math.random() * Math.PI * 2, sp = 0.4 + Math.random() * 1.1;
-    pHearts.spawn(p.x, p.y, p.z,
-      Math.cos(a) * sp, up + Math.random() * 1.4, Math.sin(a) * sp,
-      0.8 + Math.random() * 0.5, 1, 0.62, 0.78, -0.6);
+
+// 💣 ばくはつの みため（火球・火花・けむり・破片・衝撃波・閃光）
+function explosionFX(p, blockColor) {
+  // 火球（オレンジ〜黄色）
+  for (let i = 0; i < 24; i++) {
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(Math.random() * 2 - 1);
+    const sp = 1.5 + Math.random() * 4.2;
+    const heat = Math.random();
+    pFire.spawn(p.x, p.y, p.z,
+      Math.sin(ph) * Math.cos(th) * sp, Math.cos(ph) * sp * 0.9 + 0.8, Math.sin(ph) * Math.sin(th) * sp,
+      0.3 + Math.random() * 0.35,
+      1, 0.45 + heat * 0.45, 0.12 + heat * 0.25, -1.2);
   }
-}
-function rainbowSpark(p, hue) {
-  const c = new THREE.Color().setHSL(hue % 1, 0.85, 0.68);
-  pSparks.spawn(
-    p.x + (Math.random() - 0.5) * 0.5, p.y + (Math.random() - 0.5) * 0.5,
-    p.z + (Math.random() - 0.5) * 0.5,
-    (Math.random() - 0.5) * 0.6, 0.4 + Math.random(), (Math.random() - 0.5) * 0.6,
-    0.5 + Math.random() * 0.3, c.r, c.g, c.b, 1.2);
+  // 火花
+  for (let i = 0; i < 16; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 3 + Math.random() * 4;
+    pSparks.spawn(p.x, p.y, p.z,
+      Math.cos(a) * sp, 1.5 + Math.random() * 3.5, Math.sin(a) * sp,
+      0.35 + Math.random() * 0.3, 1, 0.95, 0.7, 5);
+  }
+  // けむり（ゆっくり のぼって うすくなる）
+  for (let i = 0; i < 9; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 0.4 + Math.random() * 1.1;
+    const g = 0.55 + Math.random() * 0.2;
+    pSmoke.spawn(p.x, p.y + 0.2, p.z,
+      Math.cos(a) * sp, 0.7 + Math.random() * 0.9, Math.sin(a) * sp,
+      1.2 + Math.random() * 0.8, g, g, g, -0.5);
+  }
+  // つみきの 破片
+  const c = blockColor || new THREE.Color(0xff9ec6);
+  for (let i = 0; i < 16; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 2 + Math.random() * 4;
+    pDebris.spawn(p.x, p.y, p.z,
+      Math.cos(a) * sp, 2 + Math.random() * 3.5, Math.sin(a) * sp,
+      0.7 + Math.random() * 0.5, c.r, c.g, c.b, 8);
+  }
+  // 衝撃波リング
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.86, 1.0, 40),
+    new THREE.MeshBasicMaterial({
+      color: 0xffd9a0, transparent: true, opacity: 0.9,
+      side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.copy(p);
+  scene.add(ring);
+  effects.push({
+    t: 0,
+    update(dt) {
+      this.t += dt;
+      const k = this.t / 0.45;
+      if (k >= 1) {
+        scene.remove(ring); ring.geometry.dispose(); ring.material.dispose();
+        return false;
+      }
+      ring.scale.setScalar(0.4 + k * 4.4);
+      ring.material.opacity = 0.9 * (1 - k);
+      return true;
+    },
+  });
+  // 閃光
+  boomLight.position.set(p.x, p.y + 0.3, p.z);
+  boomLight.intensity = 70;
+  effects.push({
+    update(dt) {
+      boomLight.intensity *= Math.exp(-11 * dt);
+      if (boomLight.intensity < 0.3) { boomLight.intensity = 0; return false; }
+      return true;
+    },
+  });
 }
 
 /* ===================== ぶつり ワールド ===================== */
@@ -334,15 +388,10 @@ world.broadphase = new CANNON.SAPBroadphase(world);
 
 const matBlock = new CANNON.Material('block');
 const matGround = new CANNON.Material('ground');
-const matSlip = new CANNON.Material('slip');
 world.addContactMaterial(new CANNON.ContactMaterial(matBlock, matBlock,
   { friction: PHYS.frictionBlock, restitution: PHYS.restitution }));
 world.addContactMaterial(new CANNON.ContactMaterial(matBlock, matGround,
   { friction: PHYS.frictionGround, restitution: PHYS.restitution }));
-for (const other of [matBlock, matGround, matSlip]) {
-  world.addContactMaterial(new CANNON.ContactMaterial(matSlip, other,
-    { friction: PHYS.frictionSlip, restitution: PHYS.restitution }));
-}
 world.defaultContactMaterial.friction = 0.5;
 
 const groundBody = new CANNON.Body({ mass: 0, material: matGround, shape: new CANNON.Plane() });
@@ -388,6 +437,90 @@ function cylGeo(r, h) {
   return geoCache.get(key);
 }
 
+/* ===================== そうちの 3D モデル ===================== */
+// 💣 ばくだん：黒い玉 + どうかせん + 火花
+function buildBombModel() {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshLambertMaterial({ color: 0x3b3b47, emissive: 0x000000 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 12), mat);
+  body.castShadow = true;
+  g.add(body);
+  const cap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.055, 0.055, 0.07, 10),
+    new THREE.MeshLambertMaterial({ color: 0x8d8d9a })
+  );
+  cap.position.y = 0.18;
+  g.add(cap);
+  const curve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 0.2, 0),
+    new THREE.Vector3(0.05, 0.29, 0.02),
+    new THREE.Vector3(0.13, 0.33, 0.05),
+  ]);
+  const fuse = new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 6, 0.017, 6),
+    new THREE.MeshLambertMaterial({ color: 0xc9a06a })
+  );
+  g.add(fuse);
+  const spark = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: texSpark, color: 0xffcc66, depthWrite: false,
+  }));
+  spark.position.set(0.13, 0.35, 0.05);
+  spark.scale.setScalar(0.14);
+  g.add(spark);
+  return { group: g, mat, spark };
+}
+
+// 💨 せんぷうき：わっか + 3まいばね + もちて（+Z へ 風を おくる）
+function buildFanModel() {
+  const g = new THREE.Group();
+  const white = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const pink = new THREE.MeshLambertMaterial({ color: 0xff8fbe });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.035, 8, 24), pink);
+  g.add(ring);
+  const blades = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const holder = new THREE.Group();
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.24, 0.02), white);
+    blade.position.y = 0.15;
+    holder.add(blade);
+    holder.rotation.z = (i / 3) * Math.PI * 2;
+    blades.add(holder);
+  }
+  g.add(blades);
+  const hub = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), pink);
+  hub.position.z = 0.03;
+  g.add(hub);
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.3, 8), white);
+  stem.position.y = -0.42;
+  g.add(stem);
+  return { group: g, blades };
+}
+
+// 🔨 ハンマー：えのついた 大きな かなづち（-Z の さきに ぶつかる）
+function buildHammerModel() {
+  const g = new THREE.Group();
+  const pivot = new THREE.Group();
+  pivot.position.set(0, 0, 1.05);
+  g.add(pivot);
+  const arm = new THREE.Group();
+  pivot.add(arm);
+  const handle = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.05, 0.05, 1.0, 10),
+    new THREE.MeshLambertMaterial({ color: 0xc98b5e })
+  );
+  handle.rotation.x = Math.PI / 2;
+  handle.position.z = -0.5;
+  arm.add(handle);
+  const head = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.17, 0.17, 0.42, 14),
+    new THREE.MeshLambertMaterial({ color: 0x92a4c0 })
+  );
+  head.rotation.z = Math.PI / 2;
+  head.position.z = -1.0;
+  arm.add(head);
+  return { group: g, arm };
+}
+
 /* ===================== ゲームの じょうたい ===================== */
 const ST = { TITLE: 0, BUILD: 1, PLACE: 2, COLLAPSE: 3, RESULT: 4 };
 let state = ST.TITLE;
@@ -396,16 +529,17 @@ let stage = parseInt(localStorage.getItem('nijiiro.stage') || '1', 10) || 1;
 let seed = (Math.random() * 1e9) | 0;
 let spec = null;
 
-let blocks = [];            // { mesh, body, spec, y0, alive, sticker, visScale, balloon }
-let stickers = [];          // 置いた順 { type, block, plane }
-let selectedType = 'star';
-let balloons = [];          // 浮遊中 { block, t0, phase }
-let rainbowTrails = [];     // { block, until, hue }
+let blocks = [];            // { mesh, body, spec, y0, alive, device, ... }
+let devices = [];           // 置いた順 { type, block, ... }
+let effects = [];           // 一時エフェクト { update(dt) => bool }
+let selectedType = 'bomb';
 let popCombo = 0, popComboTime = 0;
 
 let switchTime = -1;        // ぽんスイッチを押した時刻
+let wakeAllAt = -1;         // 全員おこす時刻
 let lastActivationTime = -1;
 let calmSince = -1;         // しずかに なりはじめた時刻
+let camShake = 0;
 let score = 0;              // 0..1 くずれた たかさの わりあい
 let meterLevel = 0;
 let elapsed = 0;
@@ -434,6 +568,12 @@ function updateCamera(dt) {
     Math.max(0.8, targetY + cp * r),
     Math.cos(camTheta) * sp * r
   );
+  if (camShake > 0.003) {
+    camera.position.x += (Math.random() - 0.5) * camShake;
+    camera.position.y += (Math.random() - 0.5) * camShake;
+    camera.position.z += (Math.random() - 0.5) * camShake;
+    camShake *= Math.exp(-6 * dt);
+  }
   camera.lookAt(0, targetY, 0);
 }
 function resize() {
@@ -453,12 +593,13 @@ function clearStage() {
     scene.remove(b.mesh);
     b.mesh.material.dispose();
   }
+  for (const dev of devices) removeDeviceVisual(dev);
   blocks = [];
-  stickers = [];
-  balloons = [];
-  rainbowTrails = [];
+  devices = [];
+  effects = [];
+  boomLight.intensity = 0;
   score = 0; meterLevel = 0;
-  switchTime = -1; lastActivationTime = -1; calmSince = -1;
+  switchTime = -1; wakeAllAt = -1; lastActivationTime = -1; calmSince = -1;
   meterFill.style.height = '0%';
   meterStar.classList.remove('full');
   meterEl.classList.add('hidden');
@@ -467,7 +608,7 @@ function clearStage() {
   setFaces('normal');
 }
 
-function makeBlock(bs, index, total) {
+function makeBlock(bs, index) {
   // いろ：たかさで にじ グラデーション（+ 個体ゆらぎ）
   const tRatio = Math.min(1, bs.p[1] / Math.max(0.1, spec.height));
   let color;
@@ -517,7 +658,7 @@ function makeBlock(bs, index, total) {
 
   const block = {
     mesh, body, spec: bs, y0: bs.p[1], alive: true,
-    sticker: null, visScale: 0, index,
+    device: null, visScale: 0, index,
   };
 
   // おかお（よこながの めん に）
@@ -550,7 +691,7 @@ function startStage(newStage, newSeed) {
   stageNameEl.textContent = spec.name;
 
   for (let i = 0; i < spec.blocks.length; i++) {
-    const b = makeBlock(spec.blocks[i], i, spec.blocks.length);
+    const b = makeBlock(spec.blocks[i], i);
     b.mesh.scale.setScalar(0.001);
     b.mesh.position.copy(b.body.position);
     b.mesh.quaternion.copy(b.body.quaternion);
@@ -570,33 +711,32 @@ function startStage(newStage, newSeed) {
   setTimeout(() => {
     if (state === ST.BUILD) {
       state = ST.PLACE;
-      updateStickerUI();
+      updateDeviceUI();
       scheduleHand();
     }
   }, 400 + blocks.length * stepMs);
 
-  updateStickerUI();
+  updateDeviceUI();
   paletteEl.classList.remove('hidden');
   ponBtn.classList.remove('hidden');
 }
 
-/* ===================== シール ロジック ===================== */
-function stickersLeft() { return spec.stickers - stickers.length; }
+/* ===================== そうち ロジック ===================== */
+function devicesLeft() { return spec.stickers - devices.length; }
 
-function updateStickerUI() {
+function updateDeviceUI() {
   // のこり ドット
   stickerDotsEl.innerHTML = '';
   if (spec) {
     for (let i = 0; i < spec.stickers; i++) {
       const d = document.createElement('div');
-      d.className = 'dot' + (i < stickers.length ? ' used' : '');
-      d.textContent = i < stickers.length ?
-        { star: '⭐', heart: '💗', rainbow: '🌈' }[stickers[i].type] : '';
+      d.className = 'dot' + (i < devices.length ? ' used' : '');
+      d.textContent = i < devices.length ? DEVICE_EMOJI[devices[i].type] : '';
       stickerDotsEl.appendChild(d);
     }
   }
   // ぽんスイッチ
-  const ready = stickers.length > 0 && state === ST.PLACE;
+  const ready = devices.length > 0 && state === ST.PLACE;
   ponBtn.classList.toggle('disabled', !ready);
   ponBtn.classList.toggle('ready', ready);
   // パレット選択
@@ -605,43 +745,72 @@ function updateStickerUI() {
   });
 }
 
-function placeSticker(block, hitPoint, hitNormal) {
-  // すでに はってあれば はがす（やりなおし）
-  if (block.sticker) {
-    const st = block.sticker;
-    block.mesh.remove(st.plane);
-    stickers.splice(stickers.indexOf(st), 1);
-    block.sticker = null;
+function removeDeviceVisual(dev) {
+  if (dev.obj && dev.obj.parent) dev.obj.parent.remove(dev.obj);
+}
+
+function placeDevice(block, hitPoint, hitNormal) {
+  // すでに ついていれば はずす（やりなおし）
+  if (block.device) {
+    const dev = block.device;
+    removeDeviceVisual(dev);
+    devices.splice(devices.indexOf(dev), 1);
+    block.device = null;
     SFX.sfxUnplace();
-    updateStickerUI();
+    updateDeviceUI();
     return;
   }
-  if (stickersLeft() <= 0) {
+  if (devicesLeft() <= 0) {
     SFX.sfxNope();
     wiggleMesh(block);
     return;
   }
+
   // ワールド → ブロックローカルへ
   const localP = block.mesh.worldToLocal(hitPoint.clone());
   const invQ = block.mesh.quaternion.clone().invert();
   const localN = hitNormal.clone().applyQuaternion(invQ).normalize();
 
-  const size = Math.min(...(block.spec.kind === 'box' ? block.spec.s : [block.spec.s[0] * 2]));
-  const plane = new THREE.Mesh(stickerGeo, new THREE.MeshBasicMaterial({
-    map: stickerTex[selectedType], transparent: true, depthWrite: false,
-    polygonOffset: true, polygonOffsetFactor: -2,
-  }));
-  const ss = size * 0.8;
-  plane.scale.set(ss, ss, 1);
-  plane.position.copy(localP).addScaledVector(localN, 0.018);
-  plane.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), localN);
-  block.mesh.add(plane);
+  const dev = { type: selectedType, block, born: elapsed, fired: false, state: 'idle' };
 
-  const st = { type: selectedType, block, plane, born: elapsed };
-  block.sticker = st;
-  stickers.push(st);
+  if (selectedType === 'bomb') {
+    // つみきの めん に くっつける（うえむきに たつ）
+    const m = buildBombModel();
+    m.group.position.copy(localP).addScaledVector(localN, 0.06);
+    m.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), localN);
+    block.mesh.add(m.group);
+    dev.obj = m.group; dev.bombMat = m.mat; dev.spark = m.spark;
+  } else if (selectedType === 'fan') {
+    // つみきの すこし そとに うかせて、タワーへ むける
+    const m = buildFanModel();
+    const worldPos = hitPoint.clone().addScaledVector(hitNormal, 0.85);
+    const dir = hitNormal.clone().negate().normalize();  // 風は タワーの ほうへ
+    m.group.position.copy(worldPos);
+    m.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+    scene.add(m.group);
+    dev.obj = m.group; dev.blades = m.blades;
+    dev.origin = worldPos; dev.dir = dir; dev.baseY = worldPos.y;
+    dev.phase = Math.random() * Math.PI * 2;
+  } else {
+    // 🔨 まとマークを はる
+    const size = Math.min(...(block.spec.kind === 'box' ? block.spec.s : [block.spec.s[0] * 2]));
+    const plane = new THREE.Mesh(targetGeo, new THREE.MeshBasicMaterial({
+      map: targetTex, transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2,
+    }));
+    const ss = size * 0.85;
+    plane.scale.set(ss, ss, 1);
+    plane.position.copy(localP).addScaledVector(localN, 0.018);
+    plane.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), localN);
+    block.mesh.add(plane);
+    dev.obj = plane; dev.baseScale = ss;
+    dev.worldPoint = hitPoint.clone(); dev.worldNormal = hitNormal.clone();
+  }
+
+  block.device = dev;
+  devices.push(dev);
   SFX.sfxPlace();
-  updateStickerUI();
+  updateDeviceUI();
   scheduleHand();
 }
 
@@ -650,8 +819,10 @@ function wiggleMesh(block) {
 }
 
 /* ===================== はつどう ===================== */
+const DEV_DURATION = { bomb: 1.1, fan: 3.1, hammer: 0.55 };
+
 function pressSwitch() {
-  if (state !== ST.PLACE || stickers.length === 0) return;
+  if (state !== ST.PLACE || devices.length === 0) return;
   state = ST.COLLAPSE;
   switchTime = elapsed;
   SFX.sfxSwitch();
@@ -662,69 +833,227 @@ function pressSwitch() {
   meterEl.classList.remove('hidden');
 
   // どきどき… の あと ぜんいん おきる → 順番に はつどう
-  setTimeout(() => { for (const b of blocks) if (b.alive) b.body.wakeUp(); }, 620);
-  stickers.forEach((st, i) => {
-    setTimeout(() => activateSticker(st), 750 + i * 780);
+  wakeAllAt = elapsed + 0.62;
+  let lastEnd = 0;
+  devices.forEach((dev, i) => {
+    dev.fireAt = elapsed + 0.78 + i * 1.15;
+    lastEnd = Math.max(lastEnd, dev.fireAt + DEV_DURATION[dev.type]);
   });
-  lastActivationTime = elapsed + (750 + (stickers.length - 1) * 780) / 1000;
+  lastActivationTime = lastEnd;
 }
 
-function activateSticker(st) {
-  const block = st.block;
-  if (!block.alive) return;
-  const p = block.body.position;
-  const pos = new THREE.Vector3(p.x, p.y, p.z);
+function fireDevice(dev) {
+  if (dev.type === 'bomb') {
+    dev.state = 'fusing';
+    dev.boomAt = elapsed + 0.95;
+    SFX.sfxFuse(0.95);
+  } else if (dev.type === 'fan') {
+    dev.state = 'blowing';
+    dev.until = elapsed + 2.9;
+    SFX.sfxWind(3.0);
+  } else {
+    dev.state = 'swinging';
+    SFX.sfxWhoosh();
+    swingHammer(dev);
+  }
+}
 
-  if (st.type === 'star') {
-    // ⭐ ぽんっ：きえて ささえが なくなる（+ うえのこ に ちいさな ゆらぎ）
-    SFX.sfxStar();
-    burstStar(pos, 16);
-    removeBlock(block);
-    for (const b of blocks) {
-      if (!b.alive) continue;
-      const d = Math.hypot(b.body.position.x - p.x, b.body.position.z - p.z);
-      if (d < U * 1.9 && b.body.position.y > p.y) {
-        b.body.wakeUp();
-        b.body.applyImpulse(new CANNON.Vec3(
-          (Math.random() - 0.5) * 0.5 * b.body.mass,
-          0,
-          (Math.random() - 0.5) * 0.5 * b.body.mass
-        ));
+// 💣 ばくはつ！
+function explode(dev) {
+  const block = dev.block;
+  const p = block.body.position;
+  const center = new THREE.Vector3(p.x, p.y, p.z);
+  const color = block.alive ? block.mesh.material.color.clone() : null;
+
+  SFX.sfxBomb();
+  explosionFX(center, color);
+  camShake = 0.34;
+
+  // まわりを ふきとばす（きょり で よわまる）。
+  // 爆心の すぐそば は 粉々になって きえる（穴が あく）
+  const cv = new CANNON.Vec3(center.x, center.y, center.z);
+  for (const b of blocks) {
+    if (!b.alive || b === block) continue;
+    const d = b.body.position.distanceTo(cv);
+    if (d > BOMB.radius) continue;
+    if (d < BOMB.breakRadius) {
+      shatterBlock(b);
+      continue;
+    }
+    b.body.wakeUp();
+    const falloff = 1 - d / BOMB.radius;
+    const dir = b.body.position.vsub(cv);
+    if (dir.length() < 0.01) dir.set(Math.random() - 0.5, 0.5, Math.random() - 0.5);
+    dir.normalize();
+    dir.y += BOMB.upward;
+    b.body.applyImpulse(dir.scale(b.body.mass * BOMB.power * falloff));
+  }
+  // じぶんは こなごな
+  if (block.alive) removeBlock(block);
+  dev.state = 'done';
+}
+
+// 🔨 ふりおろす
+function swingHammer(dev) {
+  removeDeviceVisual(dev);   // まとマークを はずす
+  const m = buildHammerModel();
+  m.group.position.copy(dev.worldPoint);
+  m.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dev.worldNormal);
+  m.arm.rotation.x = 1.95;
+  scene.add(m.group);
+
+  const dur = 0.34;
+  effects.push({
+    t: 0, hit: false,
+    update(dt) {
+      this.t += dt;
+      if (!this.hit) {
+        const k = Math.min(1, this.t / dur);
+        m.arm.rotation.x = 1.95 * (1 - k * k);   // 加速しながら ふりぬく
+        if (k >= 1) {
+          this.hit = true; this.t = 0;
+          hammerImpact(dev);
+        }
+      } else {
+        // よいん：すこし はねかえって きえる
+        m.arm.rotation.x = Math.sin(this.t * 18) * 0.12 * Math.exp(-this.t * 6);
+        const s = Math.max(0.001, 1 - this.t * 2.2);
+        if (this.t > 0.45) {
+          m.group.scale.setScalar(Math.max(0.001, 1 - (this.t - 0.45) * 5));
+        }
+        if (this.t > 0.65) { scene.remove(m.group); return false; }
+      }
+      return true;
+    },
+  });
+}
+
+function hammerImpact(dev) {
+  const block = dev.block;
+  SFX.sfxHit();
+  camShake = 0.16;
+  burstStar(dev.worldPoint, 12);
+  if (!block.alive) return;
+  const n = dev.worldNormal;
+  block.body.wakeUp();
+  // まと の おくへ たたきとばす
+  block.body.velocity.set(
+    -n.x * 7 + (Math.random() - 0.5), 1.6, -n.z * 7 + (Math.random() - 0.5));
+  block.body.angularVelocity.set(
+    (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6);
+  // まわりも おこす
+  const p = block.body.position;
+  for (const b of blocks) {
+    if (!b.alive) continue;
+    if (b.body.position.distanceTo(p) < U * 2.4) b.body.wakeUp();
+  }
+  dev.state = 'done';
+}
+
+// 💨 かぜの ちから（まいフレーム）
+const tmpV = new THREE.Vector3();
+function applyWind(dev, dt) {
+  const range = U * 5.2;
+  for (const b of blocks) {
+    if (!b.alive) continue;
+    tmpV.set(b.body.position.x, b.body.position.y, b.body.position.z).sub(dev.origin);
+    const t = tmpV.dot(dev.dir);
+    if (t < -0.2 || t > range) continue;
+    const lateral = Math.sqrt(Math.max(0, tmpV.lengthSq() - t * t));
+    const radius = 0.85 + t * 0.5;
+    if (lateral > radius) continue;
+    b.body.wakeUp();
+    // すでに じゅうぶん はやければ おさない
+    const vAlong = b.body.velocity.x * dev.dir.x + b.body.velocity.y * dev.dir.y +
+                   b.body.velocity.z * dev.dir.z;
+    if (vAlong > 4.2) continue;
+    const falloff = (1 - t / range) * (1 - (lateral / radius) * 0.5);
+    const k = b.body.mass * 15 * falloff * dt;
+    b.body.applyImpulse(new CANNON.Vec3(
+      dev.dir.x * k, dev.dir.y * k + k * 0.12, dev.dir.z * k));
+  }
+  // 風の ながれ の みため
+  for (let i = 0; i < 2; i++) {
+    const off = 0.35;
+    pSparks.spawn(
+      dev.origin.x + (Math.random() - 0.5) * off,
+      dev.origin.y + (Math.random() - 0.5) * off,
+      dev.origin.z + (Math.random() - 0.5) * off,
+      dev.dir.x * (3.5 + Math.random() * 2) + (Math.random() - 0.5),
+      dev.dir.y * 3.5 + (Math.random() - 0.3) * 0.6,
+      dev.dir.z * (3.5 + Math.random() * 2) + (Math.random() - 0.5),
+      0.5 + Math.random() * 0.3, 0.75, 0.92, 1, 0.4);
+  }
+}
+
+// そうちの まいフレーム こうしん（アイドル演出 + 発動中の処理）
+function updateDevices(dt) {
+  for (const dev of devices) {
+    if (dev.type === 'bomb') {
+      if (dev.state === 'idle' && dev.spark) {
+        dev.spark.scale.setScalar(0.12 + Math.sin(elapsed * 6 + dev.born) * 0.035);
+      } else if (dev.state === 'fusing') {
+        // ちりちり… あかく てんめつ
+        const k = 1 - Math.max(0, dev.boomAt - elapsed) / 0.95;
+        dev.bombMat.emissive.setRGB(0.7 * (0.4 + 0.6 * Math.abs(Math.sin(elapsed * 22))) * k, 0.05, 0.02);
+        dev.spark.scale.setScalar(0.16 + Math.random() * 0.12);
+        if (dev.obj.parent && Math.random() < 0.7) {
+          dev.spark.getWorldPosition(tmpV);
+          pSparks.spawn(tmpV.x, tmpV.y, tmpV.z,
+            (Math.random() - 0.5) * 1.2, 0.5 + Math.random(), (Math.random() - 0.5) * 1.2,
+            0.25 + Math.random() * 0.2, 1, 0.85, 0.45, 2.5);
+        }
+        if (elapsed >= dev.boomAt) explode(dev);
+      }
+    } else if (dev.type === 'fan') {
+      const active = dev.state === 'blowing' && elapsed < dev.until;
+      dev.blades.rotation.z += dt * (active ? 46 : 2.4);
+      dev.obj.position.y = dev.baseY + Math.sin(elapsed * 2 + dev.phase) * 0.05;
+      if (dev.state === 'blowing') {
+        if (active) {
+          applyWind(dev, dt);
+        } else {
+          // おつかれさま：しゅっと ちいさくなって きえる
+          dev.state = 'done';
+          const obj = dev.obj;
+          effects.push({
+            t: 0,
+            update(dt2) {
+              this.t += dt2;
+              const s = Math.max(0.001, 1 - this.t * 2.5);
+              obj.scale.setScalar(s);
+              if (this.t > 0.42) { if (obj.parent) obj.parent.remove(obj); return false; }
+              return true;
+            },
+          });
+        }
+      }
+    } else if (dev.type === 'hammer') {
+      if (dev.state === 'idle' && dev.obj) {
+        const s = dev.baseScale * (1 + Math.sin((elapsed - dev.born) * 4.5) * 0.07);
+        dev.obj.scale.set(s, s, 1);
       }
     }
-  } else if (st.type === 'heart') {
-    // 💗 ふわ〜：ふうせんになって うかぶ
-    SFX.sfxHeart();
-    burstHeart(pos, 8, 1.2);
-    block.mesh.material.color.set(0xff9ec6);
-    block.body.wakeUp();
-    block.body.angularVelocity.set(
-      (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 2);
-    balloons.push({ block, t0: elapsed, phase: Math.random() * Math.PI * 2 });
-  } else {
-    // 🌈 つるん：つるつる + よこに すいー
-    SFX.sfxRainbow();
-    block.body.material = matSlip;
-    block.body.wakeUp();
-    const a = Math.random() * Math.PI * 2;
-    block.body.velocity.x += Math.cos(a) * 2.4;
-    block.body.velocity.z += Math.sin(a) * 2.4;
-    block.body.velocity.y += 0.6;
-    rainbowTrails.push({ block, until: elapsed + 1.5, hue: Math.random() });
-    // まわりも すこし おこす
-    for (const b of blocks) {
-      if (!b.alive) continue;
-      const q = b.body.position;
-      if (Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z) < U * 2.2) b.body.wakeUp();
-    }
   }
-  if (st.plane.parent) st.plane.parent.remove(st.plane);
 }
 
 function removeBlock(block) {
   block.alive = false;
   world.removeBody(block.body);
   scene.remove(block.mesh);
+}
+
+// つみきが 破片になって きえる（ばくはつの まきぞえ）
+function shatterBlock(block) {
+  const p = block.body.position;
+  const c = block.mesh.material.color;
+  for (let i = 0; i < 8; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 1.5 + Math.random() * 3;
+    pDebris.spawn(p.x, p.y, p.z,
+      Math.cos(a) * sp, 1.5 + Math.random() * 3, Math.sin(a) * sp,
+      0.6 + Math.random() * 0.5, c.r, c.g, c.b, 8);
+  }
+  removeBlock(block);
 }
 
 /* ===================== スコア と けっか ===================== */
@@ -811,7 +1140,7 @@ function scheduleHand() {
   if (state !== ST.PLACE && !(state === ST.BUILD)) return;
   handTimer = setTimeout(() => {
     if (state !== ST.PLACE) return;
-    if (stickers.length === 0) {
+    if (devices.length === 0) {
       // タワーを さして「ここを タップ」
       handEl.style.left = '50%';
       handEl.style.top = '42%';
@@ -823,7 +1152,7 @@ function scheduleHand() {
       handEl.style.top = `${r.top + r.height * 0.15}px`;
       handEl.classList.remove('hidden');
     }
-  }, stickers.length === 0 ? 2600 : 3600);
+  }, devices.length === 0 ? 2600 : 3600);
 }
 
 /* ===================== にゅうりょく ===================== */
@@ -882,7 +1211,7 @@ function endPointer(e) {
   const hit = pickBlock(e.clientX, e.clientY);
   if (!hit) return;
   if (state === ST.PLACE) {
-    placeSticker(hit.block, hit.point, hit.normal);
+    placeDevice(hit.block, hit.point, hit.normal);
   } else if (state === ST.RESULT) {
     freePop(hit.block);
   }
@@ -900,7 +1229,7 @@ document.querySelectorAll('.stickerBtn').forEach((btn) => {
     SFX.unlock();
     selectedType = btn.dataset.type;
     SFX.sfxSelect();
-    updateStickerUI();
+    updateDeviceUI();
   });
 });
 
@@ -950,37 +1279,25 @@ function tick(nowMs) {
   if (state !== ST.TITLE) {
     world.step(1 / 60, dt, 3);
 
-    // 💗 ふうせん の うきうき ちから
-    for (let i = balloons.length - 1; i >= 0; i--) {
-      const bl = balloons[i];
-      const b = bl.block;
-      if (!b.alive) { balloons.splice(i, 1); continue; }
-      const age = elapsed - bl.t0;
-      const m = b.body.mass;
-      b.body.wakeUp();
-      b.body.applyForce(new CANNON.Vec3(
-        Math.sin(elapsed * 2.6 + bl.phase) * m * 2.2,
-        -PHYS.gravity * m * 1.55,
-        Math.cos(elapsed * 2.2 + bl.phase) * m * 2.2
-      ));
-      burstHeartTrail(b);
-      if (age > 2.7 || b.body.position.y > spec.height + 3.5) {
-        const p = b.body.position;
-        SFX.sfxHeartPop();
-        burstHeart(new THREE.Vector3(p.x, p.y, p.z), 12, 0.8);
-        removeBlock(b);
-        balloons.splice(i, 1);
+    // ぜんいん おこす → そうちの はつどう スケジュール
+    if (state === ST.COLLAPSE) {
+      if (wakeAllAt >= 0 && elapsed >= wakeAllAt) {
+        for (const b of blocks) if (b.alive) b.body.wakeUp();
+        wakeAllAt = -1;
+      }
+      for (const dev of devices) {
+        if (!dev.fired && dev.fireAt !== undefined && elapsed >= dev.fireAt) {
+          dev.fired = true;
+          fireDevice(dev);
+        }
       }
     }
 
-    // 🌈 にじの あと
-    for (let i = rainbowTrails.length - 1; i >= 0; i--) {
-      const tr = rainbowTrails[i];
-      if (!tr.block.alive || elapsed > tr.until) { rainbowTrails.splice(i, 1); continue; }
-      tr.hue += dt * 1.6;
-      tr.block.mesh.material.color.setHSL(tr.hue % 1, 0.8, 0.66);
-      const p = tr.block.body.position;
-      rainbowSpark(p, tr.hue);
+    updateDevices(dt);
+
+    // 一時エフェクト（ハンマー・衝撃波・閃光）
+    for (let i = effects.length - 1; i >= 0; i--) {
+      if (!effects[i].update(dt)) effects.splice(i, 1);
     }
 
     // メッシュ どうき
@@ -1005,21 +1322,13 @@ function tick(nowMs) {
         b.mesh.position.x += Math.sin(k) * 0.018;
         b.mesh.position.z += Math.cos(k * 1.3) * 0.018;
       }
-      // シールなし タップの ぷるぷる
+      // そうちなし タップの ぷるぷる
       if (b.wiggleUntil && elapsed < b.wiggleUntil) {
         const s = 1 + Math.sin((b.wiggleUntil - elapsed) * 30) * 0.06;
         b.mesh.scale.setScalar(s);
       } else if (b.visScale >= 1) {
         b.mesh.scale.setScalar(1);
       }
-    }
-
-    // シールの ぷくぷく
-    for (const st of stickers) {
-      if (!st.plane.parent) continue;
-      const base = st.plane.scale.x / (st.pulse || 1);
-      st.pulse = 1 + Math.sin((elapsed - st.born) * 4.5) * 0.08;
-      st.plane.scale.set(base * st.pulse, base * st.pulse, 1);
     }
 
     // くずれ ちゅう：メーター + おちつき はんてい
@@ -1053,22 +1362,12 @@ function tick(nowMs) {
   }
 
   pStars.update(dt);
-  pHearts.update(dt);
   pSparks.update(dt);
+  pFire.update(dt);
+  pSmoke.update(dt);
+  pDebris.update(dt);
   updateCamera(dt);
   renderer.render(scene, camera);
-}
-
-// 💗 ふうせんの ハートの あわ
-let heartTrailAcc = 0;
-function burstHeartTrail(b) {
-  heartTrailAcc++;
-  if (heartTrailAcc % 5 !== 0) return;
-  const p = b.body.position;
-  pHearts.spawn(
-    p.x + (Math.random() - 0.5) * 0.4, p.y - 0.2, p.z + (Math.random() - 0.5) * 0.4,
-    (Math.random() - 0.5) * 0.4, -0.5 - Math.random() * 0.5, (Math.random() - 0.5) * 0.4,
-    0.7, 1, 0.7, 0.82, -1.5);
 }
 
 /* ===================== きどう ===================== */

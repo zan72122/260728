@@ -9,7 +9,6 @@ export const PHYS = {
   gravity: -13,          // 少しキビキビした重力
   frictionBlock: 0.55,   // つみき同士
   frictionGround: 0.7,   // つみきと地面
-  frictionSlip: 0.02,    // 🌈つるんシール
   restitution: 0.05,
   sleepSpeedLimit: 0.35,
   sleepTimeLimit: 0.4,
@@ -17,6 +16,17 @@ export const PHYS = {
 };
 
 export const U = 0.7;        // つみき基本サイズ（ワールド単位）
+
+// 💣 ばくだんの威力（main.js と物理テストで共用）
+// つみきは密着して積んであり摩擦がインパルスを食うので、
+// ・爆心のそば（breakRadius）は粉砕して穴を開け、
+// ・つよい上向き成分で宙に浮かせて摩擦から解放する
+export const BOMB = {
+  radius: U * 3.4,       // 吹き飛ばし半径
+  breakRadius: U * 1.2,  // この中の つみきは 粉々になって消える
+  power: 9,              // インパルス係数（× 質量 × 距離減衰）
+  upward: 0.95,          // 上向き成分（浮かせて ばら撒く）
+};
 const GAP = 0.004;           // 積み上げの すき間（めり込み防止）
 
 // ---- シード付き乱数（同じタワーを再現するため） ----
@@ -73,25 +83,27 @@ function towerStraight(rng, cycle) {
 function towerCake(rng, cycle) {
   const blocks = [];
   const s = U, L = s + GAP;
-  const tiers = cycle === 0 ? [4, 3, 2] : [5, 4, 3];
+  // このタワーは 大きくすると ぐらつくので、周回でも 同じ形を保つ
+  // （postH=3・お皿ひかえめ が「安定 かつ 一撃で くずせる」ちょうど良い塩梅）
+  const tiers = [4, 3, 2];
+  const postHBase = 3;
   const plateH = s * 0.32;
   let y = 0;
   for (const n of tiers) {
-    // だんの柱：かど 4本 + へんの まんなか 4本（うえの だんは かどだけ）
-    // 1本 けすだけで お皿が かたむく、はんのうの いい つくり
+    // だんの柱：かどの 4本 × 3だんの のっぽ柱。
+    // のっぽ で ほそい ので、爆風や 風で したから けりだされ、
+    // お皿ごと かたむいて 上の だんが すべり落ちる
     const half = ((n - 1) / 2) * L;
-    const posts = n >= 3
-      ? [[-half, -half], [half, -half], [-half, half], [half, half],
-         [-half, 0], [half, 0], [0, -half], [0, half]]
-      : [[-half, -half], [half, -half], [-half, half], [half, half]];
+    const posts = [[-half, -half], [half, -half], [-half, half], [half, half]];
+    const postH = postHBase;
     for (const [px, pz] of posts) {
-      for (let layer = 0; layer < 2; layer++) {
+      for (let layer = 0; layer < postH; layer++) {
         box(blocks, s, s, s, px, y + layer * L + s / 2, pz, 0);
       }
     }
-    y += 2 * L;
-    // お皿プレート（すこし はみ出す）
-    const pw = n * L + s * 0.35;
+    y += postH * L;
+    // お皿プレート（はみ出しは ひかえめ）
+    const pw = n * L + s * 0.12;
     box(blocks, pw, plateH, pw, 0, y + plateH / 2, 0, 0);
     y += plateH + GAP;
   }
@@ -229,8 +241,8 @@ export function buildTowerSpec(stage, seed) {
 
   // ちいさな個体差：位置ゆらぎ（安定を壊さない程度）と色ゆらぎ用の乱数
   for (const b of spec.blocks) {
-    b.p[0] += (rng() - 0.5) * 0.012;
-    b.p[2] += (rng() - 0.5) * 0.012;
+    b.p[0] += (rng() - 0.5) * 0.006;
+    b.p[2] += (rng() - 0.5) * 0.006;
     b.hueJitter = (rng() - 0.5) * 16;   // 色相ゆらぎ（度）
     b.faceRoll = rng();                 // 顔をつけるかの抽選
     b.faceSide = Math.floor(rng() * 4); // 顔の向き

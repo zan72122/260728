@@ -10,7 +10,7 @@
    ============================================================ */
 
 import * as CANNON from '../lib/cannon-es.js';
-import { buildTowerSpec, PHYS, U } from '../js/towers.js';
+import { buildTowerSpec, PHYS, U, BOMB } from '../js/towers.js';
 
 function createWorld() {
   const world = new CANNON.World({ gravity: new CANNON.Vec3(0, PHYS.gravity, 0) });
@@ -105,30 +105,55 @@ for (let stg = 1; stg <= 10; stg++) {
     );
   }
 
-  // --- 検証2: 土台側のブロックを 2 個⭐で消す → ちゃんと動きが出ること ---
+  // --- 検証2: 💣 1 個で「しっかり崩せる置き場所」が存在すること ---
+  //     （main.js の explode() と同じ BOMB 定数・同じインパルス式。
+  //       低層の候補地点を数か所ためして 最良スコアで判定する。
+  //       置き場所によって結果が変わるのは ゲームとして正しい分散）
   {
-    const { world, matBlock } = createWorld();
-    const bodies = makeBodies(spec, world, matBlock);
-    for (const b of bodies) b.body.initPosition = b.body.position.clone();
-    // 下から 1〜2 層目のブロックを 2 個選んで除去
-    const lows = bodies
-      .map((b, i) => ({ b, i }))
-      .filter(({ b }) => b.y0 > U * 0.2 && b.y0 < U * 2.2)
-      .slice(0, 4);
-    const targets = [lows[0], lows[lows.length - 1]].filter(Boolean);
-    for (const t of targets) {
-      world.removeBody(t.b.body);
-      t.b.removed = true;
+    function bombAt(targetIndex) {
+      const { world, matBlock } = createWorld();
+      const bodies = makeBodies(spec, world, matBlock);
+      const target = bodies[targetIndex];
+      const center = target.body.position.clone();
+      for (const b of bodies) b.body.wakeUp();
+      for (const b of bodies) {
+        if (b === target) continue;
+        const d = b.body.position.distanceTo(center);
+        if (d > BOMB.radius) continue;
+        if (d < BOMB.breakRadius) {          // 爆心のそばは 粉砕
+          world.removeBody(b.body);
+          b.removed = true;
+          continue;
+        }
+        const falloff = 1 - d / BOMB.radius;
+        const dir = b.body.position.vsub(center);
+        if (dir.length() < 0.01) dir.set(0.5, 0.5, 0.5);
+        dir.normalize();
+        dir.y += BOMB.upward;
+        b.body.applyImpulse(dir.scale(b.body.mass * BOMB.power * falloff));
+      }
+      world.removeBody(target.body);
+      target.removed = true;
+      simulate(world, 8);
+      return dropScore(bodies);
     }
-    for (const b of bodies) if (!b.removed) b.body.wakeUp();
-    simulate(world, 8);
-    const score = dropScore(bodies);
-    const ok = score > 0.02;
+
+    // 候補：下から 2 層ぶんの ブロック（間引いて最大 6 か所）
+    const lowIdx = spec.blocks
+      .map((bs, i) => ({ bs, i }))
+      .filter(({ bs }) => bs.p[1] > U * 0.2 && bs.p[1] < U * 2.2)
+      .map(({ i }) => i);
+    const step = Math.max(1, Math.floor(lowIdx.length / 6));
+    const candidates = lowIdx.filter((_, k) => k % step === 0).slice(0, 6);
+
+    let best = 0;
+    for (const idx of candidates) best = Math.max(best, bombAt(idx));
+    const ok = best > 0.15;
     if (!ok) failures++;
     console.log(
-      `         ${' '.repeat(0)}                          ` +
-      `[⭐×2  ] score=${(score * 100).toFixed(1)}% ` +
-      (ok ? 'OK: 崩れが発生' : '△ NG: 何も起きない')
+      `                                   ` +
+      `[💣×1  ] best=${(best * 100).toFixed(1)}% (${candidates.length}か所ためし) ` +
+      (ok ? 'OK: 崩れが発生' : '△ NG: 崩れがよわい')
     );
   }
 }

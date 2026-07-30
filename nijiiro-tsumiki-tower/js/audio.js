@@ -9,6 +9,7 @@ let master = null;
 let musicGain = null;
 let muted = false;
 let musicTimer = null;
+let noiseBuf = null;
 
 const PENTA = [523.25, 587.33, 659.25, 783.99, 880.0, 1046.5]; // C5 ペンタトニック
 
@@ -51,6 +52,37 @@ function tone({ freq = 440, dur = 0.3, type = 'triangle', vol = 0.2,
   osc.stop(t0 + dur + 0.05);
 }
 
+/* ---- ノイズの こえ（爆発・風・打撃のもと） ---- */
+function getNoise() {
+  if (!noiseBuf) {
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  return noiseBuf;
+}
+function noiseVoice({ dur = 0.5, vol = 0.2, type = 'lowpass', freq = 1000,
+                      freqEnd = null, q = 0.7, when = 0, attack = 0.012 }) {
+  if (!ctx) return null;
+  const t0 = now() + when;
+  const src = ctx.createBufferSource();
+  src.buffer = getNoise();
+  src.loop = true;
+  const f = ctx.createBiquadFilter();
+  f.type = type;
+  f.Q.value = q;
+  f.frequency.setValueAtTime(freq, t0);
+  if (freqEnd !== null) f.frequency.exponentialRampToValueAtTime(Math.max(freqEnd, 20), t0 + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(f).connect(g).connect(master);
+  src.start(t0);
+  src.stop(t0 + dur + 0.1);
+  return { src, f, g, t0 };
+}
+
 /* ---- しゃらしゃら（きらきら） ---- */
 function shimmer(when = 0, count = 6, baseVol = 0.08) {
   for (let i = 0; i < count; i++) {
@@ -64,7 +96,7 @@ function shimmer(when = 0, count = 6, baseVol = 0.08) {
   }
 }
 
-/* ============ こうかおん ============ */
+/* ============ UI・きほん こうかおん ============ */
 
 // UI えらぶ
 export function sfxSelect() {
@@ -72,18 +104,18 @@ export function sfxSelect() {
   tone({ freq: 990, dur: 0.14, type: 'triangle', vol: 0.14, when: 0.06 });
 }
 
-// シールを はる：「ぺたっ♪」
+// そうちを つける：「かちっ♪」
 export function sfxPlace() {
   tone({ freq: 520, dur: 0.1, type: 'sine', vol: 0.22, glide: 780 });
   tone({ freq: 1040, dur: 0.16, type: 'sine', vol: 0.1, when: 0.07 });
 }
 
-// シールを はがす
+// そうちを はずす
 export function sfxUnplace() {
   tone({ freq: 700, dur: 0.12, type: 'sine', vol: 0.16, glide: 380 });
 }
 
-// シールぎれの ぷるぷる
+// そうちぎれの ぷるぷる
 export function sfxNope() {
   tone({ freq: 300, dur: 0.09, type: 'sine', vol: 0.14 });
   tone({ freq: 300, dur: 0.09, type: 'sine', vol: 0.14, when: 0.11 });
@@ -97,29 +129,54 @@ export function sfxSwitch() {
   }
 }
 
-// ⭐ ほし：ぽんっ + きらきら
-export function sfxStar() {
-  tone({ freq: 500, dur: 0.18, type: 'triangle', vol: 0.3, glide: 1500 });
-  shimmer(0.05, 7, 0.09);
+/* ============ そうちの おと ============ */
+
+// 💣 どうかせん：シューーッ（ちりちり）
+export function sfxFuse(dur = 0.95) {
+  noiseVoice({ dur, vol: 0.16, type: 'bandpass', freq: 2600, q: 1.2 });
+  noiseVoice({ dur, vol: 0.08, type: 'highpass', freq: 5000, when: 0.03 });
 }
 
-// 💗 はーと：ふわ〜（うえに ただよう）
-export function sfxHeart() {
-  tone({ freq: 320, dur: 0.7, type: 'sine', vol: 0.22, glide: 900 });
-  tone({ freq: 480, dur: 0.7, type: 'sine', vol: 0.12, glide: 1350, when: 0.08 });
+// 💣 ばくはつ：ドカーン！（低音の腹 + 破裂 + 高音の飛沫）
+export function sfxBomb() {
+  noiseVoice({ dur: 0.9, vol: 0.62, type: 'lowpass', freq: 950, freqEnd: 90, q: 0.4 });
+  noiseVoice({ dur: 0.16, vol: 0.38, type: 'highpass', freq: 2300, q: 0.4 });
+  tone({ freq: 150, glide: 34, dur: 0.85, type: 'sine', vol: 0.55 });
+  tone({ freq: 85, glide: 28, dur: 0.55, type: 'triangle', vol: 0.32, when: 0.02 });
+  shimmer(0.12, 5, 0.07);
 }
 
-// 💗 はーとが そらで ぱちん
-export function sfxHeartPop() {
-  tone({ freq: 900, dur: 0.12, type: 'sine', vol: 0.2, glide: 1800 });
-  shimmer(0.03, 4, 0.07);
+// 💨 せんぷうき：ビュオーーッ（うねる風）
+export function sfxWind(dur = 3.0) {
+  if (!ctx) return;
+  const v = noiseVoice({ dur, vol: 0.001, type: 'bandpass', freq: 480, q: 0.8 });
+  if (!v) return;
+  const { f, g, t0 } = v;
+  // ふくらんで おさまる エンベロープ
+  g.gain.cancelScheduledValues(t0);
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(0.34, t0 + 0.5);
+  g.gain.setValueAtTime(0.34, t0 + dur - 0.9);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  // 風の うねり
+  f.frequency.setValueAtTime(420, t0);
+  f.frequency.linearRampToValueAtTime(1050, t0 + dur * 0.45);
+  f.frequency.linearRampToValueAtTime(560, t0 + dur);
 }
 
-// 🌈 にじ：つるん〜（すべりだい）
-export function sfxRainbow() {
-  tone({ freq: 1200, dur: 0.55, type: 'sine', vol: 0.22, glide: 350 });
-  tone({ freq: 1800, dur: 0.4, type: 'sine', vol: 0.08, glide: 600, when: 0.06 });
+// 🔨 ふりかぶり：ヒュッ
+export function sfxWhoosh(dur = 0.34) {
+  noiseVoice({ dur, vol: 0.22, type: 'bandpass', freq: 380, freqEnd: 2100, q: 1.4 });
 }
+
+// 🔨 めいちゅう：ゴツン！
+export function sfxHit() {
+  tone({ freq: 115, glide: 48, dur: 0.28, type: 'sine', vol: 0.5 });
+  noiseVoice({ dur: 0.12, vol: 0.32, type: 'lowpass', freq: 1500, freqEnd: 250 });
+  tone({ freq: 560, dur: 0.08, type: 'triangle', vol: 0.16, when: 0.005 });
+}
+
+/* ============ ぶつかり・ごほうび ============ */
 
 // つみきの がっき音（衝突）— ペンタトニックの もっきん
 let lastPlink = 0;
