@@ -67,6 +67,7 @@
     ui.setDust(0, level.dustGreen);
     ui.hideGo();
     ui.message(level.hintPlace, 2600);
+    if (window.GameHooks) window.GameHooks.emit('levelStart', game.pstate, game.level);
   };
 
   game.stop = function () {
@@ -179,6 +180,7 @@
     ui.hideGo();
     audio.play('tap');
     ui.message(game.level.hintBoom, 3200);
+    if (window.GameHooks) window.GameHooks.emit('boomStart');
   };
 
   /* ---------- 進行 ---------- */
@@ -191,7 +193,7 @@
     const messy = game.bombs.some((b) =>
       b !== bomb && (b.status === 'armed' || b.status === 'lit') &&
       b.host.plugin.meta.bi === meta.bi && b.host.plugin.meta.row < meta.row);
-    const destroyed = physics.detonate(game.pstate, pos);
+    const destroyed = physics.detonate(game.pstate, pos, meta.layer);
     fx.explosion(pos.x, pos.y, messy ? 120 : 90, paletteOf(host).wall);
     audio.play('boom');
     const mult = (1 + fx.airborneDust() * 3.0) * (messy ? 1.8 : 1);
@@ -207,11 +209,13 @@
       fx.confetti((b.minX + b.maxX) / 2, b.topY + 60, (b.maxX - b.minX) * 0.7);
       audio.play('yay');
       if (game.events.onCleared) game.events.onCleared(-1, 'ドッカーン！やったね！');
+      if (window.GameHooks) window.GameHooks.emit('levelEnd');
       return;
     }
 
     if (!physics.allCleared(game.pstate)) {
       if (game.events.onFail) game.events.onFail('tall');
+      if (window.GameHooks) window.GameHooks.emit('levelEnd');
       return;
     }
     let stars = 3;
@@ -229,6 +233,7 @@
     fx.confetti((b.minX + b.maxX) / 2, b.topY + 60, (b.maxX - b.minX) * 0.7);
     audio.play('yay');
     if (game.events.onCleared) game.events.onCleared(stars, comment);
+    if (window.GameHooks) window.GameHooks.emit('levelEnd');
   }
 
   game.update = function (dt, time) {

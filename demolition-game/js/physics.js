@@ -231,14 +231,16 @@
   }
   physics.activeBlocks = activeBlocks;
 
-  /* 起爆：pos（ワールド座標）の近傍ブロックを破壊し、周辺を吹き飛ばす */
-  physics.detonate = function (state, pos) {
+  /* 起爆：pos（ワールド座標）の近傍ブロックを破壊し、周辺を吹き飛ばす。
+   * layer を渡すと、破壊・吹き飛ばしは同じレイヤーのブロックだけに限定される。 */
+  physics.detonate = function (state, pos, layer) {
     if (!state.awake) {
       state.awake = true;
       for (const blk of activeBlocks(state)) Body.setStatic(blk, false);
     }
     let destroyed = 0;
     for (const blk of activeBlocks(state)) {
+      if (layer != null && blk.plugin.meta.layer !== layer) continue;
       Sleeping.set(blk, false);
       const dx = blk.position.x - pos.x;
       const dy = blk.position.y - pos.y;

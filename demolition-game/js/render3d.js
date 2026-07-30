@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const { B, GROUND_Y } = window.GameLevels;
+  const { B, GROUND_Y, BRUSHES } = window.GameLevels;
   const R = {};
 
   let renderer, scene, camera;
@@ -13,10 +13,13 @@
   let blockMeshes = [], hintNodes = [], neighborNodes = [], cloudNodes = [];
   const fxMap = new Map();   /* パーティクル → Object3D */
   const bombMap = new Map(); /* 爆弾 → 3Dグループ（ブロックに追従） */
-  const editMap = new Map(); /* 建築モードの編集セル "c,r" → Mesh */
+  const editMap = new Map(); /* 建築モードの編集セル "c,r,layer" → { mesh, brush:{p,s}, hasWindow, layer } */
+  let buildGridDots = [];    /* 建築モードのマス目ガイド（アクティブ層の平面に表示） */
+  let editActiveLayer = 1;   /* 建築モードで現在アクティブなレイヤー（既定=なか） */
   let fitInfo = null;
 
   const ty = (my) => GROUND_Y - my; /* matter y → three y */
+  const layerZ = (l) => (l - 1) * B * 1.12; /* レイヤー(0=おく,1=なか,2=まえ) → three z */
 
   /* ---------- カメラのビュー状態（ピンチズーム・パン・視点回転） ----------
    * zoom: 1が基準（大きいほど近づく）/ panX,panY: ワールド単位のオフセット（panXはmatter/three共通のx、panYはthree空間のy=上方向プラス）
@@ -265,14 +268,116 @@
     return c;
   }
 
-  function blockMats(palette, withWindow) {
-    const key = 'blk:' + palette.wall + ':' + (withWindow ? 'w' : 'p');
+  /* ---------- そざい別テクスチャ（いし・き・ゴム・ガラス） ---------- */
+  function stoneTex(pal) {
+    return canvasTex('stone:' + pal.wall, 128, 128, (g, w, h) => {
+      g.fillStyle = pal.wall;
+      g.fillRect(0, 0, w, h);
+      for (let i = 0; i < 140; i++) {
+        g.fillStyle = 'rgba(0,0,0,' + (0.04 + Math.random() * 0.10) + ')';
+        g.beginPath();
+        g.arc(Math.random() * w, Math.random() * h, 3 + Math.random() * 9, 0, Math.PI * 2);
+        g.fill();
+      }
+      for (let i = 0; i < 60; i++) {
+        g.fillStyle = 'rgba(255,255,255,' + (Math.random() * 0.08) + ')';
+        g.beginPath();
+        g.arc(Math.random() * w, Math.random() * h, 2 + Math.random() * 5, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.strokeStyle = 'rgba(0,0,0,0.18)';
+      g.lineWidth = 6;
+      g.strokeRect(3, 3, w - 6, h - 6);
+    });
+  }
+
+  function woodTex(pal) {
+    return canvasTex('wood:' + pal.wall, 128, 128, (g, w, h) => {
+      g.fillStyle = pal.wall;
+      g.fillRect(0, 0, w, h);
+      for (let y = 6; y < h; y += 20) {
+        g.strokeStyle = 'rgba(0,0,0,0.14)';
+        g.lineWidth = 3;
+        g.beginPath();
+        g.moveTo(0, y);
+        g.lineTo(w, y + (Math.random() * 6 - 3));
+        g.stroke();
+      }
+      for (let i = 0; i < 9; i++) {
+        g.strokeStyle = 'rgba(255,255,255,0.10)';
+        g.lineWidth = 1.5;
+        g.beginPath();
+        g.moveTo(0, i * 14 + 4);
+        g.lineTo(w, i * 14 + 4);
+        g.stroke();
+      }
+      g.strokeStyle = 'rgba(0,0,0,0.2)';
+      g.lineWidth = 6;
+      g.strokeRect(3, 3, w - 6, h - 6);
+    });
+  }
+
+  function rubberTex(pal) {
+    return canvasTex('rubber:' + pal.wall, 64, 64, (g, w, h) => {
+      g.fillStyle = pal.wall;
+      g.fillRect(0, 0, w, h);
+      for (let i = 0; i < 30; i++) {
+        g.fillStyle = 'rgba(0,0,0,0.05)';
+        g.fillRect(Math.random() * w, Math.random() * h, 4, 4);
+      }
+    });
+  }
+
+  /* ブロックの正面テクスチャ（素材ごとに切り替え。ガラスはテクスチャ無し＝flat透明色） */
+  function materialFaceTex(pal, withWindow) {
+    const material = pal.material || 'normal';
+    if (material === 'stone') return stoneTex(pal);
+    if (material === 'wood') return woodTex(pal);
+    if (material === 'rubber') return rubberTex(pal);
+    if (material === 'glass') return null;
+    return wallTex(pal, withWindow);
+  }
+
+  function faceMaterial(pal, withWindow, opacity) {
+    const tex = materialFaceTex(pal, withWindow);
+    const params = tex ? { map: tex } : { color: pal.wall };
+    if (opacity != null) { params.transparent = true; params.opacity = opacity; }
+    return new THREE.MeshLambertMaterial(params);
+  }
+
+  function sideMaterial(pal, mult, opacity) {
+    const params = { color: shadeColor(pal.wall, mult) };
+    if (opacity != null) { params.transparent = true; params.opacity = opacity; }
+    return new THREE.MeshLambertMaterial(params);
+  }
+
+  /* かたち別のマテリアル配列を作る。opts: { withWindow, dim }
+   * shape: 'sq'(四角=既存6面) | 'tri'(三角柱=2面) | 'cir'(円柱パック=3面) */
+  function blockMats(palette, shape, opts) {
+    opts = opts || {};
+    const withWindow = !!opts.withWindow;
+    const dim = !!opts.dim;
+    const material = palette.material || 'normal';
+    const key = 'blk:' + shape + ':' + palette.wall + ':' + material + ':' +
+      (withWindow ? 'w' : 'p') + ':' + (dim ? 'd' : 'n');
     return cachedMat(key, () => {
-      const side = new THREE.MeshLambertMaterial({ color: shadeColor(palette.wall, 0.78) });
-      const top = new THREE.MeshLambertMaterial({ color: shadeColor(palette.wall, 1.06) });
-      const bottom = new THREE.MeshLambertMaterial({ color: shadeColor(palette.wall, 0.6) });
-      const face = new THREE.MeshLambertMaterial({ map: wallTex(palette, withWindow) });
-      const back = new THREE.MeshLambertMaterial({ color: shadeColor(palette.wall, 0.9) });
+      const isGlass = material === 'glass';
+      const faceOpacity = dim ? 0.3 : (isGlass ? 0.5 : null);
+      const sideOpacity = dim ? 0.3 : (isGlass ? 0.5 : null);
+      const face = faceMaterial(palette, withWindow, faceOpacity);
+      if (shape === 'tri') {
+        const side = sideMaterial(palette, 0.8, sideOpacity);
+        return [side, face]; /* [がわ(押し出し), まえ・うしろのキャップ] */
+      }
+      if (shape === 'cir') {
+        const side = sideMaterial(palette, 0.85, sideOpacity);
+        const back = sideMaterial(palette, 0.65, sideOpacity);
+        return [side, face, back]; /* [がわ, まえ(平面), うしろ(平面)] */
+      }
+      const side = sideMaterial(palette, 0.78, sideOpacity);
+      const top = sideMaterial(palette, 1.06, sideOpacity);
+      const bottom = sideMaterial(palette, 0.6, sideOpacity);
+      const back = sideMaterial(palette, 0.9, sideOpacity);
       return [side, side, top, bottom, face, back]; /* +x,-x,+y,-y,+z,-z */
     });
   }
@@ -283,7 +388,30 @@
     if (!geoCache.has(key)) geoCache.set(key, make());
     return geoCache.get(key);
   }
-  const blockGeo = () => cachedGeo('block', () => new THREE.BoxGeometry(B, B, B));
+  function triGeo() {
+    return cachedGeo('block:tri', () => {
+      const shapeT = new THREE.Shape();
+      shapeT.moveTo(0, 2 * B / 3);
+      shapeT.lineTo(-B / 2, -B / 3);
+      shapeT.lineTo(B / 2, -B / 3);
+      shapeT.closePath();
+      const geo = new THREE.ExtrudeGeometry(shapeT, { depth: B, bevelEnabled: false, curveSegments: 1 });
+      geo.translate(0, 0, -B / 2);
+      return geo;
+    });
+  }
+  function cirGeo() {
+    return cachedGeo('block:cir', () => {
+      const geo = new THREE.CylinderGeometry(B * 0.48, B * 0.48, B, 24);
+      geo.rotateX(Math.PI / 2); /* 円の平面が z 向き（カメラ側/うしろ側）になるように */
+      return geo;
+    });
+  }
+  function blockGeo(shape) {
+    if (shape === 'tri') return triGeo();
+    if (shape === 'cir') return cirGeo();
+    return cachedGeo('block:sq', () => new THREE.BoxGeometry(B, B, B));
+  }
   const chipGeo = () => cachedGeo('chip', () => new THREE.BoxGeometry(1, 1, 1));
 
   /* ---------- 初期化 ---------- */
@@ -392,36 +520,57 @@
     if (fitInfo) fitCamera();
   };
 
-  R.screenPos = function (wx, wy) {
-    const v = new THREE.Vector3(wx, ty(wy), 0).project(camera);
+  R.screenPos = function (wx, wy, wz) {
+    const v = new THREE.Vector3(wx, ty(wy), wz || 0).project(camera);
     return {
       x: (v.x + 1) / 2 * window.innerWidth,
       y: (1 - v.y) / 2 * window.innerHeight,
     };
   };
 
+  /* 建築モード：どのレイヤーがアクティブかを設定し、他レイヤーの編集セルを半透明にする。
+   * マス目ガイド（buildGridDots）もアクティブ層の平面に移動する。 */
+  R.setActiveLayer = function (layer) {
+    editActiveLayer = layer;
+    for (const ent of editMap.values()) {
+      const look = BRUSHES[ent.brush.p] || BRUSHES[0];
+      const dim = ent.layer !== editActiveLayer;
+      ent.mesh.material = blockMats(look, ent.brush.s, { withWindow: ent.hasWindow, dim });
+    }
+    for (const dot of buildGridDots) {
+      dot.position.z = layerZ(editActiveLayer) + B / 2 + 10;
+    }
+  };
+
   /* 建築モード：セル1個のブロックメッシュを即時 追加/差替/削除する
-   * （ドラッグ描画のためシーン全再構築を避ける） */
-  R.setEditBlock = function (key, wx, wy, palette, hasWindow) {
-    let mesh = editMap.get(key);
-    if (!palette) {
-      if (mesh) {
-        levelGroup.remove(mesh);
+   * （ドラッグ描画のためシーン全再構築を避ける）。brush = { p: ブラシindex, s: かたち } */
+  R.setEditBlock = function (key, wx, wy, layer, brush, hasWindow) {
+    let ent = editMap.get(key);
+    if (!brush) {
+      if (ent) {
+        levelGroup.remove(ent.mesh);
         editMap.delete(key);
       }
       return;
     }
-    const mats = blockMats(palette, hasWindow);
-    if (mesh) {
-      mesh.material = mats;
+    const look = BRUSHES[brush.p] || BRUSHES[0];
+    const dim = layer !== editActiveLayer;
+    const mats = blockMats(look, brush.s, { withWindow: hasWindow, dim });
+    if (ent && ent.brush.s === brush.s) {
+      ent.mesh.material = mats;
     } else {
-      mesh = new THREE.Mesh(blockGeo(), mats);
+      if (ent) levelGroup.remove(ent.mesh);
+      const mesh = new THREE.Mesh(blockGeo(brush.s), mats);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       levelGroup.add(mesh);
-      editMap.set(key, mesh);
+      ent = { mesh };
+      editMap.set(key, ent);
     }
-    mesh.position.set(wx, ty(wy), 0);
+    ent.brush = { p: brush.p, s: brush.s };
+    ent.hasWindow = hasWindow;
+    ent.layer = layer;
+    ent.mesh.position.set(wx, ty(wy), layerZ(layer));
   };
 
   /* 画面座標 → 任意z平面上のワールド座標（matter系）。planeZ省略時は z=0 */
@@ -675,7 +824,8 @@
       for (const blk of bld.blocks) {
         const meta = blk.plugin.meta;
         const pal = meta.palette || bld.spec.palette;
-        const mesh = new THREE.Mesh(blockGeo(), blockMats(pal, meta.window));
+        const shape = meta.shape || 'sq';
+        const mesh = new THREE.Mesh(blockGeo(shape), blockMats(pal, shape, { withWindow: meta.window }));
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         mesh.userData.body = blk;
@@ -692,7 +842,8 @@
       hintNodes.push({ marker, hint: s });
     }
 
-    /* 建築モードのマス目ガイド */
+    /* 建築モードのマス目ガイド（アクティブ層の平面にのみ表示） */
+    buildGridDots = [];
     if (state.level.buildGrid) {
       const gg = state.level.buildGrid;
       const spec = state.level.buildings[0];
@@ -701,12 +852,15 @@
         map: softTex(), color: 0xffffff, transparent: true,
         opacity: 0.28, depthWrite: false,
       }));
+      editActiveLayer = 1;
+      const dz = layerZ(editActiveLayer) + B / 2 + 10;
       for (let r = 0; r < gg.rows; r++) {
         for (let c = 0; c < gg.cols; c++) {
           const dot = new THREE.Sprite(dotMat);
-          dot.position.set(left + c * B + B / 2, ty(GROUND_Y - B / 2 - r * B), 10);
+          dot.position.set(left + c * B + B / 2, ty(GROUND_Y - B / 2 - r * B), dz);
           dot.scale.set(10, 10, 1);
           levelGroup.add(dot);
+          buildGridDots.push(dot);
         }
       }
     }
@@ -737,6 +891,8 @@
 
     scene.add(levelGroup);
     scene.add(fxGroup);
+
+    if (window.GameHooks) window.GameHooks.emit('sceneBuilt', { scene, levelGroup, state });
 
     fitInfo = { bounds: b };
     fitCamera();
@@ -818,7 +974,7 @@
       const body = mesh.userData.body;
       if (body.plugin.meta.removed) { mesh.visible = false; continue; }
       mesh.visible = true;
-      mesh.position.set(body.position.x, ty(body.position.y), 0);
+      mesh.position.set(body.position.x, ty(body.position.y), layerZ(body.plugin.meta.layer || 1));
       mesh.rotation.z = -body.angle;
     }
 
@@ -849,7 +1005,8 @@
       }
       const host = b.host;
       const w = window.GameCore.bombWorldPos(b);
-      grp.position.set(w.x, ty(w.y) - 6, B / 2 + 12);
+      const bz = layerZ(host.plugin.meta.layer || 1) + B / 2 + 12;
+      grp.position.set(w.x, ty(w.y) - 6, bz);
       grp.rotation.z = -host.angle;
       const spark = grp.userData.spark;
       spark.visible = b.status === 'lit';

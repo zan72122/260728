@@ -177,8 +177,31 @@ html, body {
 }
 #palette-row {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 10px;
   align-items: center;
+  justify-content: center;
+}
+#shape-row, #layer-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+}
+.layer-btn {
+  width: auto;
+  padding: 0 12px;
+  font-size: 15px;
+  white-space: nowrap;
+}
+.shape-btn { font-size: 26px; }
+.mat-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  border-style: dashed;
+  line-height: 1;
 }
 #build-row2 {
   display: flex;
@@ -252,6 +275,9 @@ html, body {
   .sq-8 { width: 30px; height: 30px; }
   .big-btn.sm-btn { font-size: 16px; padding: 10px 14px; min-height: 52px; }
   #palette-row { gap: 8px; }
+  .mat-dot { font-size: 16px; }
+  .shape-btn { font-size: 20px; }
+  .layer-btn { font-size: 13px; padding: 0 9px; }
 }
 
 #tutor-hand {

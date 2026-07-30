@@ -13,7 +13,8 @@
     ['hud', 'dust-fill', 'msg-banner', 'tutor-hand', 'scr-title', 'scr-select',
      'scr-result', 'scr-fail', 'level-grid', 'result-title', 'result-stars',
      'result-comment', 'btn-mute', 'btn-next', 'btn-go', 'btn-retry',
-     'build-bar', 'palette-row', 'brush-row', 'btn-build-done', 'dust-meter'].forEach((id) => {
+     'build-bar', 'palette-row', 'brush-row', 'shape-row', 'layer-row',
+     'btn-build-done', 'dust-meter'].forEach((id) => {
       ui.els[id] = $(id);
     });
   };
@@ -68,15 +69,25 @@
   ui.hideGo = function () { ui.els['btn-go'].classList.add('hidden'); };
 
   /* ---------- 建築モードのツールバー ---------- */
+  const MAT_EMOJI = { stone: '🪨', wood: '🪵', rubber: '⚽', glass: '🧊' };
+  const SHAPES = [['sq', '■'], ['tri', '▲'], ['cir', '●']];
+  const LAYER_LABELS = [[0, 'おく'], [1, 'なか'], [2, 'まえ']];
+
   ui.showBuildBar = function (cfg) {
+    /* いろ・そざい パレット（0..4=いろ、5..8=そざい） */
     const row = ui.els['palette-row'];
     row.innerHTML = '';
-    cfg.palettes.forEach((p, i) => {
+    cfg.brushes.forEach((p, i) => {
       const dot = document.createElement('button');
-      dot.className = 'pal-dot';
+      dot.className = 'pal-dot' + (p.material ? ' mat-dot' : '');
       dot.dataset.pal = i;
       dot.style.background = p.wall;
-      dot.setAttribute('aria-label', 'いろ' + (i + 1));
+      if (p.material) {
+        dot.textContent = MAT_EMOJI[p.material] || '';
+        dot.setAttribute('aria-label', p.material);
+      } else {
+        dot.setAttribute('aria-label', 'いろ' + (i + 1));
+      }
       dot.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         cfg.onColor(i);
@@ -91,6 +102,32 @@
     eraser.setAttribute('aria-label', 'けす');
     eraser.addEventListener('pointerdown', (e) => { e.preventDefault(); cfg.onEraser(); });
     row.appendChild(eraser);
+
+    /* かたち（■▲●） */
+    const srow = ui.els['shape-row'];
+    srow.innerHTML = '';
+    SHAPES.forEach(([s, label]) => {
+      const btn = document.createElement('button');
+      btn.className = 'brush-btn shape-btn';
+      btn.dataset.shape = s;
+      btn.textContent = label;
+      btn.setAttribute('aria-label', 'かたち ' + label);
+      btn.addEventListener('pointerdown', (e) => { e.preventDefault(); cfg.onShape(s); });
+      srow.appendChild(btn);
+    });
+
+    /* レイヤー（おく/なか/まえ） */
+    const lrow = ui.els['layer-row'];
+    lrow.innerHTML = '';
+    LAYER_LABELS.forEach(([l, label]) => {
+      const btn = document.createElement('button');
+      btn.className = 'brush-btn layer-btn';
+      btn.dataset.layer = l;
+      btn.textContent = label;
+      btn.setAttribute('aria-label', label + ' レイヤー');
+      btn.addEventListener('pointerdown', (e) => { e.preventDefault(); cfg.onLayer(l); });
+      lrow.appendChild(btn);
+    });
 
     /* ブラシサイズ＋もどす */
     const brow = ui.els['brush-row'];
@@ -116,6 +153,8 @@
 
     ui.setBuildTool(cfg.mode, cfg.palIdx);
     ui.setBrushSel(cfg.brush);
+    ui.setShapeSel(cfg.shape);
+    ui.setLayerSel(cfg.layer);
     ui.els['build-bar'].classList.remove('hidden');
   };
 
@@ -130,6 +169,18 @@
   ui.setBrushSel = function (n) {
     ui.els['brush-row'].querySelectorAll('.brush-btn').forEach((b) => {
       b.classList.toggle('sel', !b.id && Number(b.dataset.n) === n);
+    });
+  };
+
+  ui.setShapeSel = function (s) {
+    ui.els['shape-row'].querySelectorAll('.shape-btn').forEach((b) => {
+      b.classList.toggle('sel', b.dataset.shape === s);
+    });
+  };
+
+  ui.setLayerSel = function (l) {
+    ui.els['layer-row'].querySelectorAll('.layer-btn').forEach((b) => {
+      b.classList.toggle('sel', Number(b.dataset.layer) === l);
     });
   };
 
