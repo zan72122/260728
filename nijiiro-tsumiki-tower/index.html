@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>にじいろつみきタワー</title>
+<link rel="icon" type="image/png" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- そら（CSS背景 + くも + たいよう） -->
+  <div id="sky">
+    <div class="sun"></div>
+    <div class="cloud c1"></div>
+    <div class="cloud c2"></div>
+    <div class="cloud c3"></div>
+    <div class="cloud c4"></div>
+  </div>
+
+  <!-- 3D キャンバス -->
+  <canvas id="game"></canvas>
+
+  <!-- じょうぶ UI -->
+  <div id="topbar">
+    <div id="stageBadge" class="badge"><span id="stageIcon">🗼</span><span id="stageNum">1</span></div>
+    <div id="stageName" class="badge name">まっすぐタワー</div>
+    <button id="muteBtn" class="badge btn" aria-label="おと">🔊</button>
+  </div>
+
+  <!-- にじメーター -->
+  <div id="meter" class="hidden">
+    <div id="meterStar">⭐</div>
+    <div id="meterTube"><div id="meterFill"></div></div>
+  </div>
+
+  <!-- したの UI：シールパレット + ぽんスイッチ -->
+  <div id="bottombar">
+    <div id="palette">
+      <button class="stickerBtn" data-type="star"    aria-label="ほしシール">⭐</button>
+      <button class="stickerBtn" data-type="heart"   aria-label="はーとシール">💗</button>
+      <button class="stickerBtn" data-type="rainbow" aria-label="にじシール">🌈</button>
+      <div id="stickerDots"></div>
+    </div>
+    <button id="ponBtn" aria-label="ぽんスイッチ">
+      <span class="ponFace">ぽん！</span>
+      <span class="ponSpark">✨</span>
+    </button>
+  </div>
+
+  <!-- おしえて ゆび -->
+  <div id="hand" class="hidden">👆</div>
+
+  <!-- けっか カード -->
+  <div id="resultCard" class="hidden">
+    <div id="resultChara">🐰🎀</div>
+    <div id="resultStars"></div>
+    <div id="resultButtons">
+      <button id="retryBtn" aria-label="もういっかい">↺</button>
+      <button id="nextBtn" aria-label="つぎへ">▶</button>
+    </div>
+  </div>
+
+  <!-- かみふぶき -->
+  <div id="confetti"></div>
+
+  <!-- タイトル -->
+  <div id="title">
+    <div id="titleArt">🌈</div>
+    <h1><span>に</span><span>じ</span><span>い</span><span>ろ</span><span>つ</span><span>み</span><span>き</span><span>タ</span><span>ワ</span><span>ー</span></h1>
+    <button id="startBtn">▶ あそぶ</button>
+    <div id="titleHint">⭐💗🌈 シールをはって… ぽん！</div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

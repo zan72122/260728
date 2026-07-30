@@ -1,0 +1,485 @@
+/* ============================================================
+   にじいろつみきタワー — スタイル
+   4さいの おんなのこ むけ：おおきい ボタン・パステル・まるい
+   ============================================================ */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: fixed;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  font-family: "Hiragino Maru Gothic ProN", "ヒラギノ丸ゴ ProN",
+               "BIZ UDGothic", "Rounded Mplus 1c", sans-serif;
+  background: #ffd9ec;
+}
+
+/* ---------- そら ---------- */
+#sky {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    #aee4ff 0%,
+    #cfe8ff 30%,
+    #ffe3f4 62%,
+    #ffd1ea 100%
+  );
+  overflow: hidden;
+}
+
+.sun {
+  position: absolute;
+  top: max(4%, env(safe-area-inset-top));
+  right: 7%;
+  width: clamp(70px, 12vmin, 120px);
+  height: clamp(70px, 12vmin, 120px);
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 35%, #fff7c4, #ffe680 60%, #ffd54d);
+  box-shadow: 0 0 60px 20px rgba(255, 230, 130, 0.55);
+  animation: sunPulse 5s ease-in-out infinite;
+}
+@keyframes sunPulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.06); }
+}
+
+.cloud {
+  position: absolute;
+  background: #ffffff;
+  border-radius: 999px;
+  opacity: 0.92;
+  filter: drop-shadow(0 6px 8px rgba(180, 160, 220, 0.25));
+  animation: drift linear infinite;
+}
+.cloud::before, .cloud::after {
+  content: "";
+  position: absolute;
+  background: inherit;
+  border-radius: 50%;
+}
+.cloud::before { width: 55%; height: 160%; left: 12%;  bottom: 18%; }
+.cloud::after  { width: 45%; height: 130%; right: 12%; bottom: 22%; }
+
+.c1 { width: 26vmin; height: 8vmin;  top: 12%; animation-duration: 65s; }
+.c2 { width: 18vmin; height: 6vmin;  top: 26%; animation-duration: 90s;  animation-delay: -30s; }
+.c3 { width: 30vmin; height: 9vmin;  top: 6%;  animation-duration: 110s; animation-delay: -60s; }
+.c4 { width: 15vmin; height: 5vmin;  top: 36%; animation-duration: 75s;  animation-delay: -50s; }
+
+@keyframes drift {
+  from { transform: translateX(-40vmin); left: 0%; }
+  to   { transform: translateX(40vmin);  left: 100%; }
+}
+
+/* ---------- キャンバス ---------- */
+#game {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ---------- きょうつう ---------- */
+.hidden { display: none !important; }
+
+button {
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---------- うえの バー ---------- */
+#topbar {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 10px);
+  left: calc(env(safe-area-inset-left) + 12px);
+  right: calc(env(safe-area-inset-right) + 12px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.badge {
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: clamp(18px, 3.4vmin, 26px);
+  font-weight: bold;
+  color: #b0568f;
+  box-shadow: 0 4px 10px rgba(200, 120, 180, 0.25);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge.name { font-size: clamp(14px, 2.6vmin, 20px); }
+
+#muteBtn {
+  margin-left: auto;
+  pointer-events: auto;
+  min-width: 52px;
+  min-height: 52px;
+  justify-content: center;
+}
+#muteBtn:active { transform: scale(0.9); }
+
+/* ---------- にじメーター ---------- */
+#meter {
+  position: absolute;
+  left: calc(env(safe-area-inset-left) + 14px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+#meterStar {
+  font-size: clamp(28px, 5vmin, 42px);
+  filter: grayscale(1) opacity(0.5);
+  transition: filter 0.3s, transform 0.3s;
+}
+#meterStar.full {
+  filter: none;
+  animation: starSpin 1.2s ease-in-out infinite;
+}
+@keyframes starSpin {
+  0%, 100% { transform: rotate(-15deg) scale(1.1); }
+  50%      { transform: rotate(15deg)  scale(1.35); }
+}
+
+#meterTube {
+  width: clamp(18px, 3vmin, 26px);
+  height: clamp(160px, 34vmin, 300px);
+  background: rgba(255, 255, 255, 0.75);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 2px 6px rgba(160, 100, 150, 0.25);
+  display: flex;
+  align-items: flex-end;
+}
+
+#meterFill {
+  width: 100%;
+  height: 0%;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    #b28cff 0%, #7ec9ff 22%, #7fe8a9 44%,
+    #ffe37e 66%, #ffb37e 82%, #ff8cae 100%
+  );
+  transition: height 0.25s ease-out;
+}
+
+/* ---------- したの バー ---------- */
+#bottombar {
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom) + 14px);
+  left: calc(env(safe-area-inset-left) + 12px);
+  right: calc(env(safe-area-inset-right) + 12px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+#palette {
+  display: flex;
+  align-items: center;
+  gap: clamp(8px, 2vmin, 16px);
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 999px;
+  padding: clamp(8px, 1.6vmin, 14px) clamp(12px, 2.4vmin, 20px);
+  box-shadow: 0 6px 16px rgba(200, 120, 180, 0.3);
+  pointer-events: auto;
+  position: relative;
+}
+
+.stickerBtn {
+  width: clamp(58px, 11vmin, 84px);
+  height: clamp(58px, 11vmin, 84px);
+  border-radius: 50%;
+  font-size: clamp(30px, 6vmin, 46px);
+  background: #fff0f8;
+  box-shadow: 0 3px 0 #f3c3dd;
+  transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.stickerBtn:active { transform: scale(0.92); }
+
+.stickerBtn.selected {
+  background: #ffffff;
+  transform: scale(1.14) translateY(-6px);
+  box-shadow: 0 0 0 4px #ff9ecb, 0 8px 18px rgba(255, 130, 190, 0.5);
+  animation: selectedBob 1s ease-in-out infinite;
+}
+@keyframes selectedBob {
+  0%, 100% { transform: scale(1.14) translateY(-6px); }
+  50%      { transform: scale(1.14) translateY(-10px); }
+}
+
+#stickerDots {
+  display: flex;
+  gap: 6px;
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+#stickerDots .dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2px 4px rgba(200, 120, 180, 0.4);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  transition: transform 0.2s;
+}
+#stickerDots .dot.used { background: #ffd3e8; transform: scale(0.8); }
+
+/* ---------- ぽんスイッチ ---------- */
+#ponBtn {
+  width: clamp(88px, 17vmin, 132px);
+  height: clamp(88px, 17vmin, 132px);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffb1d4, #ff7fb5 55%, #f75e9e);
+  box-shadow: 0 8px 0 #d14a86, 0 12px 24px rgba(230, 90, 160, 0.45);
+  color: #ffffff;
+  font-size: clamp(22px, 4.2vmin, 34px);
+  font-weight: bold;
+  text-shadow: 0 2px 3px rgba(180, 50, 120, 0.5);
+  pointer-events: auto;
+  position: relative;
+  transition: transform 0.1s, box-shadow 0.1s, filter 0.3s;
+}
+#ponBtn:active {
+  transform: translateY(6px);
+  box-shadow: 0 2px 0 #d14a86, 0 4px 10px rgba(230, 90, 160, 0.45);
+}
+#ponBtn.disabled {
+  filter: grayscale(0.75) opacity(0.55);
+  pointer-events: none;
+}
+#ponBtn.ready { animation: ponPulse 1.1s ease-in-out infinite; }
+@keyframes ponPulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.07); }
+}
+
+.ponSpark {
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  font-size: clamp(20px, 3.6vmin, 30px);
+  animation: sparkTwinkle 1.4s ease-in-out infinite;
+}
+@keyframes sparkTwinkle {
+  0%, 100% { transform: scale(1) rotate(0deg);   opacity: 1; }
+  50%      { transform: scale(1.4) rotate(20deg); opacity: 0.6; }
+}
+
+/* ---------- おしえて ゆび ---------- */
+#hand {
+  position: absolute;
+  font-size: clamp(44px, 8vmin, 64px);
+  z-index: 20;
+  pointer-events: none;
+  filter: drop-shadow(0 4px 6px rgba(150, 80, 130, 0.4));
+  animation: handTap 0.9s ease-in-out infinite;
+}
+@keyframes handTap {
+  0%, 100% { transform: translate(-50%, -20%) scale(1); }
+  50%      { transform: translate(-50%, -34%) scale(0.88); }
+}
+
+/* ---------- けっか カード ---------- */
+#resultCard {
+  position: absolute;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 16px);
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.93);
+  border-radius: 32px;
+  padding: 14px 26px 18px;
+  box-shadow: 0 12px 30px rgba(200, 100, 170, 0.4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 15;
+  animation: cardPop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes cardPop {
+  from { transform: translateX(-50%) translateY(60px) scale(0.6); opacity: 0; }
+  to   { transform: translateX(-50%) translateY(0)    scale(1);   opacity: 1; }
+}
+
+#resultChara { font-size: clamp(34px, 6.4vmin, 52px); }
+
+#resultStars {
+  display: flex;
+  gap: 8px;
+  min-height: clamp(44px, 8vmin, 64px);
+  align-items: center;
+}
+#resultStars .rstar {
+  font-size: clamp(40px, 7.6vmin, 60px);
+  animation: rstarPop 0.5s cubic-bezier(0.34, 1.8, 0.64, 1) both;
+}
+#resultStars .rstar.dim {
+  filter: grayscale(1) opacity(0.3);
+  animation: none;
+}
+@keyframes rstarPop {
+  from { transform: scale(0) rotate(-160deg); }
+  to   { transform: scale(1) rotate(0deg); }
+}
+
+#resultButtons { display: flex; gap: 18px; }
+
+#retryBtn, #nextBtn {
+  border-radius: 50%;
+  font-weight: bold;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#retryBtn {
+  width: clamp(60px, 11vmin, 84px);
+  height: clamp(60px, 11vmin, 84px);
+  font-size: clamp(28px, 5.2vmin, 42px);
+  background: radial-gradient(circle at 35% 30%, #b7e6ff, #6fc4f5 60%, #4aa8e0);
+  box-shadow: 0 5px 0 #3a8cc0;
+}
+#nextBtn {
+  width: clamp(74px, 13.5vmin, 104px);
+  height: clamp(74px, 13.5vmin, 104px);
+  font-size: clamp(32px, 6vmin, 50px);
+  background: radial-gradient(circle at 35% 30%, #ffc9e2, #ff86bd 60%, #f75e9e);
+  box-shadow: 0 6px 0 #d14a86;
+  animation: ponPulse 1.2s ease-in-out infinite;
+}
+#retryBtn:active, #nextBtn:active { transform: translateY(4px); box-shadow: none; }
+
+/* ---------- かみふぶき ---------- */
+#confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 14;
+}
+.confettiBit {
+  position: absolute;
+  top: -5vh;
+  font-size: clamp(16px, 3vmin, 26px);
+  animation: confettiFall linear both;
+}
+@keyframes confettiFall {
+  from { transform: translateY(0)     rotate(0turn); }
+  to   { transform: translateY(115vh) rotate(3turn); }
+}
+
+/* ---------- タイトル ---------- */
+#title {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(14px, 3vmin, 28px);
+  background: linear-gradient(
+    180deg,
+    rgba(174, 228, 255, 0.94) 0%,
+    rgba(255, 227, 244, 0.94) 60%,
+    rgba(255, 209, 234, 0.96) 100%
+  );
+  transition: opacity 0.6s;
+}
+#title.fadeout { opacity: 0; pointer-events: none; }
+
+#titleArt {
+  font-size: clamp(70px, 17vmin, 150px);
+  animation: titleBob 2.4s ease-in-out infinite;
+}
+@keyframes titleBob {
+  0%, 100% { transform: translateY(0)    rotate(-4deg); }
+  50%      { transform: translateY(-14px) rotate(4deg); }
+}
+
+#title h1 {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: clamp(30px, 7.6vmin, 66px);
+  letter-spacing: 0.04em;
+  padding: 0 16px;
+  text-align: center;
+}
+#title h1 span {
+  animation: charBounce 1.6s ease-in-out infinite;
+  text-shadow: 0 3px 0 rgba(255, 255, 255, 0.9), 0 6px 12px rgba(220, 120, 180, 0.35);
+}
+#title h1 span:nth-child(10n+1)  { color: #ff6f9c; animation-delay: 0.00s; }
+#title h1 span:nth-child(10n+2)  { color: #ff9d5c; animation-delay: 0.08s; }
+#title h1 span:nth-child(10n+3)  { color: #ffc94d; animation-delay: 0.16s; }
+#title h1 span:nth-child(10n+4)  { color: #7ed37e; animation-delay: 0.24s; }
+#title h1 span:nth-child(10n+5)  { color: #5bbcf0; animation-delay: 0.32s; }
+#title h1 span:nth-child(10n+6)  { color: #9a8cf5; animation-delay: 0.40s; }
+#title h1 span:nth-child(10n+7)  { color: #d98cf0; animation-delay: 0.48s; }
+#title h1 span:nth-child(10n+8)  { color: #ff8cae; animation-delay: 0.56s; }
+#title h1 span:nth-child(10n+9)  { color: #ffab7a; animation-delay: 0.64s; }
+#title h1 span:nth-child(10n+10) { color: #82cfa8; animation-delay: 0.72s; }
+@keyframes charBounce {
+  0%, 100% { transform: translateY(0); }
+  30%      { transform: translateY(-10px); }
+}
+
+#startBtn {
+  font-size: clamp(26px, 5.6vmin, 44px);
+  font-weight: bold;
+  color: #fff;
+  background: radial-gradient(circle at 35% 30%, #ffb1d4, #ff7fb5 55%, #f75e9e);
+  border-radius: 999px;
+  padding: clamp(14px, 2.8vmin, 24px) clamp(38px, 7.6vmin, 68px);
+  box-shadow: 0 8px 0 #d14a86, 0 14px 28px rgba(230, 90, 160, 0.45);
+  animation: ponPulse 1.3s ease-in-out infinite;
+}
+#startBtn:active { transform: translateY(6px); box-shadow: 0 2px 0 #d14a86; }
+
+#titleHint {
+  font-size: clamp(16px, 3.2vmin, 26px);
+  color: #b0568f;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  padding: 8px 22px;
+}
+
+/* ---------- よこがめん ちょうせい ---------- */
+@media (orientation: landscape) and (max-height: 480px) {
+  #meterTube { height: clamp(110px, 30vh, 200px); }
+  #topbar { top: calc(env(safe-area-inset-top) + 6px); }
+  #bottombar { bottom: calc(env(safe-area-inset-bottom) + 8px); }
+}
