@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>スポンジまてんろう</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="ui">
+
+  <!-- タイトル -->
+  <div id="title" class="screen on">
+    <div class="logoWrap">
+      <div class="logoSponges">
+        <span class="ls" style="--d:0s">🧽</span><span class="ls" style="--d:.15s">🧽</span><span class="ls" style="--d:.3s">🧽</span>
+      </div>
+      <h1 class="logo">スポンジ<br>まてんろう</h1>
+      <div class="logoDeco">🌈 ✨ 💖 ✨ 🌈</div>
+    </div>
+    <button id="playBtn" aria-label="あそぶ">▶</button>
+  </div>
+
+  <!-- とう えらび -->
+  <div id="select" class="screen">
+    <h2 class="selTitle">どの とうで あそぶ？</h2>
+    <div id="towerGrid"></div>
+  </div>
+
+  <!-- あそびちゅう HUD -->
+  <div id="hud" class="screen">
+    <button id="homeBtn" aria-label="えらびなおす">🏠</button>
+    <div id="stars"></div>
+    <div id="toolbar">
+      <button id="rebuildBtn" aria-label="もういちど">🔄</button>
+    </div>
+    <div id="rainbowBanner">🌈✨🎀 にじが かんせい！ 🎀✨🌈</div>
+  </div>
+
+</div>
+
+<script src="lib/three.min.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
