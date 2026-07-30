@@ -56,13 +56,16 @@ export const CHAR = {
 }
 
 export const CAMERA = {
-  minDist: 1.6,
-  maxDist: 7.5,
-  initDist: 4.6,
-  initYaw: -0.32,
-  initPitch: 0.38,
+  minDist: 1.4,
+  maxDist: 5.6,
+  initDist: 3.4,
+  initYaw: 0.25,
+  initPitch: 0.3,
   minPitch: -0.15,
   maxPitch: 1.35,
+  /** 固定する水平FOV [rad](縦画面では垂直FOVを逆算して拡大) */
+  targetHFov: 1.08,
+  maxVFov: 1.35,
 }
 
 export const FLOOR_AREA = ROOM.width * ROOM.depth

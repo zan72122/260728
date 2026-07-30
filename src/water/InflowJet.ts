@@ -19,6 +19,9 @@ export class InflowJet {
   private spawnAcc = 0
   private fan: THREE.Mesh
   private fanMat: THREE.ShaderMaterial
+  private mist: THREE.Points
+  private mistMat: THREE.PointsMaterial
+  private mistSeed: Float32Array
 
   constructor(private flood: FloodSim) {
     this.pos = new Float32Array(MAX_P * 3)
@@ -106,6 +109,26 @@ export class InflowJet {
     this.fan.renderOrder = 11
     this.fan.visible = false
     this.group.add(this.fan)
+
+    // ドア開口のミスト(飛沫の霧)
+    const MIST_N = 14
+    this.mistSeed = new Float32Array(MIST_N)
+    const mistPos = new Float32Array(MIST_N * 3)
+    for (let i = 0; i < MIST_N; i++) this.mistSeed[i] = Math.random()
+    const mistGeo = new THREE.BufferGeometry()
+    mistGeo.setAttribute('position', new THREE.BufferAttribute(mistPos, 3).setUsage(THREE.DynamicDrawUsage))
+    this.mistMat = new THREE.PointsMaterial({
+      map: softCircleTexture(),
+      color: 0xd8e4dc,
+      size: 0.34,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    })
+    this.mist = new THREE.Points(mistGeo, this.mistMat)
+    this.mist.frustumCulled = false
+    this.mist.renderOrder = 12
+    this.group.add(this.mist)
   }
 
   update(dt: number, time: number): void {
@@ -164,8 +187,28 @@ export class InflowJet {
       this.size[i] = 0.03 + Math.random() * 0.05
       this.alpha[i] = 0.55
     }
+    // ミスト(開口付近の霧)
+    this.mistMat.opacity = Math.min(0.14, inten * 0.2)
+    if (inten > 0.02) {
+      const mp = this.mist.geometry.getAttribute('position') as THREE.BufferAttribute
+      const ox = DOOR.hingeX + DOOR.width * 0.5 * Math.cos(th) + DOOR.width * 0.5
+      const oz = -hd + DOOR.width * 0.5 * Math.sin(th) * 0.5
+      for (let i = 0; i < this.mistSeed.length; i++) {
+        const s = this.mistSeed[i]
+        const drift = (time * (0.2 + s * 0.3) + s * 7) % 1
+        mp.setXYZ(
+          i,
+          ox / 2 + dx * drift * 1.4 + (s - 0.5) * 0.7,
+          f.waterLevel + 0.15 + s * Math.max(0.3, DOOR.height - f.waterLevel) * 0.5,
+          oz + dz * drift * 1.4 + (Math.floor(s * 10) % 2 === 0 ? 0.2 : -0.1) * s
+        )
+      }
+      mp.needsUpdate = true
+    }
+
     // 更新
     const lvl = f.waterLevel
+    let splashBudget = 26
     for (let i = 0; i < this.alive; i++) {
       this.life[i] -= dt
       if (this.life[i] <= 0) {
@@ -182,7 +225,30 @@ export class InflowJet {
         continue
       }
       let vy = this.vel[i * 3 + 1]
+      const wasAbove = this.pos[i * 3 + 1] >= lvl
       const under = this.pos[i * 3 + 1] < lvl
+      // 着水の瞬間にスプラッシュを上げる
+      if (
+        wasAbove &&
+        this.pos[i * 3 + 1] + vy * dt < lvl &&
+        vy < -1.2 &&
+        splashBudget > 0 &&
+        this.alive < MAX_P - 2
+      ) {
+        splashBudget--
+        for (let k = 0; k < 2; k++) {
+          const j = this.alive++
+          this.pos[j * 3] = this.pos[i * 3] + (Math.random() - 0.5) * 0.06
+          this.pos[j * 3 + 1] = lvl + 0.02
+          this.pos[j * 3 + 2] = this.pos[i * 3 + 2] + (Math.random() - 0.5) * 0.06
+          this.vel[j * 3] = this.vel[i * 3] * 0.25 + (Math.random() - 0.5) * 0.5
+          this.vel[j * 3 + 1] = 0.9 + Math.random() * 1.1
+          this.vel[j * 3 + 2] = this.vel[i * 3 + 2] * 0.25 + (Math.random() - 0.5) * 0.5
+          this.life[j] = 0.3 + Math.random() * 0.2
+          this.size[j] = 0.06 + Math.random() * 0.05
+          this.alpha[j] = 0.65
+        }
+      }
       if (under) {
         // 水面下では泡として浮上・減速
         this.vel[i * 3] *= 1 - Math.min(1, 3 * dt)
@@ -215,5 +281,6 @@ export class InflowJet {
     this.spawnAcc = 0
     this.points.geometry.setDrawRange(0, 0)
     this.fan.visible = false
+    this.mistMat.opacity = 0
   }
 }

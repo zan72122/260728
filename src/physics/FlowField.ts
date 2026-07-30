@@ -47,7 +47,9 @@ export class FlowField {
     const axial = Math.min(1, 1.1 / (Math.max(0, s) + 1.1))
     // 開口高さの範囲(ほぼ全高から噴くが、水面近傍が最も強い)
     const hFade = p.y < DOOR.height ? 1 : Math.max(0, 1 - (p.y - DOOR.height) / 0.5)
-    const mag = v0 * lat * axial * hFade * Math.min(1, gap / 0.25 + 0.35)
+    // 流入が細るほど(満水間際の空気圧縮など)流れも弱まる
+    const inflowFade = Math.min(1, this.flood.inflowRate / 0.35)
+    const mag = v0 * lat * axial * hFade * Math.min(1, gap / 0.25 + 0.35) * inflowFade
     return out.set(this.dir.x * mag, 0, this.dir.z * mag)
   }
 }

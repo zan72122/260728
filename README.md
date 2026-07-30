@@ -41,7 +41,10 @@ npm run build    # ビルド
 npm test         # Playwright による決定的シミュレーション検証+スクリーンショット
 ```
 
-技術: Three.js + TypeScript + Vite + Rapier(@dimforge/rapier3d-compat)。
-テクスチャ・環境マップはすべて Canvas によるプロシージャル生成で、外部アセットはありません。
+技術: Three.js + TypeScript + Vite + Rapier(@dimforge/rapier3d-compat)+
+postprocessing/n8ao(SSAO・ブルーム・ビネット。メニューの品質切替でオフ可能)。
+テクスチャ(法線マップ含む)・環境マップはすべて Canvas によるプロシージャル生成で、外部アセットはありません。
+部屋の外から見たときは壁が透けて水槽のように浸水状況を観察できます(壁掛け物は
+カメラがその壁の外にあるとき自動で非表示)。視界を塞ぐ大型家具は自動で半透明になります。
 `?test=1` を付けると `window.__sim`(固定ステップ手動進行・状態取得)が公開され、
 決定的なテストができます。

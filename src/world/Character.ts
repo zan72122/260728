@@ -2,6 +2,7 @@
 // 浸水深に応じて WALK → WADE(滑る/よろける) → SWIM → AIR_POCKET と遷移する。
 
 import * as THREE from 'three'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import RAPIER from '@dimforge/rapier3d-compat'
 import { PhysicsWorld, GROUP_CHAR, GROUP_STATIC, GROUP_DOOR, GROUP_PROP, groups } from '../physics/PhysicsWorld'
 import { FlowField } from '../physics/FlowField'
@@ -32,6 +33,9 @@ export class Character {
   private walkPhase = 0
   private staggerPhase = 0
   private lean = new THREE.Vector2()
+  private swimPose = 0
+  private breathTime = 0
+  private breathTarget: THREE.Mesh | null = null
   private initPos = new THREE.Vector3(-1.0, CENTER_H, 0.15)
 
   // 身体パーツ(プロシージャルアニメ用ピボット)
@@ -77,53 +81,108 @@ export class Character {
   }
 
   private buildMesh(): void {
-    const skin = makeWettable(new THREE.MeshStandardMaterial({ color: 0xd9a884, roughness: 0.7 }))
-    const shirt = makeWettable(new THREE.MeshStandardMaterial({ color: 0x6f8fb0, roughness: 0.85 }))
-    const pants = makeWettable(new THREE.MeshStandardMaterial({ color: 0x474c56, roughness: 0.9 }))
-    const hair = makeWettable(new THREE.MeshStandardMaterial({ color: 0x33281f, roughness: 0.9 }))
+    const skin = makeWettable(new THREE.MeshStandardMaterial({ color: 0xd9a884, roughness: 0.62 }))
+    const shirt = makeWettable(new THREE.MeshStandardMaterial({ color: 0x6f8fb0, roughness: 0.88 }))
+    const shirtDark = makeWettable(new THREE.MeshStandardMaterial({ color: 0x5e7c9c, roughness: 0.9 }))
+    const pants = makeWettable(new THREE.MeshStandardMaterial({ color: 0x474c56, roughness: 0.92 }))
+    const shoe = makeWettable(new THREE.MeshStandardMaterial({ color: 0x2e2a26, roughness: 0.55 }))
+    const hair = makeWettable(new THREE.MeshStandardMaterial({ color: 0x33281f, roughness: 0.85 }))
 
     const root = new THREE.Group()
     this.mesh.add(root)
 
-    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.17, 0.19), pants)
-    pelvis.position.y = -0.18
+    // 骨盤〜腰(丸み)
+    const pelvis = new THREE.Mesh(new RoundedBoxGeometry(0.3, 0.2, 0.2, 3, 0.07), pants)
+    pelvis.position.y = -0.17
     root.add(pelvis)
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.3, 6, 12), shirt)
-    torso.scale.set(1.1, 1, 0.72)
-    torso.position.y = 0.1
-    const torsoPivot = new THREE.Group()
-    torsoPivot.add(torso)
-    root.add(torsoPivot)
+    const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.152, 0.158, 0.05, 16), shoe)
+    belt.scale.z = 0.72
+    belt.position.y = -0.06
+    root.add(belt)
 
+    const torsoPivot = new THREE.Group()
+    root.add(torsoPivot)
+    // 腹(シャツ)
+    const belly = new THREE.Mesh(new THREE.CapsuleGeometry(0.155, 0.1, 6, 14), shirt)
+    belly.scale.set(1.02, 0.95, 0.74)
+    belly.position.y = 0.02
+    torsoPivot.add(belly)
+    // 胸(シャツ)
+    const chest = new THREE.Mesh(new THREE.CapsuleGeometry(0.165, 0.16, 6, 14), shirt)
+    chest.scale.set(1.1, 1, 0.76)
+    chest.position.y = 0.18
+    torsoPivot.add(chest)
+    // シャツの裾
+    const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.165, 0.175, 0.07, 16), shirtDark)
+    hem.scale.z = 0.74
+    hem.position.y = -0.05
+    torsoPivot.add(hem)
+    // 襟
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.075, 0.045, 12), shirtDark)
+    collar.position.y = 0.375
+    torsoPivot.add(collar)
+    // 肩のブレンド球
+    for (const side of [-1, 1]) {
+      const sh = new THREE.Mesh(new THREE.SphereGeometry(0.068, 12, 10), shirt)
+      sh.position.set(side * 0.185, 0.3, 0)
+      torsoPivot.add(sh)
+    }
+
+    // 頭(のっぺらぼう維持)
     const headPivot = new THREE.Group()
     headPivot.position.y = 0.42
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.105, 18, 14), skin)
-    head.position.y = 0.09
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.105, 22, 18), skin)
+    head.scale.set(0.92, 1.05, 0.96)
+    head.position.y = 0.095
     headPivot.add(head)
     const hairCap = new THREE.Mesh(
-      new THREE.SphereGeometry(0.108, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      new THREE.SphereGeometry(0.109, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.52),
       hair
     )
-    hairCap.position.set(0, 0.1, -0.012)
+    hairCap.scale.set(0.94, 1.06, 0.99)
+    hairCap.position.set(0, 0.1, -0.014)
     headPivot.add(hairCap)
-    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.08, 10), skin)
-    neck.position.y = -0.015
+    // もみあげ・襟足
+    const nape = new THREE.Mesh(
+      new THREE.SphereGeometry(0.1, 16, 10, 0, Math.PI * 2, Math.PI * 0.35, Math.PI * 0.3),
+      hair
+    )
+    nape.scale.set(0.9, 1.05, 0.9)
+    nape.position.set(0, 0.1, -0.03)
+    headPivot.add(nape)
+    // 耳
+    for (const side of [-1, 1]) {
+      const ear = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6), skin)
+      ear.scale.set(0.5, 1, 0.8)
+      ear.position.set(side * 0.095, 0.085, -0.01)
+      headPivot.add(ear)
+    }
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.055, 0.09, 12), skin)
+    neck.position.y = -0.01
     headPivot.add(neck)
     torsoPivot.add(headPivot)
 
     const makeArm = (side: number) => {
       const shoulder = new THREE.Group()
-      shoulder.position.set(side * 0.21, 0.32, 0)
-      const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.048, 0.2, 4, 10), shirt)
-      upper.position.y = -0.14
+      shoulder.position.set(side * 0.21, 0.3, 0)
+      // 半袖: 上腕上部はシャツ
+      const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.12, 12), shirt)
+      sleeve.position.y = -0.06
+      shoulder.add(sleeve)
+      const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.16, 4, 12), skin)
+      upper.position.y = -0.17
       shoulder.add(upper)
       const elbow = new THREE.Group()
       elbow.position.y = -0.28
-      const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.042, 0.18, 4, 10), skin)
+      const elbowBall = new THREE.Mesh(new THREE.SphereGeometry(0.044, 10, 8), skin)
+      elbow.add(elbowBall)
+      const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.038, 0.17, 4, 12), skin)
+      fore.scale.set(1, 1, 0.92)
       fore.position.y = -0.12
       elbow.add(fore)
-      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), skin)
-      hand.position.y = -0.25
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.047, 12, 10), skin)
+      hand.scale.set(0.8, 1.3, 0.55)
+      hand.position.y = -0.26
       elbow.add(hand)
       shoulder.add(elbow)
       torsoPivot.add(shoulder)
@@ -134,17 +193,25 @@ export class Character {
 
     const makeLeg = (side: number) => {
       const hip = new THREE.Group()
-      hip.position.set(side * 0.095, -0.27, 0)
-      const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.26, 4, 10), pants)
-      thigh.position.y = -0.17
+      hip.position.set(side * 0.095, -0.25, 0)
+      const hipBall = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), pants)
+      hip.add(hipBall)
+      const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.068, 0.24, 4, 12), pants)
+      thigh.scale.set(1, 1, 0.95)
+      thigh.position.y = -0.18
       hip.add(thigh)
       const knee = new THREE.Group()
-      knee.position.y = -0.34
-      const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.24, 4, 10), pants)
-      shin.position.y = -0.16
+      knee.position.y = -0.36
+      const kneeBall = new THREE.Mesh(new THREE.SphereGeometry(0.058, 10, 8), pants)
+      knee.add(kneeBall)
+      const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.2, 4, 12), pants)
+      shin.position.y = -0.14
       knee.add(shin)
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.05, 0.22), hair)
-      foot.position.set(0, -0.31, 0.05)
+      const ankle = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), skin)
+      ankle.position.y = -0.27
+      knee.add(ankle)
+      const foot = new THREE.Mesh(new RoundedBoxGeometry(0.095, 0.06, 0.24, 2, 0.025), shoe)
+      foot.position.set(0, -0.3, 0.05)
       knee.add(foot)
       hip.add(knee)
       root.add(hip)
@@ -152,6 +219,7 @@ export class Character {
     }
     const legL = makeLeg(-1)
     const legR = makeLeg(1)
+    this.breathTarget = chest
 
     this.mesh.traverse((o) => {
       if (o instanceof THREE.Mesh) {
@@ -301,33 +369,48 @@ export class Character {
   private animate(dt: number, depth: number, inputMag: number): void {
     const p = this.parts
     const speed = Math.hypot(this.velocity.x, this.velocity.z)
-    if (this.state === 'WALK' || this.state === 'WADE') {
+    // 呼吸(常時、わずかに)
+    this.breathTime += dt
+    if (this.breathTarget) {
+      const b = 1 + Math.sin((this.breathTime * Math.PI * 2) / 3.2) * 0.009
+      this.breathTarget.scale.y = b
+    }
+    // 泳ぎ姿勢への滑らかな移行
+    const swimming = this.state === 'SWIM' || this.state === 'AIR_POCKET'
+    const swimLevel = swimming ? Math.min(1, inputMag * 1.5) : 0
+    const poseTarget = swimming ? swimLevel : 0
+    this.swimPose += (poseTarget - this.swimPose) * Math.min(1, 4 * dt)
+    const sp = this.swimPose * this.swimPose * (3 - 2 * this.swimPose)
+    p.root.rotation.x = -sp * 1.25
+
+    if (!swimming) {
+      // 非対称の踏み込み(sin + 2倍波)+ 腕は位相遅れ
       this.walkPhase += dt * (4 + speed * 5)
       const amp = Math.min(0.65, speed * 0.5 + (this.state === 'WADE' ? 0.25 : 0))
-      const s = Math.sin(this.walkPhase)
+      const gait = (x: number) => Math.sin(x) + 0.15 * Math.sin(2 * x)
+      const s = gait(this.walkPhase)
+      const sArm = gait(this.walkPhase - 0.18)
       p.legL.rotation.x = s * amp
       p.legR.rotation.x = -s * amp
       p.kneeL.rotation.x = Math.max(0, -s) * amp * 0.9
       p.kneeR.rotation.x = Math.max(0, s) * amp * 0.9
-      p.armL.rotation.x = -s * amp * 0.55
-      p.armR.rotation.x = s * amp * 0.55
-      p.elbowL.rotation.x = -0.2
-      p.elbowR.rotation.x = -0.2
+      p.armL.rotation.x = -sArm * amp * 0.5
+      p.armR.rotation.x = sArm * amp * 0.5
+      p.elbowL.rotation.x = -0.22 - Math.max(0, sArm) * amp * 0.25
+      p.elbowR.rotation.x = -0.22 - Math.max(0, -sArm) * amp * 0.25
       // 徒渉では腕でバランスを取る
       const spread = this.state === 'WADE' ? 0.5 + Math.min(0.4, depth * 0.3) : 0.06
       p.armL.rotation.z = -spread
       p.armR.rotation.z = spread
       p.torso.rotation.x = this.state === 'WADE' ? 0.12 : speed * 0.05
-      p.root.rotation.x = 0
+      p.head.rotation.x = this.state === 'WADE' ? -0.08 : 0
     } else {
       // 泳ぎ: 移動中は水平姿勢でクロール、停止中は立ち泳ぎ
       this.walkPhase += dt * (5 + speed * 4)
-      const swimLevel = Math.min(1, inputMag * 1.5)
-      p.root.rotation.x = -swimLevel * 1.25
       const s = Math.sin(this.walkPhase * 2)
       // バタ足
-      p.legL.rotation.x = s * 0.35 + swimLevel * 0.15
-      p.legR.rotation.x = -s * 0.35 + swimLevel * 0.15
+      p.legL.rotation.x = s * 0.35 + sp * 0.15
+      p.legR.rotation.x = -s * 0.35 + sp * 0.15
       p.kneeL.rotation.x = Math.max(0, s) * 0.3
       p.kneeR.rotation.x = Math.max(0, -s) * 0.3
       if (swimLevel > 0.3) {
@@ -346,8 +429,8 @@ export class Character {
         p.armR.rotation.x = 0
         p.armL.rotation.z = -0.9 - w * 0.25
         p.armR.rotation.z = 0.9 + w * 0.25
-        p.elbowL.rotation.x = 0
-        p.elbowR.rotation.x = 0
+        p.elbowL.rotation.x = -0.3 + w * 0.15
+        p.elbowR.rotation.x = -0.3 + w * 0.15
         p.head.rotation.x = 0
       }
       p.torso.rotation.x = 0

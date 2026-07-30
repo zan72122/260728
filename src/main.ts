@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import RAPIER from '@dimforge/rapier3d-compat'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { Renderer } from './engine/Renderer'
+import { PostFX } from './engine/PostFX'
 import { PhysicsWorld } from './physics/PhysicsWorld'
 import { Buoyancy } from './physics/Buoyancy'
 import { FlowField } from './physics/FlowField'
@@ -26,6 +27,7 @@ import { Hud } from './ui/Hud'
 
 class App {
   renderer: Renderer
+  postfx: PostFX | null = null
   scene = new THREE.Scene()
   rig: CameraRig
   physics: PhysicsWorld
@@ -56,9 +58,8 @@ class App {
     this.renderer = new Renderer(parent)
     this.rig = new CameraRig(window.innerWidth / window.innerHeight)
     this.renderer.onResize = (w, h) => {
-      this.rig.camera.aspect = w / h
-      this.rig.portraitBoost = h > w ? 1.25 : 1
-      this.rig.camera.updateProjectionMatrix()
+      this.rig.setViewport(w / h)
+      this.postfx?.setSize(w, h)
     }
     this.renderer.onResize(window.innerWidth, window.innerHeight)
 
@@ -66,22 +67,27 @@ class App {
     const dir = new THREE.DirectionalLight(0xfff4e0, 1.6)
     dir.position.set(2.5, 5.5, 3)
     dir.castShadow = true
-    dir.shadow.mapSize.set(1024, 1024)
+    dir.shadow.mapSize.set(2048, 2048)
     dir.shadow.camera.left = -3.5
     dir.shadow.camera.right = 3.5
     dir.shadow.camera.top = 3.5
     dir.shadow.camera.bottom = -3.5
     dir.shadow.camera.far = 15
-    dir.shadow.bias = -0.002
+    dir.shadow.bias = -0.0015
+    dir.shadow.radius = 3
     this.scene.add(dir)
-    const hemi = new THREE.HemisphereLight(0xdfe8dd, 0x3a3f36, 0.95)
+    const hemi = new THREE.HemisphereLight(0xdfe8dd, 0x3a3f36, 0.72)
     this.scene.add(hemi)
     const ceil = new THREE.PointLight(0xffe9c0, 12, 7)
     ceil.position.set(0, ROOM.height - 0.55, 0.25)
     this.scene.add(ceil)
+    // 窓からの冷たい水中光
+    const windowLight = new THREE.PointLight(0x9fc8d8, 3.5, 4.5)
+    windowLight.position.set(ROOM.width / 2 - 0.3, 1.4, 0.1)
+    this.scene.add(windowLight)
     const pmrem = new THREE.PMREMGenerator(this.renderer.renderer)
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
-    this.scene.environmentIntensity = 0.5
+    this.scene.environmentIntensity = 0.38
 
     // ワールド構築
     this.physics = new PhysicsWorld()
@@ -99,12 +105,18 @@ class App {
     this.flow = new FlowField(this.flood)
     this.buoyancy = new Buoyancy(this.flow)
     this.water = new WaterSurface(this.flood)
+    this.water.setLightDir(dir.position.clone())
     this.scene.add(this.water.mesh)
     this.scene.add(this.water.sides)
     this.jet = new InflowJet(this.flood)
     this.scene.add(this.jet.group)
     this.fx = new UnderwaterFX(this.flood, this.scene, dir, hemi)
     this.scene.add(this.fx.group)
+
+
+    // ポストプロセス
+    this.postfx = new PostFX(this.renderer.renderer, this.scene, this.rig.camera)
+    this.renderer.onContextRestored = () => this.postfx?.rebuild()
 
     // 入力
     this.joystick = new Joystick(parent)
@@ -114,12 +126,24 @@ class App {
       onReset: () => this.reset(),
       onQualityToggle: () => {
         const hi = this.renderer.dprCap < 2
-        this.renderer.setQuality(hi)
+        this.setQuality(hi)
         return hi
       },
     })
 
     if (this.testMode) this.installTestHooks()
+    // デバッグ: ?hide=jet,fx,char,water,outside,furniture でグループ非表示
+    const hide = new URLSearchParams(location.search).get('hide') ?? ''
+    if (hide.includes('jet')) this.jet.group.visible = false
+    if (hide.includes('fx')) this.fx.group.visible = false
+    if (hide.includes('char')) this.character.mesh.visible = false
+    if (hide.includes('water')) {
+      // update() が visible を毎フレーム上書きするのでスケールで消す
+      this.water.mesh.scale.setScalar(0.0001)
+      this.water.sides.scale.setScalar(0.0001)
+    }
+    if (hide.includes('outside')) this.outside.group.visible = false
+    if (hide.includes('furniture')) this.furniture.group.visible = false
     requestAnimationFrame(this.frame)
   }
 
@@ -152,10 +176,11 @@ class App {
     // 力の適用 → 物理 → 後処理
     this.doorSwipe.update(dt)
     this.door.applyTorques(this.flood.waterLevel)
-    this.buoyancy.apply(this.furniture.floatingBodies, this.flood.waterLevel)
+    this.buoyancy.apply(this.furniture.floatingBodies, this.flood.waterLevel, dt)
     this.character.update(dt, this.flood.waterLevel, this.flow, this.flood.ceilingLimit)
     this.physics.step()
     this.door.postStep()
+    this.furniture.postStep()
     this.furniture.sync()
   }
 
@@ -184,20 +209,39 @@ class App {
     this.water.update(t)
     this.jet.update(Math.min(dt, 0.05), t)
     this.outside.update(t)
-    this.furniture.updateClock(t)
+    this.furniture.updateClock(t, this.rig.camera.position.z)
+    this.room.updateCulling(this.rig.camera.position)
     this.door.updateGlow(t)
     wetUniforms.uWaterLevel.value = this.flood.waterLevel
     wetUniforms.uMaxLevel.value = this.flood.maxLevel
 
+    // 注視点は主人公を主、部屋中心を従にブレンド(隅にいても構図が偏らない)
     const target = this.character.position.clone()
     target.y += swim ? 0.45 : 0.35
+    target.multiplyScalar(0.75)
+    target.x += 0 * 0.25
+    target.y += 1.15 * 0.25
+    target.z += 0.1 * 0.25
     this.rig.setTarget(target)
     this.rig.update(dt)
+    this.furniture.updateOcclusionFade(this.rig.camera.position, this.rig.lastTarget, dt)
     this.fx.update(dt, t, this.rig.camera.position.y)
     this.hud.update(dt)
 
-    this.renderer.renderer.render(this.scene, this.rig.camera)
+    if (this.postfx?.active) {
+      this.postfx.render(dt)
+    } else {
+      this.renderer.renderer.render(this.scene, this.rig.camera)
+    }
     requestAnimationFrame(this.frame)
+  }
+
+  setQuality(hi: boolean): void {
+    this.renderer.setQuality(hi)
+    this.postfx?.setEnabled(hi)
+    const w = window.visualViewport?.width ?? window.innerWidth
+    const h = window.visualViewport?.height ?? window.innerHeight
+    this.postfx?.setSize(w, h)
   }
 
   reset(): void {
@@ -224,6 +268,44 @@ class App {
         this.moveOverride = x === 0 && y === 0 ? null : { x, y }
       },
       reset: () => this.reset(),
+      setQuality: (hi: boolean) => this.setQuality(hi),
+      bodyStates: () =>
+        this.furniture.props.map((p) => {
+          const t = p.body.translation()
+          const v = p.body.linvel()
+          const a = p.body.angvel()
+          return {
+            name: p.name,
+            pos: [t.x, t.y, t.z],
+            vel: [v.x, v.y, v.z],
+            ang: [a.x, a.y, a.z],
+            sleeping: p.body.isSleeping(),
+          }
+        }),
+      roomCoverage: () => {
+        // 部屋の8隅を投影し、NDC バウンディングの画面占有率を返す
+        this.rig.camera.updateMatrixWorld()
+        let minX = Infinity
+        let maxX = -Infinity
+        let minY = Infinity
+        let maxY = -Infinity
+        for (const sx of [-1, 1])
+          for (const sy of [0, 1])
+            for (const sz of [-1, 1]) {
+              const v = new THREE.Vector3(
+                (sx * ROOM.width) / 2,
+                sy * ROOM.height,
+                (sz * ROOM.depth) / 2
+              ).project(this.rig.camera)
+              minX = Math.min(minX, v.x)
+              maxX = Math.max(maxX, v.x)
+              minY = Math.min(minY, v.y)
+              maxY = Math.max(maxY, v.y)
+            }
+        const w = Math.min(1, maxX / 2 + 0.5) - Math.max(0, minX / 2 + 0.5)
+        const h = Math.min(1, maxY / 2 + 0.5) - Math.max(0, minY / 2 + 0.5)
+        return Math.max(0, w) * Math.max(0, h)
+      },
       knobScreen: () => {
         const v = new THREE.Vector3()
         this.door.knobWorld(v)
@@ -237,8 +319,11 @@ class App {
         waterLevel: this.flood.waterLevel,
         inflowRate: this.flood.inflowRate,
         doorAngle: this.door.openAngle,
+        doorPos: { ...this.door.mesh.position },
         charState: this.character.state,
         charPos: { ...this.character.position },
+        camPos: { ...this.rig.camera.position },
+        camDist: this.rig.dist,
         time: this.simTime,
       }),
     }

@@ -2,14 +2,28 @@
 // 室内が見通せる。コライダーは壁厚のあるボックス。
 
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { PhysicsWorld } from '../physics/PhysicsWorld'
 import { DOOR, ROOM } from '../sim/constants'
-import { floorMat, wallMat, woodDarkMat, whiteMat } from '../gfx/materials'
+import {
+  floorMat,
+  wallMat,
+  woodDarkMat,
+  whiteMat,
+  rugMat,
+  makeWettable,
+} from '../gfx/materials'
+import { fabricTexture, paintingTexture } from '../gfx/textures'
 
 export const WINDOW_RECT = { z0: -0.55, z1: 0.75, y0: 0.9, y1: 1.9 } // +x壁
 
 export class Room {
   group = new THREE.Group()
+  // 壁ごとの装飾(額縁・カーテン等)。カメラがその壁の外に出たら隠す
+  // (壁自体は内向き面で外から見えないため、裏面だけ宙に浮いて見えるのを防ぐ)
+  private decorBack = new THREE.Group()
+  private decorLeft = new THREE.Group()
+  private decorRight = new THREE.Group()
 
   constructor(physics: PhysicsWorld) {
     const W = ROOM.width
@@ -115,6 +129,122 @@ export class Room {
     // 窓の中桟
     wf(0.03, wy1 - wy0, (wy0 + wy1) / 2, (wz0 + wz1) / 2)
 
+    // ---- 建築ディテール(巾木・廻り縁・ケーシング) ----
+    // 1メッシュに結合してドローコールを抑える
+    const trims: THREE.BufferGeometry[] = []
+    const trim = (w: number, h: number, d: number, x: number, y: number, z: number) => {
+      trims.push(new THREE.BoxGeometry(w, h, d).translate(x, y, z))
+    }
+    const bbH = 0.09
+    const bbT = 0.018
+    // 巾木(ドア開口を避ける)
+    trim(dx0 + hw, bbH, bbT, (-hw + dx0) / 2, bbH / 2, -hd + bbT / 2)
+    trim(hw - dx1, bbH, bbT, (dx1 + hw) / 2, bbH / 2, -hd + bbT / 2)
+    trim(W, bbH, bbT, 0, bbH / 2, hd - bbT / 2)
+    trim(bbT, bbH, D, -hw + bbT / 2, bbH / 2, 0)
+    trim(bbT, bbH, D, hw - bbT / 2, bbH / 2, 0)
+    // 廻り縁
+    const cmH = 0.05
+    const cmT = 0.02
+    trim(W, cmH, cmT, 0, H - cmH / 2, -hd + cmT / 2)
+    trim(W, cmH, cmT, 0, H - cmH / 2, hd - cmT / 2)
+    trim(cmT, cmH, D, -hw + cmT / 2, H - cmH / 2, 0)
+    trim(cmT, cmH, D, hw - cmT / 2, H - cmH / 2, 0)
+    // ドアケーシング(枠の外側の平板)
+    const caW = 0.09
+    const caT = 0.022
+    trim(caW, dh + caW, caT, dx0 - 0.06 - caW / 2 + 0.06, (dh + caW) / 2, -hd + caT / 2)
+    trim(caW, dh + caW, caT, dx1 + 0.06 + caW / 2 - 0.06, (dh + caW) / 2, -hd + caT / 2)
+    trim(dx1 - dx0 + 0.12 + caW * 2, caW, caT, (dx0 + dx1) / 2, dh + 0.06 + caW / 2, -hd + caT / 2)
+    // 窓ケーシング+窓台
+    trim(caT, wy1 - wy0 + caW * 2, caW, hw - caT / 2, (wy0 + wy1) / 2, wz0 - 0.05 - caW / 2 + 0.05)
+    trim(caT, wy1 - wy0 + caW * 2, caW, hw - caT / 2, (wy0 + wy1) / 2, wz1 + 0.05 + caW / 2 - 0.05)
+    trim(caT, caW, wz1 - wz0 + 0.1 + caW * 2, hw - caT / 2, wy1 + 0.05 + caW / 2, (wz0 + wz1) / 2)
+    trim(0.07, 0.03, wz1 - wz0 + 0.2, hw - 0.045, wy0 - 0.04, (wz0 + wz1) / 2)
+    const trimMat = makeWettable(
+      new THREE.MeshStandardMaterial({ color: 0xf4f2ec, roughness: 0.35, metalness: 0.05 })
+    )
+    const trimMesh = new THREE.Mesh(mergeGeometries(trims), trimMat)
+    trimMesh.castShadow = true
+    trimMesh.receiveShadow = true
+    this.group.add(trimMesh)
+
+    // ---- カーテン(窓の両脇、波形を焼き込んだ静的メッシュ) ----
+    const curtainMat = makeWettable(
+      new THREE.MeshStandardMaterial({
+        map: fabricTexture(142, 152, 168),
+        roughness: 1,
+        metalness: 0,
+        side: THREE.DoubleSide,
+      })
+    )
+    for (const side of [-1, 1]) {
+      const cg = new THREE.PlaneGeometry(0.42, wy1 - wy0 + 0.5, 16, 8)
+      const pos = cg.getAttribute('position') as THREE.BufferAttribute
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i)
+        pos.setZ(i, 0.045 * Math.sin(x * 34) + 0.025 * Math.sin(x * 15 + 1.7))
+      }
+      cg.computeVertexNormals()
+      const cm = new THREE.Mesh(cg, curtainMat)
+      cm.position.set(
+        hw - 0.1,
+        (wy0 + wy1) / 2 + 0.12,
+        side > 0 ? wz1 + 0.12 : wz0 - 0.12
+      )
+      cm.rotation.y = -Math.PI / 2
+      cm.castShadow = true
+      this.decorRight.add(cm)
+    }
+    // カーテンレール
+    const rail = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.012, 0.012, wz1 - wz0 + 0.55, 8),
+      woodDarkMat()
+    )
+    rail.rotation.x = Math.PI / 2
+    rail.position.set(hw - 0.1, wy1 + 0.28, (wz0 + wz1) / 2)
+    this.decorRight.add(rail)
+
+    // ---- ラグ(テーブル下) ----
+    const rug = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.014, 1.25), rugMat())
+    rug.position.set(0.6, 0.007, 0.55)
+    rug.rotation.y = 0.08
+    rug.receiveShadow = true
+    this.group.add(rug)
+
+    // ---- 額縁 ----
+    const framePic = (
+      w: number,
+      h: number,
+      x: number,
+      y: number,
+      z: number,
+      ry: number,
+      seed: number
+    ) => {
+      const g = new THREE.Group()
+      const fr = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.03), woodDarkMat())
+      fr.castShadow = true
+      g.add(fr)
+      const pic = new THREE.Mesh(
+        new THREE.PlaneGeometry(w - 0.07, h - 0.07),
+        new THREE.MeshStandardMaterial({ map: paintingTexture(seed), roughness: 0.85 })
+      )
+      pic.position.z = 0.017
+      g.add(pic)
+      g.position.set(x, y, z)
+      g.rotation.y = ry
+      return g
+    }
+    this.decorBack.add(framePic(0.52, 0.68, -0.85, 1.5, hd - 0.03, Math.PI, 0))
+    this.decorLeft.add(framePic(0.62, 0.46, -hw + 0.03, 1.5, 0.65, Math.PI / 2, 1))
+    this.group.add(this.decorBack, this.decorLeft, this.decorRight)
+
+    // ---- シーリングローズ(照明の根本) ----
+    const rose = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.025, 24), whiteMat())
+    rose.position.set(0, H - 0.012, 0.25)
+    this.group.add(rose)
+
     // ---- コライダー ----
     // 床・天井
     physics.addStaticBox(0, -0.1, 0, hw + 0.5, 0.1, hd + 0.5)
@@ -128,5 +258,12 @@ export class Room {
     physics.addStaticBox(0, H / 2, hd + T / 2, hw, H / 2, T / 2)
     physics.addStaticBox(-hw - T / 2, H / 2, 0, T / 2, H / 2, hd)
     physics.addStaticBox(hw + T / 2, H / 2, 0, T / 2, H / 2, hd)
+  }
+
+  /** カメラが壁の外にあるとき、その壁の装飾を隠す */
+  updateCulling(camPos: THREE.Vector3): void {
+    this.decorBack.visible = camPos.z < ROOM.depth / 2 + 0.05
+    this.decorLeft.visible = camPos.x > -ROOM.width / 2 - 0.05
+    this.decorRight.visible = camPos.x < ROOM.width / 2 + 0.05
   }
 }

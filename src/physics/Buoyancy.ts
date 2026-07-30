@@ -40,12 +40,19 @@ const _rel = new THREE.Vector3()
 export class Buoyancy {
   constructor(private flow: FlowField) {}
 
-  apply(items: FloatingBody[], waterLevel: number): void {
+  apply(items: FloatingBody[], waterLevel: number, dt: number): void {
     for (const it of items) {
       const b = it.body
       const t = b.translation()
       const bottom = t.y - it.half.y * 1.2
-      if (waterLevel <= bottom + 0.01) continue
+      if (waterLevel <= bottom + 0.01) {
+        // 水面上に出た物は抗力を解除
+        if (b.linearDamping() !== 0) {
+          b.setLinearDamping(0)
+          b.setAngularDamping(0)
+        }
+        continue
+      }
       if (b.isSleeping()) b.wakeUp()
 
       b.resetForces(true)
@@ -55,35 +62,74 @@ export class Buoyancy {
       _v.set(lv.x, lv.y, lv.z)
 
       const fPerSample = (WATER.rho * WATER.g * it.dispVol) / SAMPLES.length
+      // 2パス: まず水没率を集計し、合計浮力をクランプしてから適用する
+      // (軽い物への過大な加速で天井を突き抜ける事故を防ぐ)
+      const subs: number[] = []
       let submerged = 0
       for (const s of SAMPLES) {
         _p.set(s[0] * it.half.x, s[1] * it.half.y, s[2] * it.half.z)
           .applyQuaternion(_q)
           .add(_c)
-        // 滑らかな水没率(安定化)
         const sub = Math.min(1, Math.max(0, (waterLevel - _p.y) / 0.08))
-        if (sub <= 0) continue
+        subs.push(sub)
         submerged += sub / SAMPLES.length
-        b.addForceAtPoint({ x: 0, y: fPerSample * sub, z: 0 }, { x: _p.x, y: _p.y, z: _p.z }, true)
       }
-      if (submerged <= 0) continue
+      const mass = b.mass()
+      const totalF = fPerSample * subs.reduce((a, x) => a + x, 0)
+      const maxF = mass * (WATER.g + 45)
+      const fScale = totalF > maxF ? maxF / totalF : 1
+      // 上向きに速い間は浮力を弱める(水面での暴れ防止)
+      const vyDamp = _v.y > 0.5 ? Math.max(0.25, 1 - (_v.y - 0.5) * 0.35) : 1
+      for (let i = 0; i < SAMPLES.length; i++) {
+        if (subs[i] <= 0) continue
+        const s = SAMPLES[i]
+        _p.set(s[0] * it.half.x, s[1] * it.half.y, s[2] * it.half.z)
+          .applyQuaternion(_q)
+          .add(_c)
+        b.addForceAtPoint(
+          { x: 0, y: fPerSample * subs[i] * fScale * vyDamp, z: 0 },
+          { x: _p.x, y: _p.y, z: _p.z },
+          true
+        )
+      }
+      if (submerged <= 0) {
+        b.setLinearDamping(0)
+        b.setAngularDamping(0)
+        continue
+      }
 
       const ds = it.dragScale ?? 1
-      // 抗力(線形+二次)
+      // 抗力は implicit damping で適用(慣性が小さい物でも無条件安定)
+      b.setLinearDamping((1.2 + 0.8 * ds) * submerged)
+      b.setAngularDamping((4.5 + 2 * ds) * submerged)
+
+      // 水流の力(二次抗力)。1ステップで相対速度を超えないようクランプ
       this.flow.velocityAt(_c, _u)
       _rel.copy(_u).sub(_v)
       const relMag = _rel.length()
-      const cLin = 18 * it.dispVol * 1000 * 0.06 * ds
-      const cQuad = 0.5 * WATER.rho * 1.0 * it.frontal * ds
-      const fx = _rel.x * (cLin + cQuad * relMag) * submerged
-      const fy = _rel.y * (cLin + cQuad * relMag) * submerged
-      const fz = _rel.z * (cLin + cQuad * relMag) * submerged
-      b.addForce({ x: fx, y: fy, z: fz }, true)
+      if (relMag > 0.01) {
+        const cQuad = 0.5 * WATER.rho * 1.0 * it.frontal * ds
+        let fMag = cQuad * relMag * relMag * submerged
+        const fMax = (mass * relMag) / dt * 0.5
+        if (fMag > fMax) fMag = fMax
+        b.addForce(
+          { x: (_rel.x / relMag) * fMag, y: (_rel.y / relMag) * fMag, z: (_rel.z / relMag) * fMag },
+          true
+        )
+      }
 
-      // 回転抗力
+      // 保険: 速度の暴走を抑える(ソルバーのパニック防止)
       const av = b.angvel()
-      const cAng = (2.5 * it.dispVol * 1000 * 0.05 + 0.4) * submerged * ds
-      b.addTorque({ x: -av.x * cAng, y: -av.y * cAng, z: -av.z * cAng }, true)
+      const avMag = Math.hypot(av.x, av.y, av.z)
+      if (avMag > 25) {
+        const k = 25 / avMag
+        b.setAngvel({ x: av.x * k, y: av.y * k, z: av.z * k }, true)
+      }
+      const vMag = _v.length()
+      if (vMag > 12) {
+        const k = 12 / vMag
+        b.setLinvel({ x: _v.x * k, y: _v.y * k, z: _v.z * k }, true)
+      }
     }
   }
 }

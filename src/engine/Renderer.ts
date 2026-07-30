@@ -8,6 +8,7 @@ export class Renderer {
   canvas: HTMLCanvasElement
   dprCap = 2
   onResize: ((w: number, h: number) => void) | null = null
+  onContextRestored: (() => void) | null = null
 
   constructor(parent: HTMLElement) {
     this.canvas = document.createElement('canvas')
@@ -33,7 +34,10 @@ export class Renderer {
     window.addEventListener('orientationchange', doResize)
 
     this.canvas.addEventListener('webglcontextlost', (e) => e.preventDefault())
-    this.canvas.addEventListener('webglcontextrestored', () => this.applySize())
+    this.canvas.addEventListener('webglcontextrestored', () => {
+      this.applySize()
+      this.onContextRestored?.()
+    })
   }
 
   setQuality(hi: boolean): void {

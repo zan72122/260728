@@ -19,6 +19,8 @@ declare global {
       setDoorOmega: (omega: number, seconds: number) => void
       setMove: (x: number, y: number) => void
       reset: () => void
+      setQuality: (hi: boolean) => void
+      roomCoverage: () => number
       knobScreen: () => { x: number; y: number }
       state: () => SimState
     }
@@ -137,6 +139,33 @@ test.describe('浸水シミュレーション', () => {
     expect(s.doorAngle).toBeGreaterThan(0.08)
   })
 
+  test('構図: 縦画面で部屋が画面を満たす', async ({ page }) => {
+    await boot(page)
+    await page.waitForTimeout(1200) // カメラのスムージング収束待ち
+    const cov = await page.evaluate(() => window.__sim.roomCoverage())
+    expect(cov).toBeGreaterThan(0.8)
+  })
+
+  test('品質トグルで両レンダリング経路が生存する', async ({ page }) => {
+    await boot(page)
+    await page.evaluate(() => {
+      window.__sim.setQuality(false)
+      window.__sim.step(30)
+    })
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: 'e2e/out/quality-low.png' })
+    const s1 = await state(page)
+    expect(s1.time).toBeGreaterThan(0)
+    await page.evaluate(() => {
+      window.__sim.setQuality(true)
+      window.__sim.step(30)
+    })
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: 'e2e/out/quality-high.png' })
+    const s2 = await state(page)
+    expect(s2.time).toBeGreaterThan(s1.time - 0.001)
+  })
+
   test('リセットで初期状態に戻る', async ({ page }) => {
     await boot(page)
     await page.evaluate(() => {
@@ -162,5 +191,12 @@ test.describe('横画面', () => {
       window.__sim.step(420)
     })
     await page.screenshot({ path: 'e2e/out/landscape-flood.png' })
+  })
+
+  test('構図: 横画面で部屋が画面を満たす', async ({ page }) => {
+    await boot(page)
+    await page.waitForTimeout(1200)
+    const cov = await page.evaluate(() => window.__sim.roomCoverage())
+    expect(cov).toBeGreaterThan(0.8)
   })
 })
