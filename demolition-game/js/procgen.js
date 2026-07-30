@@ -127,14 +127,10 @@
     r = towerSeg(CENTER, w2, r, seg2H, layer, bodyColor);
     r = towerSeg(CENTER, w3, r, seg3H, layer, bodyColor);
 
-    const rw = Math.max(1, w3 - 2);
-    const rl = CENTER - Math.floor(rw / 2);
-    for (let c = rl; c < rl + rw; c++) place(c, r, layer, roofColor, 'tri');
-    place(CENTER, r + 1, layer, roofColor, 'tri');
-    if (r + 3 < ROWS) {
-      place(CENTER, r + 2, layer, STONE, 'sq');
-      place(CENTER, r + 3, layer, STONE, 'sq');
-    }
+    /* とがった屋根（はば全部→さらに中心だけ、で先細りのスパイアに） */
+    const left3 = CENTER - Math.floor((w3 - 1) / 2);
+    for (let c = left3; c < left3 + w3; c++) place(c, r, layer, roofColor, 'tri');
+    if (w3 >= 3) place(CENTER, r + 1, layer, roofColor, 'tri');
   }
 
   /* ---------- おうち 🏠 ---------- */
