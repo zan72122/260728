@@ -141,7 +141,16 @@
     e.preventDefault();
     audio.unlock();
     if (scene === 'play') game.tap(e.clientX, e.clientY);
-    else if (scene === 'build') window.GameBuild.tap(e.clientX, e.clientY);
+    else if (scene === 'build') window.GameBuild.strokeStart(e.clientX, e.clientY);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (scene === 'build') window.GameBuild.strokeMove(e.clientX, e.clientY);
+  });
+  window.addEventListener('pointerup', () => {
+    if (scene === 'build') window.GameBuild.strokeEnd();
+  });
+  window.addEventListener('pointercancel', () => {
+    if (scene === 'build') window.GameBuild.strokeEnd();
   });
 
   /* スクロール・ダブルタップズームの抑止 */

@@ -13,7 +13,7 @@
     ['hud', 'dust-fill', 'msg-banner', 'tutor-hand', 'scr-title', 'scr-select',
      'scr-result', 'scr-fail', 'level-grid', 'result-title', 'result-stars',
      'result-comment', 'btn-mute', 'btn-next', 'btn-go', 'btn-retry',
-     'build-bar', 'palette-row', 'btn-build-done', 'dust-meter'].forEach((id) => {
+     'build-bar', 'palette-row', 'brush-row', 'btn-build-done', 'dust-meter'].forEach((id) => {
       ui.els[id] = $(id);
     });
   };
@@ -68,24 +68,71 @@
   ui.hideGo = function () { ui.els['btn-go'].classList.add('hidden'); };
 
   /* ---------- 建築モードのツールバー ---------- */
-  ui.showBuildBar = function (palettes, selIdx, onPick) {
+  ui.showBuildBar = function (cfg) {
     const row = ui.els['palette-row'];
     row.innerHTML = '';
-    palettes.forEach((p, i) => {
+    cfg.palettes.forEach((p, i) => {
       const dot = document.createElement('button');
-      dot.className = 'pal-dot' + (i === selIdx ? ' sel' : '');
+      dot.className = 'pal-dot';
+      dot.dataset.pal = i;
       dot.style.background = p.wall;
       dot.setAttribute('aria-label', 'いろ' + (i + 1));
       dot.addEventListener('pointerdown', (e) => {
         e.preventDefault();
-        row.querySelectorAll('.pal-dot').forEach((d) => d.classList.remove('sel'));
-        dot.classList.add('sel');
-        onPick(i);
+        cfg.onColor(i);
       });
       row.appendChild(dot);
     });
+    /* けしゴム */
+    const eraser = document.createElement('button');
+    eraser.className = 'pal-dot tool-eraser';
+    eraser.id = 'btn-eraser';
+    eraser.textContent = '🧽';
+    eraser.setAttribute('aria-label', 'けす');
+    eraser.addEventListener('pointerdown', (e) => { e.preventDefault(); cfg.onEraser(); });
+    row.appendChild(eraser);
+
+    /* ブラシサイズ＋もどす */
+    const brow = ui.els['brush-row'];
+    brow.innerHTML = '';
+    [1, 2, 4, 8].forEach((n) => {
+      const btn = document.createElement('button');
+      btn.className = 'brush-btn';
+      btn.dataset.n = n;
+      btn.setAttribute('aria-label', n + 'x' + n);
+      const sq = document.createElement('span');
+      sq.className = 'sq sq-' + n;
+      btn.appendChild(sq);
+      btn.addEventListener('pointerdown', (e) => { e.preventDefault(); cfg.onBrush(n); });
+      brow.appendChild(btn);
+    });
+    const undo = document.createElement('button');
+    undo.className = 'brush-btn undo-btn';
+    undo.id = 'btn-undo';
+    undo.textContent = '↩';
+    undo.setAttribute('aria-label', 'もどす');
+    undo.addEventListener('pointerdown', (e) => { e.preventDefault(); cfg.onUndo(); });
+    brow.appendChild(undo);
+
+    ui.setBuildTool(cfg.mode, cfg.palIdx);
+    ui.setBrushSel(cfg.brush);
     ui.els['build-bar'].classList.remove('hidden');
   };
+
+  ui.setBuildTool = function (mode, palIdx) {
+    const row = ui.els['palette-row'];
+    row.querySelectorAll('.pal-dot').forEach((d) => {
+      if (d.id === 'btn-eraser') d.classList.toggle('sel', mode === 'erase');
+      else d.classList.toggle('sel', mode === 'draw' && Number(d.dataset.pal) === palIdx);
+    });
+  };
+
+  ui.setBrushSel = function (n) {
+    ui.els['brush-row'].querySelectorAll('.brush-btn').forEach((b) => {
+      b.classList.toggle('sel', !b.id && Number(b.dataset.n) === n);
+    });
+  };
+
   ui.hideBuildBar = function () { ui.els['build-bar'].classList.add('hidden'); };
   ui.setBuildDoneEnabled = function (on) { ui.els['btn-build-done'].disabled = !on; };
 

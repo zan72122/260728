@@ -13,6 +13,7 @@
   let blockMeshes = [], hintNodes = [], neighborNodes = [], cloudNodes = [];
   const fxMap = new Map();   /* パーティクル → Object3D */
   const bombMap = new Map(); /* 爆弾 → 3Dグループ（ブロックに追従） */
+  const editMap = new Map(); /* 建築モードの編集セル "c,r" → Mesh */
   let fitInfo = null;
 
   const ty = (my) => GROUND_Y - my; /* matter y → three y */
@@ -350,6 +351,30 @@
     };
   };
 
+  /* 建築モード：セル1個のブロックメッシュを即時 追加/差替/削除する
+   * （ドラッグ描画のためシーン全再構築を避ける） */
+  R.setEditBlock = function (key, wx, wy, palette, hasWindow) {
+    let mesh = editMap.get(key);
+    if (!palette) {
+      if (mesh) {
+        levelGroup.remove(mesh);
+        editMap.delete(key);
+      }
+      return;
+    }
+    const mats = blockMats(palette, hasWindow);
+    if (mesh) {
+      mesh.material = mats;
+    } else {
+      mesh = new THREE.Mesh(blockGeo(), mats);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      levelGroup.add(mesh);
+      editMap.set(key, mesh);
+    }
+    mesh.position.set(wx, ty(wy), 0);
+  };
+
   /* 画面座標 → z=0 平面上のワールド座標（matter系） */
   R.worldFromScreen = function (sx, sy) {
     const v = new THREE.Vector3(
@@ -579,6 +604,7 @@
     if (fxGroup) { scene.remove(fxGroup); }
     fxMap.clear();
     bombMap.clear();
+    editMap.clear();
     levelGroup = new THREE.Group();
     fxGroup = new THREE.Group();
     blockMeshes = [];

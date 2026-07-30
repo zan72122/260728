@@ -123,7 +123,16 @@
       }
     });
 
-    /* カメラ用のシーン範囲 */
+    /* カメラ用のシーン範囲（level.viewBounds があればそれを優先） */
+    if (level.viewBounds) {
+      state.bounds = {
+        minX: level.viewBounds.minX - 110,
+        maxX: level.viewBounds.maxX + 110,
+        topY: level.viewBounds.topY,
+        bottomY: GROUND_Y + 90,
+      };
+      return state;
+    }
     let minX = Infinity, maxX = -Infinity, maxRows = 0;
     level.buildings.forEach((sp) => {
       minX = Math.min(minX, sp.x - (sp.cols * B) / 2);
