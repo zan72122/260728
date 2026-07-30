@@ -1053,6 +1053,7 @@
         grid: grid, gi: gi, nx: nx, ny: ny, nz: nz, ox: ox, oz: oz,
         freeList: [], dirtyColor: [], pending: [],
         center: new THREE.Vector3(0, (maxIy * cell) / 2, 0),
+        halfW: Math.max((maxX - minX), (maxZ - minZ)) / 2 * cell,
         maxAttY: maxIy * cell, supportT: 0,
         comRest: new THREE.Vector2(), comCur: new THREE.Vector2(), attN: n,
         napThresh: 4, // ずぶぬれ柱の生き残りは最大4セル（物理仕様）なので、それ以下なら「もう倒れた」扱い
@@ -1120,8 +1121,38 @@
     // --- 重心オフセット（前フレームの見た目から） ---
     var comOffX = 0, comOffZ = 0, comN = 0;
 
-    // --- 柱ごとの ばね ---
+    // --- 水は下へながれる（ぬれ筋がツーッと下に走る） ---
     var cols = vx.columns;
+    for (var fci = 0; fci < cols.length; fci++) {
+      var fc = cols[fci];
+      for (var fk = fc.attLen - 1; fk >= 1; fk--) {
+        var fv = fc.vox[fk];
+        if (fv.wet > 0.42) {
+          var below = fc.vox[fk - 1];
+          var mv = (fv.wet - 0.42) * 0.55 * dt;
+          fv.wet -= mv * 0.5;                       // 半分は通り道に残る
+          below.wet = Math.min(1, below.wet + mv);
+          if (!fv.dirty) { fv.dirty = 1; vx.dirtyColor.push(fv); }
+          if (!below.dirty) { below.dirty = 1; vx.dirtyColor.push(below); }
+        }
+      }
+      // いちばん下が びしょびしょ → 張り出しから ポタポタ・じめんに 水たまり
+      if (fc.attLen > 0) {
+        var fb = fc.vox[0];
+        if (fb.wet > 0.75 && Math.random() < dt * 2.5) {
+          var dripY = GROUND_Y + fc.baseIy * vx.cell;
+          if (Math.random() < perfScale) {
+            spawnP(TEX.dot('#7ec8ff', true), {
+              pos: new THREE.Vector3(fc.wx + rand(-0.2, 0.2), dripY, fc.wz + rand(-0.2, 0.2)),
+              vel: new THREE.Vector3(0, -0.5, 0),
+              grav: 5, life: 0.7, size: 0.14, fade: false
+            });
+          }
+          addPuddle(fc.wx, fc.wz, 0.06);
+          fb.wet = Math.max(0, fb.wet - 0.015);
+        }
+      }
+    }
     for (var ci = 0; ci < cols.length; ci++) {
       var col = cols[ci];
       if (col.attLen <= 0) continue;
@@ -1151,8 +1182,8 @@
         fx += Math.cos(dA) * dK;
         fz += Math.sin(dA) * dK;
       }
-      fx += G.wind.x * (0.5 + 0.5 * clamp(Hc / 6, 0, 1)) * (1.25 - wetAvg) * 1.1;
-      fz += G.wind.y * (0.5 + 0.5 * clamp(Hc / 6, 0, 1)) * (1.25 - wetAvg) * 1.1;
+      fx += G.wind.x * (0.5 + 0.5 * clamp(Hc / 6, 0, 1)) * (1.25 - wetAvg) * 2.3;
+      fz += G.wind.y * (0.5 + 0.5 * clamp(Hc / 6, 0, 1)) * (1.25 - wetAvg) * 2.3;
       var co = vx.comCur;
       var coLen = Math.sqrt(co.x * co.x + co.y * co.y);
       if (coLen > 0.2) {
@@ -1323,7 +1354,7 @@
           // 最終の見た目を書き込んで 以後は静止
           _vP.set(v2.px, GROUND_Y + cell * 0.5, v2.pz);
           _vQ.setFromEuler(_vE.set(0, v2.ey, 0));
-          _vS.set(1 + 0.08 * v2.wet, 1, 1 + 0.08 * v2.wet);
+          _vS.set(1 + 0.22 * v2.wet, 1, 1 + 0.22 * v2.wet);
           _vM.compose(_vP, _vQ, _vS);
           vx.mesh.setMatrixAt(v2.id, _vM);
           fl.splice(fi, 1);
@@ -1357,8 +1388,15 @@
         var f3 = Math.pow((k3 + 1) / lenF, 1.15);
         var px3 = c4.wx + c4.shear.x * f3;
         var pz3 = c4.wz + c4.shear.y * f3;
-        var sw3 = (1 + (1 - v3.sq) * 0.5 + 0.08 * v3.wet) * cell * 0.96;
-        var sy3 = v3.sq * cell * 0.96;
+        // ぬれると ぷっくり ふくらむ ＋ 水風船のぷにぷに波
+        var puff = 0;
+        if (v3.puffA) {
+          var ph = (t - v3.puffT0) / 0.38;
+          if (ph >= 1) v3.puffA = 0;
+          else if (ph > 0) puff = v3.puffA * Math.sin(Math.PI * ph);
+        }
+        var sw3 = (1 + (1 - v3.sq) * 0.5 + 0.22 * v3.wet + puff) * cell * 0.96;
+        var sy3 = (v3.sq + puff * 0.6) * cell * 0.96;
         if (v3.st === 0) {
           var pop3 = clamp((t - voxT0 - v3.birth) / 0.4, 0, 1);
           pop3 = 1 - Math.pow(1 - pop3, 3);
@@ -1421,6 +1459,44 @@
   var voxT0 = 0; // 登場アニメの基準時刻
 
   /* --- ボクセルへの水・乾燥 --- */
+
+  /* ブラシ半径：構造の大きさに連動（1回で数十個が変わる） */
+  function waterBrushR() {
+    if (!G.tower) return 1.4;
+    if (G.tower.kind === 'voxel') return clamp(G.tower.vox.halfW * 0.4, 1.2, 2.6);
+    return 1.6;
+  }
+
+  /* ボクセルのだいたいの現在位置（走査用） */
+  var _wp = new THREE.Vector3();
+  function voxWorldPos(v, vx) {
+    if (v.st === 2 || v.st === 3) {
+      _wp.set(v.px || 0, v.py || 0, v.pz || 0);
+    } else {
+      var c = v.col;
+      _wp.set(c.wx + c.shear.x * ((v.inCol + 1) / c.vox.length),
+        GROUND_Y + (c.baseIy + v.inCol + 0.5) * vx.cell,
+        c.wz + c.shear.y * ((v.inCol + 1) / c.vox.length));
+    }
+    return _wp;
+  }
+
+  /* 球のなかの全ボクセルに cb(v, falloff, dist) を実行 */
+  function forEachVoxInSphere(point, R, cb) {
+    if (!G.tower || G.tower.kind !== 'voxel') return;
+    var vx = G.tower.vox;
+    var R2 = R * R;
+    for (var i = 0; i < vx.voxels.length; i++) {
+      var v = vx.voxels[i];
+      var p = voxWorldPos(v, vx);
+      var dx = p.x - point.x, dy = p.y - point.y, dz = p.z - point.z;
+      var d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 > R2) continue;
+      var d = Math.sqrt(d2);
+      cb(v, 1 - (d / R) * 0.65, d);
+    }
+  }
+
   function pickVox(cx, cy) {
     if (!G.tower || G.tower.kind !== 'voxel') return null;
     ndc.set((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
@@ -1446,52 +1522,32 @@
   }
 
   function applyWaterVox(hit, rate, dt) {
-    var vx = G.tower.vox;
-    var v = vx.voxels[hit.vi];
-    if (v.st === 1 || v.st === 0) {
-      wetVoxel(v, rate * dt, hit.point);
-      // まわりと したに しみる
-      var dirs = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]];
-      for (var d = 0; d < dirs.length; d++) {
-        var id2 = vx.grid[vx.gi(v.ix + dirs[d][0], v.iy + dirs[d][1], v.iz + dirs[d][2])];
-        if (id2 >= 0) wetVoxel(vx.voxels[id2], rate * dt * 0.55, hit.point);
-      }
-      var below = vx.grid[vx.gi(v.ix, v.iy - 1, v.iz)];
-      if (below >= 0) wetVoxel(vx.voxels[below], rate * dt * 0.5, null);
-    } else if (v.st === 3) {
-      wetVoxel(v, rate * dt, null);
-    }
-    if (Math.random() < dt * 18 * perfScale) {
+    // シャワー：ブラシ半径のなかを まとめて ぬらす（数十個が同時にかわる）
+    var R = waterBrushR();
+    forEachVoxInSphere(hit.point, R, function (v, fall) {
+      wetVoxel(v, rate * dt * 1.7 * fall, v.st <= 1 ? hit.point : null);
+    });
+    if (Math.random() < dt * 22 * perfScale) {
       spawnP(TEX.dot('#aaddff', true), {
-        pos: hit.point.clone(),
+        pos: hit.point.clone().add(new THREE.Vector3(rand(-R, R) * 0.5, rand(0, 0.4), rand(-R, R) * 0.5)),
         vel: new THREE.Vector3(rand(-1, 1), rand(0.5, 1.5), rand(-1, 1)),
-        grav: 5, life: 0.5, size: 0.13, size1: 0.04
+        grav: 5, life: 0.5, size: 0.15, size1: 0.04
       });
     }
-    addPuddle(hit.point.x, hit.point.z, rate * dt * 0.7);
+    addPuddle(hit.point.x, hit.point.z, rate * dt * 0.9);
   }
 
   function applyDryVox(hit, dt) {
     var vx = G.tower.vox;
-    var v = vx.voxels[hit.vi];
     var did = false;
-    var around = [[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]];
-    for (var d = 0; d < around.length; d++) {
-      var id2 = vx.grid[vx.gi(v.ix + around[d][0], v.iy + around[d][1], v.iz + around[d][2])];
-      if (id2 >= 0) {
-        var v2 = vx.voxels[id2];
-        if (v2.wet > 0) {
-          v2.wet = Math.max(0, v2.wet - dt * 0.55);
-          if (!v2.dirty) { v2.dirty = 1; vx.dirtyColor.push(v2); }
-          did = true;
-        }
+    // おひさまも 水と同じ広さで きく
+    forEachVoxInSphere(hit.point, waterBrushR(), function (v, fall) {
+      if (v.wet > 0) {
+        v.wet = Math.max(0, v.wet - dt * 0.9 * fall);
+        if (!v.dirty) { v.dirty = 1; vx.dirtyColor.push(v); }
+        did = true;
       }
-    }
-    if (v.st === 3 && v.wet > 0) {
-      v.wet = Math.max(0, v.wet - dt * 0.55);
-      if (!v.dirty) { v.dirty = 1; vx.dirtyColor.push(v); }
-      did = true;
-    }
+    });
     if (did && Math.random() < dt * 10 * perfScale) {
       spawnP(TEX.dot('#ffffff', true), {
         pos: hit.point.clone().add(new THREE.Vector3(rand(-0.2, 0.2), 0.15, rand(-0.2, 0.2))),
@@ -1499,6 +1555,209 @@
         grav: -0.5, life: 1, size: 0.22, size1: 0.6, opacity: 0.7
       });
       SFX.steam();
+    }
+  }
+
+  /* =========================================================
+     みずふうせん（タップ＝ポーンと飛んで バシャッ）
+     ========================================================= */
+  var balloons = [];
+
+  function throwBalloon(target) {
+    var mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.34, 14, 10),
+      new THREE.MeshStandardMaterial({ color: '#8ecfff', transparent: true, opacity: 0.88, roughness: 0.25 })
+    );
+    mesh.castShadow = true;
+    var dir = camera.getWorldDirection(new THREE.Vector3());
+    var from = camera.position.clone().addScaledVector(dir, 3.5).add(new THREE.Vector3(0, -1.2, 0));
+    mesh.position.copy(from);
+    scene.add(mesh);
+    balloons.push({ mesh: mesh, from: from, to: target.clone(), t: 0 });
+    SFX.pop();
+  }
+
+  function updateBalloons(dt) {
+    for (var i = balloons.length - 1; i >= 0; i--) {
+      var b = balloons[i];
+      b.t += dt / 0.5; // 0.5秒で とうちゃく
+      var t = Math.min(b.t, 1);
+      b.mesh.position.lerpVectors(b.from, b.to, t);
+      b.mesh.position.y += Math.sin(t * Math.PI) * 2.2;
+      var wob = 1 + Math.sin(t * 22) * 0.12;
+      b.mesh.scale.set(wob, 2 - wob, wob);
+      if (b.t >= 1) {
+        scene.remove(b.mesh);
+        b.mesh.geometry.dispose();
+        b.mesh.material.dispose();
+        balloons.splice(i, 1);
+        burstAt(b.to);
+      }
+    }
+  }
+
+  function clearBalloons() {
+    balloons.forEach(function (b) {
+      scene.remove(b.mesh);
+      b.mesh.geometry.dispose();
+      b.mesh.material.dispose();
+    });
+    balloons.length = 0;
+  }
+
+  /* 着弾：広いはんいを 一気にぬらして ぷにぷに波 */
+  function burstAt(point) {
+    G._bursts = (G._bursts || 0) + 1;
+    var tNow = performance.now() / 1000;
+    var R = waterBrushR() * 1.9;
+    // ボクセル
+    if (G.tower && G.tower.kind === 'voxel') {
+      var vx = G.tower.vox;
+      forEachVoxInSphere(point, R, function (v, fall, d) {
+        wetVoxel(v, 0.5 * fall, v.st <= 1 ? point : null);
+        if (v.st <= 1) {
+          var amp = 0.32 * fall + 0.06;
+          if (amp > (v.puffA || 0)) {
+            v.puffA = amp;
+            v.puffT0 = tNow + d * 0.07; // 外へ 波が つたわる
+          }
+        }
+      });
+    }
+    // おおきなスポンジ（おともだち・従来ステージ）
+    if (G.tower) {
+      G.tower.blocks.forEach(function (b) {
+        var d = b.mesh.position.distanceTo(point);
+        var R2 = R + 1.0;
+        if (d > R2) return;
+        var fall = 1 - d / R2 * 0.7;
+        if (b.state === 'attached' || b.state === 'asleep') {
+          b.wet = clamp(b.wet + 0.55 * fall, 0, 1);
+          b.dirty = true;
+          b.squashV -= 2.2 * fall;  // ぷにっ
+          var dxb = point.x - b.mesh.position.x, dzb = point.z - b.mesh.position.z;
+          var dlb = Math.sqrt(dxb * dxb + dzb * dzb);
+          if (dlb > 0.2) {
+            b.wetDir.x = lerp(b.wetDir.x, dxb / dlb, 0.5 * fall);
+            b.wetDir.y = lerp(b.wetDir.y, dzb / dlb, 0.5 * fall);
+          }
+        }
+      });
+    }
+    // しぶき・音・水たまり
+    SFX.splat(); SFX.plink();
+    for (var i = 0; i < Math.round(16 * perfScale); i++) {
+      var a = rand(0, Math.PI * 2);
+      spawnP(TEX.dot('#8ec9ff', true), {
+        pos: point.clone(),
+        vel: new THREE.Vector3(Math.cos(a) * rand(1, 3.2), rand(1.2, 3), Math.sin(a) * rand(1, 3.2)),
+        grav: 6, life: rand(0.4, 0.8), size: rand(0.16, 0.3), size1: 0.05
+      });
+    }
+    burstSparkles(point.clone(), 5, ['#c3ecff', '#ffffff', '#ffd1ea']);
+    addPuddle(point.x, point.z, 0.8);
+  }
+
+  /* =========================================================
+     あめくも（⭐1個で かいきん の ごほうびツール）
+     ========================================================= */
+  var cloudTool = (function () {
+    var g = new THREE.Group();
+    var mat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1 });
+    [[0, 0, 0, 0.95], [0.9, 0.12, 0.1, 0.66], [-0.85, 0.1, -0.05, 0.62], [0.1, 0.42, -0.28, 0.55], [-0.2, 0.05, 0.5, 0.5]].forEach(function (p) {
+      var m = new THREE.Mesh(new THREE.SphereGeometry(p[3], 14, 10), mat);
+      m.position.set(p[0], p[1], p[2]);
+      g.add(m);
+    });
+    g.scale.set(1.5, 1.2, 1.5);
+    g.visible = false;
+    scene.add(g);
+    return { group: g, mat: mat, hold: 0, vis: 0 };
+  })();
+
+  /* ゆびの下の たかさ planeY の水平面のうえの点 */
+  function pickPlane(cx, cy, planeY) {
+    ndc.set((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    var o = raycaster.ray.origin, d = raycaster.ray.direction;
+    if (Math.abs(d.y) < 1e-4) return null;
+    var tt = (planeY - o.y) / d.y;
+    if (tt < 0) return null;
+    return o.clone().addScaledVector(d, tt);
+  }
+
+  function applyCloud(cx, cy, dt) {
+    var topY = (G.tower && G.tower.kind === 'voxel') ? G.tower.vox.maxAttY : 7;
+    var cy2 = clamp(topY + 2.6, 4.5, 10);
+    // ゆびの真下に くもが くるように（雲の高さの水平面で交差）
+    var g = pickPlane(cx, cy, cy2);
+    if (!g) g = pickGround(cx, cy);
+    if (!g) return;
+    g.x = clamp(g.x, -18, 18); g.z = clamp(g.z, -18, 18);
+    cloudTool.hold = Math.min(cloudTool.hold + dt, 1.6);
+    var pw = cloudTool.hold / 1.6;                  // ながおしで どしゃぶり
+    var R = waterBrushR() * (1.9 + 1.2 * pw);
+    var rate = 0.9 + 1.6 * pw;
+    cloudTool.vis = 1;
+    cloudTool.group.visible = true;
+    cloudTool.group.position.lerp(new THREE.Vector3(g.x, cy2, g.z), Math.min(dt * 6, 1));
+    cloudTool.mat.color.lerpColors(new THREE.Color('#ffffff'), new THREE.Color('#aebfd8'), pw);
+    var sc = 1.5 * (1 + 0.35 * pw);
+    cloudTool.group.scale.set(sc, sc * 0.8, sc);
+    SFX.pour(0.35 + 0.5 * pw);
+
+    var c = cloudTool.group.position;
+    // あめつぶ
+    var drops = (3 + 9 * pw) * perfScale;
+    for (var i = 0; i < drops; i++) {
+      if (Math.random() > dt * 22) continue;
+      var a = rand(0, Math.PI * 2), rr = Math.sqrt(Math.random()) * R * 0.8;
+      spawnP(TEX.dot('#8ec9ff', true), {
+        pos: new THREE.Vector3(c.x + Math.cos(a) * rr, c.y - 0.8, c.z + Math.sin(a) * rr),
+        vel: new THREE.Vector3(0, -7, 0),
+        grav: 2, life: 1.1, size: 0.15, fade: false, stretch: 0.4
+      });
+    }
+    // くもの下を まとめて ぬらす（うえから）
+    if (G.tower && G.tower.kind === 'voxel') {
+      var vx = G.tower.vox;
+      for (var ci = 0; ci < vx.columns.length; ci++) {
+        var col = vx.columns[ci];
+        if (col.attLen <= 0) continue;
+        var dx = col.wx - c.x, dz = col.wz - c.z;
+        var d = Math.sqrt(dx * dx + dz * dz);
+        if (d > R) continue;
+        var fall = 1 - d / R * 0.5;
+        // てっぺんから 2〜3こに あめ
+        for (var k = col.attLen - 1; k >= Math.max(0, col.attLen - 3); k--) {
+          wetVoxel(col.vox[k], rate * dt * fall * (k === col.attLen - 1 ? 1 : 0.4), null);
+        }
+        if (d > 0.3) {
+          col.wetDir.x = lerp(col.wetDir.x, dx / d, dt * 0.8);
+          col.wetDir.y = lerp(col.wetDir.y, dz / d, dt * 0.8);
+        }
+      }
+    }
+    if (G.tower) {
+      G.tower.blocks.forEach(function (b) {
+        if (b.state !== 'attached' && b.state !== 'asleep') return;
+        var dxb = b.mesh.position.x - c.x, dzb = b.mesh.position.z - c.z;
+        if (dxb * dxb + dzb * dzb > R * R) return;
+        b.wet = clamp(b.wet + rate * dt * 0.8, 0, 1);
+        b.dirty = true;
+      });
+    }
+    if (Math.random() < dt * 3) addPuddle(c.x + rand(-R, R) * 0.5, c.z + rand(-R, R) * 0.5, 0.25);
+  }
+
+  function updateCloudTool(dt, t) {
+    if (!(toolTouch && toolTouch.mode === 'tool' && tool === TOOL.CLOUD)) {
+      cloudTool.hold = Math.max(0, cloudTool.hold - dt * 2);
+      cloudTool.vis = Math.max(0, cloudTool.vis - dt * 2.5);
+      if (cloudTool.vis <= 0) cloudTool.group.visible = false;
+    }
+    if (cloudTool.group.visible) {
+      cloudTool.group.position.y += Math.sin(t * 2.2) * 0.003;
     }
   }
 
@@ -1525,7 +1784,8 @@
           for (var k = 0; k < c2.attLen; k++) {
             var v = c2.vox[k];
             v.st = 3;
-            _vP.set(c2.wx, GROUND_Y + (c2.baseIy + k + 0.5) * vx.cell, c2.wz);
+            v.px = c2.wx; v.py = GROUND_Y + (c2.baseIy + k + 0.5) * vx.cell; v.pz = c2.wz;
+            _vP.set(v.px, v.py, v.pz);
             _vQ.identity();
             _vS.set(vx.cell * 0.96, vx.cell * 0.96, vx.cell * 0.96);
             _vM.compose(_vP, _vQ, _vS);
@@ -1568,7 +1828,7 @@
       c.wobble = rand(0.8, 1.25);
     });
     vx.voxels.forEach(function (v) {
-      v.st = 0; v.sq = 1; v.settle = 0;
+      v.st = 0; v.sq = 1; v.settle = 0; v.puffA = 0;
       v.birth = v.iy * 0.055 + Math.random() * 0.35;
       if (v.wet > 0) { v.wet = 0; if (!v.dirty) { v.dirty = 1; vx.dirtyColor.push(v); } }
       vx.grid[vx.gi(v.ix, v.iy, v.iz)] = v.id;
@@ -1600,15 +1860,18 @@
     cushions: [],
     stars: parseInt(localStorage.getItem('sponge_stars') || '0', 10),
     rainbows: parseInt(localStorage.getItem('sponge_rainbows') || '0', 10),
+    starsTotal: parseInt(localStorage.getItem('sponge_total') || '-1', 10),
     lastTouch: 0,
     celebration: 0,
     sparkleMode: false
   };
   G.sparkleMode = G.rainbows > 0;
+  if (G.starsTotal < 0) G.starsTotal = G.stars + G.rainbows * STAR_GOAL;
 
   function saveStars() {
     localStorage.setItem('sponge_stars', String(G.stars));
     localStorage.setItem('sponge_rainbows', String(G.rainbows));
+    localStorage.setItem('sponge_total', String(G.starsTotal));
   }
 
   /* ================= 塔の生成・削除 ================= */
@@ -2047,6 +2310,8 @@
     SFX.sleepy();
     setTimeout(function () { SFX.chime(); }, 700);
     G.stars++;
+    G.starsTotal++;
+    if (G.starsTotal === 1) setTimeout(revealCloudBtn, 2200); // はじめての⭐で あめくも かいきん
     var full = G.stars >= STAR_GOAL;
     if (full) {
       G.stars = 0; G.rainbows++; G.sparkleMode = true;
@@ -2149,7 +2414,7 @@
   }
 
   /* ================= どうぐ ================= */
-  var TOOL = { WATER: 'water', DRY: 'dry', WIND: 'wind', CUSHION: 'cushion' };
+  var TOOL = { WATER: 'water', DRY: 'dry', WIND: 'wind', CLOUD: 'cloud', CUSHION: 'cushion' };
   var tool = TOOL.WATER;
 
   var raycaster = new THREE.Raycaster();
@@ -2273,6 +2538,15 @@
         });
       }
       if (before < 0.99 && b.wet >= 0.99) SFX.squish(0.5);
+      // まわりの おおきなスポンジにも しぶきが かかる
+      G.tower.blocks.forEach(function (nb) {
+        if (nb === b || (nb.state !== 'attached' && nb.state !== 'asleep')) return;
+        var nd = nb.mesh.position.distanceTo(hit.point);
+        if (nd < 2.2) {
+          nb.wet = clamp(nb.wet + rate * dt * 0.45 * (1 - nd / 2.2), 0, 1);
+          nb.dirty = true;
+        }
+      });
       addPuddle(b.mesh.position.x, b.mesh.position.z, rate * dt * 0.8);
     } else if (vhit) {
       applyWaterVox(vhit, rate, dt);
@@ -2378,7 +2652,7 @@
     if (G.screen !== 'play') return;
 
     var mode = 'tool';
-    if (tool !== TOOL.WIND) {
+    if (tool !== TOOL.WIND && tool !== TOOL.CLOUD) {
       var hitB = pickBlock(e.clientX, e.clientY);
       var hitV = pickVox(e.clientX, e.clientY);
       var hitG = pickGround(e.clientX, e.clientY);
@@ -2435,6 +2709,14 @@
       if (tool === TOOL.CUSHION && toolTouch.mode === 'tool' && toolTouch.moved < 25 && dt < 600) {
         var g = pickGround(toolTouch.x, toolTouch.y);
         if (g && Math.hypot(g.x, g.z) < 20) placeCushion(g.x, g.z);
+      }
+      // タップ＝みずふうせん ポーン
+      if (tool === TOOL.WATER && toolTouch.mode === 'tool' && toolTouch.moved < 30 && dt < 600) {
+        var hb = pickBlock(toolTouch.x, toolTouch.y);
+        var hv = pickVox(toolTouch.x, toolTouch.y);
+        if (hb && hv) { if (hv.dist < hb.dist) hb = null; else hv = null; }
+        var tp = hb ? hb.point : (hv ? hv.point : pickGround(toolTouch.x, toolTouch.y));
+        if (tp && Math.hypot(tp.x, tp.z) < 24) throwBalloon(tp);
       }
       endTool();
     }
@@ -2516,6 +2798,7 @@
     G.cushions = [];
     G.windTarget.set(0, 0);
     G.wind.set(0, 0);
+    clearBalloons();
     if (def.kind === 'voxel') buildVoxelTower(def);
     else buildTower(def);
     pulseRebuild(false);
@@ -2568,7 +2851,7 @@
 
   /* ツールバー */
   var toolBtns = {};
-  [['water', '💧'], ['dry', '☀️'], ['wind', '🌬️'], ['cushion', '🛏️']].forEach(function (def) {
+  [['water', '💧'], ['dry', '☀️'], ['wind', '🌬️'], ['cloud', '🌧️'], ['cushion', '🛏️']].forEach(function (def) {
     var btn = document.createElement('button');
     btn.className = 'toolBtn' + (def[0] === tool ? ' sel' : '');
     btn.id = 'tool_' + def[0];
@@ -2583,6 +2866,19 @@
     toolBtns[def[0]] = btn;
     $('#toolbar').insertBefore(btn, $('#rebuildBtn'));
   });
+
+  function cloudUnlocked() { return G.starsTotal >= 1; }
+
+  function revealCloudBtn() {
+    var btn = toolBtns.cloud;
+    if (!btn.classList.contains('locked')) return;
+    btn.classList.remove('locked');
+    btn.classList.add('unlock', 'pulse');
+    SFX.tada();
+    setTimeout(function () { btn.classList.remove('pulse'); }, 6000);
+  }
+
+  if (!cloudUnlocked()) toolBtns.cloud.classList.add('locked');
 
   updateStarUI(false);
 
@@ -2694,9 +2990,12 @@
       if (toolTouch && toolTouch.mode === 'tool') {
         if (tool === TOOL.WATER) applyWater(toolTouch.x, toolTouch.y, dt);
         else if (tool === TOOL.DRY) applyDry(toolTouch.x, toolTouch.y, dt);
+        else if (tool === TOOL.CLOUD) applyCloud(toolTouch.x, toolTouch.y, dt);
       } else {
         SFX.pour(0);
       }
+      updateBalloons(dt);
+      updateCloudTool(dt, t);
       simulate(dt, t);
       updateWindFx(dt);
       updateFaces(dt);
@@ -2745,6 +3044,8 @@
       }
       return out;
     },
+    /* テスト用：みずふうせん */
+    balloons: function () { return { active: balloons.length, bursts: G._bursts || 0 }; },
     /* テスト用：ぬれ具合の合計 */
     wetSum: function () {
       if (!G.tower) return 0;
