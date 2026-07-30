@@ -11,7 +11,7 @@
   const audio = window.GameAudio;
 
   const COLS = 48, ROWS = 24, LAYERS = 3;
-  const MAX_BLOCKS = 600;
+  const getMaxBlocks = () => (window.GamePerf && window.GamePerf.maxBlocks) || 600;
   const LEFT = -(COLS * B) / 2;
   const DEFAULT_LAYER = 1; /* 「なか」から始める */
 
@@ -69,7 +69,7 @@
     if (brushOrNull == null) {
       build.layout.delete(k);
     } else {
-      if (!cur && build.layout.size >= MAX_BLOCKS) {
+      if (!cur && build.layout.size >= getMaxBlocks()) {
         warnFull();
         return false;
       }
