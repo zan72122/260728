@@ -65,6 +65,7 @@
     game.stop();
     ui.showOnly(null);
     ui.show('hud');
+    ui.hide('dust-meter'); /* 建築編集中はほこりメーター無意味なので隠す */
     ui.setDust(0, 60);
     window.GameCamera.showBar(true);
     window.GameBuild.enter();
@@ -76,6 +77,7 @@
     currentLevel = level;
     ui.showOnly(null); /* すべてのスクリーンを隠す */
     ui.show('hud');
+    ui.show('dust-meter');
     window.GameCamera.showBar(true);
     game.start(level);
     window.GameRender.resetView();

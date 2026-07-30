@@ -10,14 +10,51 @@
   };
 
   ui.init = function () {
-    ['hud', 'dust-fill', 'msg-banner', 'tutor-hand', 'scr-title', 'scr-select',
+    ['hud', 'hud-top', 'dust-fill', 'msg-banner', 'tutor-hand', 'scr-title', 'scr-select',
      'scr-result', 'scr-fail', 'level-grid', 'result-title', 'result-stars',
      'result-comment', 'btn-mute', 'btn-next', 'btn-go', 'btn-retry',
      'build-bar', 'palette-row', 'brush-row', 'shape-row', 'layer-row',
-     'btn-build-done', 'dust-meter'].forEach((id) => {
+     'btn-build-done', 'dust-meter', 'btn-toolbox'].forEach((id) => {
       ui.els[id] = $(id);
     });
+
+    /* ツールバー開閉ハンドル */
+    ui.els['btn-toolbox'].addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      ui.toggleBuildBar();
+    });
+
+    /* HUD上部バー: タップ後2秒だけくっきり表示（build/play中はうっすら表示） */
+    let hudFadeTimer = null;
+    ui.els['hud-top'].addEventListener('pointerdown', () => {
+      const el = ui.els['hud-top'];
+      el.classList.add('hud-active');
+      if (hudFadeTimer) clearTimeout(hudFadeTimer);
+      hudFadeTimer = setTimeout(() => el.classList.remove('hud-active'), 2000);
+    }, true /* capture: 子ボタンのstopPropagationに影響されない */);
+
+    /* ツールバーが開いているあいだは、中身（できた！ボタンなど。他機能が
+       #decor-row 等を動的に追加して高さが変わることもある）に重ならないよう、
+       ハンドルをバーのすぐ上まで押し上げる */
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => updateToolboxPos());
+      ro.observe(ui.els['build-bar']);
+    }
+    window.addEventListener('resize', updateToolboxPos);
   };
+
+  function updateToolboxPos() {
+    const bar = ui.els['build-bar'];
+    const handle = ui.els['btn-toolbox'];
+    if (!bar || !handle) return;
+    if (bar.classList.contains('hidden') || bar.classList.contains('bb-collapsed')) {
+      handle.style.bottom = '';
+      return;
+    }
+    const h = Math.ceil(bar.getBoundingClientRect().height);
+    handle.style.bottom = 'calc(env(safe-area-inset-bottom, 0px) + ' + (h + 12) + 'px)';
+  }
 
   ui.show = function (id) { ui.els[id].classList.remove('hidden'); };
   ui.hide = function (id) { ui.els[id].classList.add('hidden'); };
@@ -156,6 +193,10 @@
     ui.setShapeSel(cfg.shape);
     ui.setLayerSel(cfg.layer);
     ui.els['build-bar'].classList.remove('hidden');
+    /* 建築モード開始時は開いた状態から */
+    ui.els['build-bar'].classList.remove('bb-collapsed');
+    ui.els['btn-toolbox'].classList.remove('hidden');
+    updateToolboxPos();
   };
 
   ui.setBuildTool = function (mode, palIdx) {
@@ -184,8 +225,25 @@
     });
   };
 
-  ui.hideBuildBar = function () { ui.els['build-bar'].classList.add('hidden'); };
+  ui.hideBuildBar = function () {
+    ui.els['build-bar'].classList.add('hidden');
+    ui.els['build-bar'].classList.remove('bb-collapsed');
+    ui.els['btn-toolbox'].classList.add('hidden');
+    updateToolboxPos();
+  };
   ui.setBuildDoneEnabled = function (on) { ui.els['btn-build-done'].disabled = !on; };
+
+  /* ツールバーの開閉トグル（ハンドルからのみ呼ばれる想定）。
+     open===true→開く / false→閉じる / 省略→現在の状態を反転。
+     buildシーン外（build-barがhidden）のときは何もしない。 */
+  ui.toggleBuildBar = function (open) {
+    const bar = ui.els['build-bar'];
+    if (bar.classList.contains('hidden')) return;
+    const isOpen = !bar.classList.contains('bb-collapsed');
+    const shouldOpen = (open === undefined) ? !isOpen : open;
+    bar.classList.toggle('bb-collapsed', !shouldOpen);
+    updateToolboxPos();
+  };
 
   ui.buildLevelGrid = function (levels, stars, onPick, onBuild) {
     const grid = ui.els['level-grid'];
