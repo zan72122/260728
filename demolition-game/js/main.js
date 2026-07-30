@@ -8,11 +8,16 @@
   const { LEVELS } = window.GameLevels;
 
   const canvas = document.getElementById('game-canvas');
-  const ctx = canvas.getContext('2d');
+  window.GameRender.init(canvas);
 
   let scene = 'title'; /* title | select | play */
   let currentLevel = null;
-  let dpr = 1;
+  let backdrop = null; /* タイトル/選択画面の背景用3Dシーン */
+
+  function showBackdrop() {
+    if (!backdrop) backdrop = window.GamePhysics.buildLevel(LEVELS[0]);
+    window.GameRender.buildScene(backdrop);
+  }
 
   /* ---------- 星の保存 ---------- */
   let stars = {};
@@ -22,17 +27,14 @@
   }
 
   /* ---------- キャンバス ---------- */
-  function resize() {
-    dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width = Math.round(window.innerWidth * dpr);
-    canvas.height = Math.round(window.innerHeight * dpr);
-  }
+  function resize() { window.GameRender.resize(); }
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', () => setTimeout(resize, 250));
   resize();
 
   /* ---------- シーン切り替え ---------- */
   function gotoTitle() {
+    if (scene === 'play') { backdrop = null; showBackdrop(); }
     scene = 'title';
     game.stop();
     ui.hide('hud');
@@ -40,6 +42,7 @@
   }
 
   function gotoSelect() {
+    if (scene === 'play') { backdrop = null; showBackdrop(); }
     scene = 'select';
     game.stop();
     ui.hide('hud');
@@ -119,14 +122,11 @@
     lastT = now;
     const time = now / 1000;
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const cw = window.innerWidth, ch = window.innerHeight;
-
     if (scene === 'play') {
       game.update(dt, time);
-      game.draw(ctx, cw, ch, time);
-    } else {
-      game.drawSky(ctx, cw, ch, time);
+      game.draw(time);
+    } else if (backdrop) {
+      window.GameRender.render(backdrop, time, { showSockets: false, pulseBombs: false });
     }
     requestAnimationFrame(frame);
   }
@@ -134,6 +134,7 @@
   /* ---------- 起動 ---------- */
   ui.init();
   ui.setMuteIcon(audio.muted);
+  showBackdrop();
   gotoTitle();
   requestAnimationFrame(frame);
 })();

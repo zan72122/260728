@@ -1,4 +1,4 @@
-/* physics.js — Matter.js ラッパ：建物の生成・爆破・崩壊判定・ワールド描画 */
+/* physics.js — Matter.js ラッパ：建物の生成・爆破・崩壊判定 */
 (function () {
   'use strict';
 
@@ -153,7 +153,7 @@
         if (blk.plugin.meta && !blk.plugin.meta.removed) {
           blk.plugin.meta.removed = true;
           Composite.remove(state.engine.world, blk);
-          if (state.onCrumble) state.onCrumble(blk.position.x, blk.position.y);
+          if (state.onCrumble) state.onCrumble(blk.position.x, blk.position.y, blk);
         }
       }
       state.toCrumble.length = 0;
@@ -201,8 +201,9 @@
 
   /* 建物がじゅうぶん低くなったか（全棟） */
   physics.allCleared = function (state) {
+    const ratio = state.level.clearRatio || 0.42;
     for (const bld of state.buildings) {
-      const limit = Math.max(B * 2.6, bld.spec.rows * B * 0.42);
+      const limit = Math.max(B * 2.6, bld.spec.rows * B * ratio);
       let top = GROUND_Y;
       let any = false;
       for (const blk of bld.blocks) {
@@ -234,183 +235,6 @@
     return n;
   };
 
-  /* ---------- ワールド描画（ctx はワールド座標に変換済み） ---------- */
-
-  function roundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-  }
-
-  function drawNeighbor(ctx, nb) {
-    const n = nb.spec;
-    const x = n.x, w = n.w, h = n.h;
-    const top = GROUND_Y - h;
-    /* かべ */
-    ctx.fillStyle = n.color;
-    ctx.fillRect(x - w / 2, top, w, h);
-    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(x - w / 2, top, w, h);
-    /* やね */
-    ctx.fillStyle = n.roof;
-    ctx.beginPath();
-    ctx.moveTo(x - w / 2 - 14, top);
-    ctx.lineTo(x + w / 2 + 14, top);
-    ctx.lineTo(x, top - h * 0.5);
-    ctx.closePath();
-    ctx.fill();
-    /* かお */
-    const fy = top + h * 0.42;
-    ctx.fillStyle = '#3d2c1e';
-    if (!nb.hit) {
-      ctx.beginPath();
-      ctx.arc(x - w * 0.16, fy, 5, 0, Math.PI * 2);
-      ctx.arc(x + w * 0.16, fy, 5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#3d2c1e';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(x, fy + 6, w * 0.14, 0.15 * Math.PI, 0.85 * Math.PI);
-      ctx.stroke();
-    } else {
-      ctx.strokeStyle = '#3d2c1e';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(x - w * 0.16, fy, 7, 0, Math.PI * 2);
-      ctx.moveTo(x + w * 0.16 + 7, fy);
-      ctx.arc(x + w * 0.16, fy, 7, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(x, fy + 18, 8, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-  }
-
-  function drawBlock(ctx, blk, palette) {
-    const meta = blk.plugin.meta;
-    ctx.save();
-    ctx.translate(blk.position.x, blk.position.y);
-    ctx.rotate(blk.angle);
-    ctx.fillStyle = palette.wall;
-    ctx.fillRect(-B / 2, -B / 2, B, B);
-    ctx.strokeStyle = palette.shade;
-    ctx.lineWidth = 3;
-    ctx.strokeRect(-B / 2 + 1.5, -B / 2 + 1.5, B - 3, B - 3);
-    if (meta.window) {
-      ctx.fillStyle = palette.win;
-      roundRect(ctx, -B * 0.28, -B * 0.28, B * 0.56, B * 0.56, 5);
-      ctx.fill();
-      ctx.strokeStyle = palette.shade;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  function drawBomb(ctx, s, time) {
-    ctx.save();
-    ctx.translate(s.x, s.y);
-    /* TNTのたば */
-    ctx.fillStyle = '#e63946';
-    roundRect(ctx, -20, -14, 40, 28, 6);
-    ctx.fill();
-    ctx.strokeStyle = '#9d2230';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(-20, -4, 40, 8);
-    ctx.fillStyle = '#9d2230';
-    ctx.font = 'bold 9px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('TNT', 0, 0.5);
-    /* どうかせん */
-    ctx.strokeStyle = '#6b4f2a';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(0, -14);
-    ctx.quadraticCurveTo(8, -26, 16, -24);
-    ctx.stroke();
-    if (s.status === 'lit') {
-      const r = 6 + Math.sin(time * 30) * 2.5;
-      ctx.fillStyle = '#ffd23e';
-      ctx.beginPath();
-      ctx.arc(16, -24, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#ff7a1a';
-      ctx.beginPath();
-      ctx.arc(16, -24, r * 0.55, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  physics.drawWorld = function (ctx, state, time, opts) {
-    const level = state.level;
-    const bounds = state.bounds;
-
-    /* じめん */
-    ctx.fillStyle = '#8bc34a';
-    ctx.fillRect(bounds.minX - 600, GROUND_Y, bounds.maxX - bounds.minX + 1200, 18);
-    ctx.fillStyle = '#a1887f';
-    ctx.fillRect(bounds.minX - 600, GROUND_Y + 18, bounds.maxX - bounds.minX + 1200, 300);
-
-    /* 安全ゾーンのコーン */
-    for (const zx of [level.zone.l, level.zone.r]) {
-      ctx.fillStyle = '#ff7a1a';
-      ctx.beginPath();
-      ctx.moveTo(zx - 14, GROUND_Y);
-      ctx.lineTo(zx + 14, GROUND_Y);
-      ctx.lineTo(zx, GROUND_Y - 34);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(zx - 8, GROUND_Y - 16, 16, 6);
-    }
-
-    /* おとなり */
-    for (const nb of state.neighbors) drawNeighbor(ctx, nb);
-
-    /* ブロック */
-    for (const bld of state.buildings) {
-      for (const blk of bld.blocks) {
-        if (!blk.plugin.meta.removed) drawBlock(ctx, blk, bld.spec.palette);
-      }
-    }
-
-    /* ソケットと爆破装置 */
-    for (const s of state.sockets) {
-      if (s.status === 'empty' && opts.showSockets) {
-        const pulse = 1 + Math.sin(time * 5) * 0.15;
-        ctx.strokeStyle = 'rgba(255,210,60,0.95)';
-        ctx.lineWidth = 5;
-        ctx.setLineDash([8, 7]);
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, 26 * pulse, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, 12 * pulse, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (s.status === 'armed' || s.status === 'lit') {
-        drawBomb(ctx, s, time);
-        if (s.status === 'armed' && opts.pulseBombs) {
-          const pulse = 1 + Math.sin(time * 5) * 0.12;
-          ctx.strokeStyle = 'rgba(255,90,54,0.8)';
-          ctx.lineWidth = 4;
-          ctx.beginPath();
-          ctx.arc(s.x, s.y, 34 * pulse, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-      }
-    }
-  };
 
   window.GamePhysics = physics;
 })();

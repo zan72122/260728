@@ -41,7 +41,7 @@
     {
       id: 3, name: 'となりにおうち', emoji: '🏡',
       buildings: [{ x: -70, cols: 3, rows: 6, palette: PALETTES.coral }],
-      neighbors: [{ x: 210, w: 170, h: 140, color: '#ffe0a3', roof: '#e07a5f' }],
+      neighbors: [{ x: 250, w: 170, h: 140, color: '#ffe0a3', roof: '#e07a5f' }],
       sockets: [{ b: 0, col: 0, row: 0 }, { b: 0, col: 0, row: 3 }],
       zone: { l: -460, r: 118 },
       dustGreen: 60,
@@ -58,6 +58,7 @@
       sockets: [{ b: 0, col: 0.5, row: 0 }, { b: 1, col: 0.5, row: 0 }],
       zone: { l: -420, r: 420 },
       dustGreen: 70,
+      clearRatio: 0.58, /* 爆弾1個/棟なので高さ判定はゆるめ */
       hintPlace: 'ひかるところを たっぷ！',
       hintBoom: 'ひとつずつ ゆっくりね！',
     },
