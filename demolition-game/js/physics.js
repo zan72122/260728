@@ -9,6 +9,19 @@
   const PUSH_R = B * 4.0;      /* 吹き飛ばしの半径 */
   const CRUMBLE_SPEED = 6;     /* meta.crumble が無いときのフォールバックしきい値 */
 
+  /* ---------- 物理負荷対策（大量ブロック向け） ----------
+   * LEGACY_MAX 未満のブロック数（既存6ステージはすべてこの範囲）では、
+   * 起爆時に従来どおり「全ブロックいっせいウェイク」を行い、挙動を完全に変えない。
+   * それ以上（建築モードの大規模な建物）では、局所ウェイク＋再凍結＋
+   * 同時アクティブバジェットで負荷を抑える。 */
+  const LEGACY_MAX = 120;          /* この未満は従来どおりのフルウェイク経路 */
+  const WAKE_R = PUSH_R * 1.6;     /* 局所ウェイクの半径 */
+  const CORRIDOR_HALF_W = B * 0.8; /* 「支えを失った上方」を起こす垂直コリドーの半幅 */
+  const RESLEEP_SCAN_DT = 0.25;    /* 再凍結／バジェットスキャンの間隔（秒） */
+  const RESLEEP_TIME = 0.8;        /* isSleeping継続でこの秒数たったら再凍結 */
+  const ACTIVE_MAX_DEFAULT = 280;  /* GamePerf.activeMax 未指定時の同時アクティブ上限 */
+  const TOUCH_WAKE_SPEED = 1.0;    /* touch-to-wake の相対速度しきい値 */
+
   /* レイヤーごとの衝突カテゴリ（0=おく,1=なか,2=まえ）。
    * ブロックは同じレイヤーどうし＋地面/おとなり(0x1)とだけ衝突する。 */
   function layerCategory(layer) { return 0x0002 << (layer | 0); }
@@ -124,6 +137,11 @@
       });
     }
 
+    /* 総ブロック数はレベル開始時に固定（減ることはあっても増えない）。
+     * これでレガシー経路／局所ウェイク経路の判定がプレイ中にぶれない。 */
+    state.totalBlocks = state.buildings.reduce((n, b) => n + b.blocks.length, 0);
+    state.scanAcc = 0;
+
     /* おすすめポイント（ヒント）のワールド座標 */
     level.sockets.forEach((s) => {
       const spec = level.buildings[s.b];
@@ -162,6 +180,20 @@
             if (speed > th) state.toCrumble.push(faster);
           }
         }
+
+        /* touch-to-wake：静的なブロックに動的なもの（がれき／てっきゅう／ショベルなど）
+         * がある程度の速さでぶつかったら、そのブロックと支えを失う上方を起こす。
+         * 既存6ステージでは起爆前に動的ボディが存在しないため実質ノーオペ。 */
+        if (speed > TOUCH_WAKE_SPEED) {
+          let staticBlk = null;
+          if (a.label === 'block' && a.isStatic && !b.isStatic) staticBlk = a;
+          else if (b.label === 'block' && b.isStatic && !a.isStatic) staticBlk = b;
+          if (staticBlk) {
+            wakeBlock(staticBlk);
+            wakeCorridorAbove(state, staticBlk.plugin.meta.layer,
+              [{ x: staticBlk.position.x, y: staticBlk.position.y }]);
+          }
+        }
       }
     });
 
@@ -197,6 +229,119 @@
     return state;
   };
 
+  function activeBlocks(state) {
+    const out = [];
+    for (const bld of state.buildings) {
+      for (const blk of bld.blocks) if (!blk.plugin.meta.removed) out.push(blk);
+    }
+    return out;
+  }
+  physics.activeBlocks = activeBlocks;
+
+  function isLegacy(state) { return state.totalBlocks < LEGACY_MAX; }
+  function speedOf(blk) { return Math.hypot(blk.velocity.x, blk.velocity.y); }
+
+  /* 1個のブロックを起こす（static解除＋スリープ解除＋再凍結タイマーのリセット） */
+  function wakeBlock(blk) {
+    if (blk.isStatic) Body.setStatic(blk, false);
+    Sleeping.set(blk, false);
+    if (blk.plugin.meta) blk.plugin.meta.sleepT = 0;
+  }
+
+  /* 支えを失った上方の静的ブロックを連鎖して起こす（再帰なし・収束するまで反復）。
+   * startPts: [{x,y}, ...]（起こした/破壊した各ブロックの現在位置）。同一レイヤーのみ対象。 */
+  function wakeCorridorAbove(state, layer, startPts) {
+    if (!startPts.length) return;
+    const candidates = [];
+    for (const bld of state.buildings) {
+      for (const blk of bld.blocks) {
+        if (blk.plugin.meta.removed) continue;
+        if (blk.plugin.meta.layer !== layer) continue;
+        candidates.push(blk);
+      }
+    }
+    let frontier = startPts;
+    let guard = 0;
+    while (frontier.length && guard < 64) {
+      guard++;
+      const next = [];
+      for (const p of frontier) {
+        for (const blk of candidates) {
+          if (!blk.isStatic) continue;
+          if (Math.abs(blk.position.x - p.x) < CORRIDOR_HALF_W && blk.position.y < p.y - 1) {
+            wakeBlock(blk);
+            next.push({ x: blk.position.x, y: blk.position.y });
+          }
+        }
+      }
+      frontier = next;
+    }
+  }
+
+  /* 外部（重機など）からの任意ウェイク：pos半径内の同レイヤー静的ブロックを起こし、
+   * それぞれの上方コリドーも連鎖して起こす。layer が null/undefined なら全レイヤー対象。 */
+  physics.wakeAt = function (state, pos, radius, layer) {
+    const byLayer = new Map();
+    for (const blk of activeBlocks(state)) {
+      if (layer != null && blk.plugin.meta.layer !== layer) continue;
+      if (!blk.isStatic) continue;
+      const dx = blk.position.x - pos.x, dy = blk.position.y - pos.y;
+      if (Math.hypot(dx, dy) < radius) {
+        wakeBlock(blk);
+        const ly = blk.plugin.meta.layer;
+        if (!byLayer.has(ly)) byLayer.set(ly, []);
+        byLayer.get(ly).push({ x: blk.position.x, y: blk.position.y });
+      }
+    }
+    for (const [ly, pts] of byLayer) wakeCorridorAbove(state, ly, pts);
+  };
+
+  /* A2: 眠り続けた動的ブロックの再凍結／A3: 同時アクティブバジェット。
+   * isLegacy(state) のときは呼ばれない（既存6ステージのsettled判定タイミングに影響させない）。 */
+  function periodicScan(state) {
+    const dynBlocks = [];
+    for (const bld of state.buildings) {
+      for (const blk of bld.blocks) {
+        if (blk.plugin.meta.removed || blk.isStatic) continue;
+        dynBlocks.push(blk);
+      }
+    }
+
+    /* A2: isSleeping が RESLEEP_TIME 秒続いたブロックを再凍結する。
+     * isSleeping中のみ凍結するので空中で固まることはない。 */
+    for (const blk of dynBlocks) {
+      const meta = blk.plugin.meta;
+      if (blk.isSleeping) {
+        meta.sleepT = (meta.sleepT || 0) + RESLEEP_SCAN_DT;
+        if (meta.sleepT >= RESLEEP_TIME) {
+          Body.setStatic(blk, true);
+          meta.sleepT = 0;
+        }
+      } else {
+        meta.sleepT = 0;
+      }
+    }
+
+    /* A3: 動的ブロック数が ACTIVE_MAX を超えたら、超過分を速度の遅い順に処理する。
+     * GamePerf は別エージェント実装中の可能性があるため毎回参照（未定義でも動く）。 */
+    const ACTIVE_MAX = (window.GamePerf && window.GamePerf.activeMax) || ACTIVE_MAX_DEFAULT;
+    const alive = dynBlocks.filter((blk) => !blk.isStatic);
+    if (alive.length > ACTIVE_MAX) {
+      const excess = alive.length - ACTIVE_MAX;
+      alive.sort((a, b) => speedOf(a) - speedOf(b));
+      for (let i = 0; i < excess; i++) {
+        const blk = alive[i];
+        if (blk.plugin.meta.removed) continue;
+        if (speedOf(blk) < 0.5) {
+          Body.setStatic(blk, true);
+          blk.plugin.meta.sleepT = 0;
+        } else {
+          state.toCrumble.push(blk);
+        }
+      }
+    }
+  }
+
   /* 固定タイムステップで物理を進める */
   physics.update = function (state, dt) {
     state.acc += dt;
@@ -208,37 +353,51 @@
     }
     if (steps === 4) state.acc = 0;
 
+    const legacy = isLegacy(state);
+
+    if (!legacy) {
+      state.scanAcc = (state.scanAcc || 0) + dt;
+      if (state.scanAcc >= RESLEEP_SCAN_DT) {
+        state.scanAcc -= RESLEEP_SCAN_DT;
+        periodicScan(state);
+      }
+    }
+
     /* 砕けるブロックの処理（衝突コールバック中の削除は避ける） */
     if (state.toCrumble.length) {
       for (const blk of state.toCrumble) {
         if (blk.plugin.meta && !blk.plugin.meta.removed) {
+          const wasStatic = blk.isStatic;
+          const layer = blk.plugin.meta.layer;
+          const px = blk.position.x, py = blk.position.y;
           blk.plugin.meta.removed = true;
           blk.plugin.meta.removedBy = 'crumble';
           Composite.remove(state.engine.world, blk);
-          if (state.onCrumble) state.onCrumble(blk.position.x, blk.position.y, blk);
+          if (!legacy && wasStatic) wakeCorridorAbove(state, layer, [{ x: px, y: py }]);
+          if (state.onCrumble) state.onCrumble(px, py, blk);
         }
       }
       state.toCrumble.length = 0;
     }
   };
 
-  function activeBlocks(state) {
-    const out = [];
-    for (const bld of state.buildings) {
-      for (const blk of bld.blocks) if (!blk.plugin.meta.removed) out.push(blk);
-    }
-    return out;
-  }
-  physics.activeBlocks = activeBlocks;
-
   /* 起爆：pos（ワールド座標）の近傍ブロックを破壊し、周辺を吹き飛ばす。
-   * layer を渡すと、破壊・吹き飛ばしは同じレイヤーのブロックだけに限定される。 */
+   * layer を渡すと、破壊・吹き飛ばしは同じレイヤーのブロックだけに限定される。
+   * ブロック総数 < LEGACY_MAX（既存6ステージは常にこちら）では従来どおり全ブロックを
+   * 一斉ウェイクする。それ以上では爆心まわりの局所ウェイク（＋上方コリドー）に留める。 */
   physics.detonate = function (state, pos, layer) {
+    const legacy = isLegacy(state);
     if (!state.awake) {
       state.awake = true;
-      for (const blk of activeBlocks(state)) Body.setStatic(blk, false);
+      if (legacy) {
+        for (const blk of activeBlocks(state)) Body.setStatic(blk, false);
+      }
+    }
+    if (!legacy) {
+      physics.wakeAt(state, pos, WAKE_R, layer);
     }
     let destroyed = 0;
+    const destroyedPts = [];
     for (const blk of activeBlocks(state)) {
       if (layer != null && blk.plugin.meta.layer !== layer) continue;
       Sleeping.set(blk, false);
@@ -248,6 +407,7 @@
       if (d < DESTROY_R) {
         blk.plugin.meta.removed = true;
         blk.plugin.meta.removedBy = 'blast';
+        if (!legacy) destroyedPts.push({ x: blk.position.x, y: blk.position.y });
         Composite.remove(state.engine.world, blk);
         destroyed++;
       } else if (d < PUSH_R) {
@@ -260,6 +420,7 @@
         Body.setAngularVelocity(blk, (Math.random() - 0.5) * 0.25);
       }
     }
+    if (!legacy && destroyedPts.length) wakeCorridorAbove(state, layer, destroyedPts);
     return destroyed;
   };
 

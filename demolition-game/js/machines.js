@@ -95,15 +95,12 @@
     barEl.classList.toggle('hidden', !show);
   }
 
-  /* ---------- ブロックを起こす（爆弾の初回起爆と同じ扱い） ---------- */
-  function wakeBlocks() {
-    const gc = window.GameCore;
-    const pstate = gc && gc.pstate;
-    if (!pstate || pstate.awake) return;
-    pstate.awake = true;
-    const blocks = window.GamePhysics.activeBlocks(pstate);
-    for (const blk of blocks) Matter.Body.setStatic(blk, false);
-  }
+  /* ---------- ブロックを起こす ----------
+   * 以前はここで全ブロックを一斉に setStatic(false) していたが、大量ブロック時の
+   * 物理負荷対策として廃止。physics.js の touch-to-wake（collisionStart 内）が、
+   * てっきゅう／ショベルが静的なブロックにぶつかった時点で個別に起こし、支えを
+   * 失った上方のブロックも連鎖して起こすため、何もしなくてよい。 */
+  function wakeBlocks() {}
 
   /* ---------- 衝突検知（シェイク・ほこり・ドスン音） ---------- */
   function attachImpactListener(engine, label) {
