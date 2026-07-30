@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>パンケーキタワーすべり解体</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="gl"></canvas>
+
+  <!-- 最小限の常時アイコン -->
+  <button id="mute-btn" class="mini-btn" aria-label="sound">🔔</button>
+  <button id="rebake-btn" class="mini-btn" aria-label="new tower">🥞↻</button>
+  <div id="star-pill"><span id="star-icon">⭐</span><span id="star-count">0</span></div>
+
+  <!-- トッピングパレット（タップで開閉） -->
+  <div id="palette">
+    <div id="palette-fan"></div>
+    <button id="palette-btn" aria-label="toppings">🍯</button>
+  </div>
+
+  <!-- ラウンドクリア -->
+  <button id="next-btn" class="hidden"><span class="next-cake">🥞</span><span class="next-arrow">▶</span></button>
+
+  <!-- ヒント・演出用 -->
+  <div id="hint-hand" class="hidden">👆</div>
+  <div id="fx-layer"></div>
+  <div id="unlock-toast" class="hidden"></div>
+
+  <!-- はじめのタップ待ち -->
+  <div id="boot-cover">
+    <div class="boot-cake">🥞</div>
+    <div class="boot-tap">👆</div>
+  </div>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/world.js"></script>
+<script src="js/pancake.js"></script>
+<script src="js/physics.js"></script>
+<script src="js/toppings.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
