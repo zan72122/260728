@@ -141,6 +141,25 @@ html, body {
   50% { scale: 1.06; }
 }
 
+/* ---------- 視点プリセットボタン ---------- */
+#view-bar {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px calc(env(safe-area-inset-left, 0px) + 10px);
+  pointer-events: none;
+  z-index: 5;
+}
+#view-bar .view-btn {
+  pointer-events: auto;
+  border-radius: 50%;
+  font-size: 26px;
+}
+
 /* ---------- 建築モードのツールバー ---------- */
 #build-bar {
   position: absolute;

@@ -18,6 +18,30 @@
 
   const ty = (my) => GROUND_Y - my; /* matter y → three y */
 
+  /* ---------- カメラのビュー状態（ピンチズーム・パン・視点回転） ----------
+   * zoom: 1が基準（大きいほど近づく）/ panX,panY: ワールド単位のオフセット（panXはmatter/three共通のx、panYはthree空間のy=上方向プラス）
+   * az,el: fitCamera基準角(0.22/0.15)への加算オフセット */
+  let view = { zoom: 1, panX: 0, panY: 0, az: 0, el: 0 };
+  const ZOOM_MIN = 0.45, ZOOM_MAX = 2.6;
+  const AZ_MIN = -0.9, AZ_MAX = 0.9;
+  const EL_MIN = -0.2, EL_MAX = 0.5;
+
+  function clampNum(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function clampView() {
+    view.zoom = clampNum(view.zoom, ZOOM_MIN, ZOOM_MAX);
+    view.az = clampNum(view.az, AZ_MIN, AZ_MAX);
+    view.el = clampNum(view.el, EL_MIN, EL_MAX);
+    if (fitInfo && fitInfo.bounds) {
+      const b = fitInfo.bounds;
+      const bw = b.maxX - b.minX;
+      const bh = ty(b.topY) - ty(b.bottomY);
+      const maxPan = Math.max(bw, bh) * 0.9 + 260;
+      view.panX = clampNum(view.panX, -maxPan, maxPan);
+      view.panY = clampNum(view.panY, -maxPan, maxPan);
+    }
+  }
+
   /* ---------- キャンバス製テクスチャ ---------- */
   const texCache = new Map();
   function canvasTex(key, w, h, draw) {
@@ -304,21 +328,26 @@
   /* ---------- カメラフィット ---------- */
   function fitCamera() {
     const b = fitInfo.bounds;
-    const cx = (b.minX + b.maxX) / 2;
+    const cx0 = (b.minX + b.maxX) / 2;
     const topY = ty(b.topY);       /* 高いほう */
     const botY = ty(b.bottomY);    /* 低いほう（マイナス） */
-    const cy = (topY + botY) / 2;
+    const cy0 = (topY + botY) / 2;
     const bw = b.maxX - b.minX;
     const bh = topY - botY;
 
+    clampView(); /* zoom/az/el/pan をシーンに合わせてクランプ */
+
     const vFov = camera.fov * Math.PI / 180;
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
-    const dist = Math.max(
+    const distBase = Math.max(
       (bh / 2) / Math.tan(vFov / 2),
       (bw / 2) / Math.tan(hFov / 2)
     ) * 1.14 + 120;
+    const dist = distBase / view.zoom;
 
-    const az = 0.22, el = 0.15; /* ちょっと斜めから見る */
+    const cx = cx0 + view.panX;
+    const cy = cy0 + view.panY;
+    const az = 0.22 + view.az, el = 0.15 + view.el; /* ちょっと斜めから見る（+ジェスチャー分） */
     const dx = Math.sin(az) * Math.cos(el);
     const dy = Math.sin(el);
     const dz = Math.cos(az) * Math.cos(el);
@@ -333,15 +362,35 @@
     camera.far = dist * 3.2 + 1500;
     camera.updateProjectionMatrix();
 
-    /* 影カメラをシーンに合わせる */
+    /* 影カメラをシーンに合わせる（パン・ズームには追従させず建物中心のまま） */
     const d = R._dir;
-    d.target.position.set(cx, 0, 0);
-    d.position.set(cx - 420, 700, 520);
+    d.target.position.set(cx0, 0, 0);
+    d.position.set(cx0 - 420, 700, 520);
     const s = Math.max(bw, bh) * 0.9 + 300;
     d.shadow.camera.left = -s; d.shadow.camera.right = s;
     d.shadow.camera.top = s; d.shadow.camera.bottom = -s;
     d.shadow.camera.updateProjectionMatrix();
   }
+
+  /* ---------- ビュー操作 API（カメラのピンチズーム・パン・視点回転用） ---------- */
+  R.setView = function (partial) {
+    if (partial) Object.assign(view, partial);
+    clampView();
+    if (fitInfo) fitCamera();
+  };
+
+  R.getView = function () {
+    return { zoom: view.zoom, panX: view.panX, panY: view.panY, az: view.az, el: view.el };
+  };
+
+  R.resetView = function () {
+    view = { zoom: 1, panX: 0, panY: 0, az: 0, el: 0 };
+    if (fitInfo) fitCamera();
+  };
+
+  R.refreshCamera = function () {
+    if (fitInfo) fitCamera();
+  };
 
   R.screenPos = function (wx, wy) {
     const v = new THREE.Vector3(wx, ty(wy), 0).project(camera);
@@ -375,8 +424,9 @@
     mesh.position.set(wx, ty(wy), 0);
   };
 
-  /* 画面座標 → z=0 平面上のワールド座標（matter系） */
-  R.worldFromScreen = function (sx, sy) {
+  /* 画面座標 → 任意z平面上のワールド座標（matter系）。planeZ省略時は z=0 */
+  R.worldFromScreen = function (sx, sy, planeZ) {
+    if (planeZ === undefined) planeZ = 0;
     const v = new THREE.Vector3(
       (sx / window.innerWidth) * 2 - 1,
       -(sy / window.innerHeight) * 2 + 1,
@@ -384,7 +434,7 @@
     );
     v.unproject(camera);
     const dir = v.sub(camera.position).normalize();
-    const t = -camera.position.z / dir.z;
+    const t = (planeZ - camera.position.z) / dir.z;
     const p = camera.position.clone().addScaledVector(dir, t);
     return { x: p.x, y: GROUND_Y - p.y };
   };
@@ -853,6 +903,8 @@
       fitInfo.base.z
     );
     camera.lookAt(fitInfo.look);
+
+    if (window.GameHooks) window.GameHooks.emit('frame', state, time, opts);
 
     renderer.render(scene, camera);
   };

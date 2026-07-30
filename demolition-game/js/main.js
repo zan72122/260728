@@ -39,6 +39,7 @@
     window.GameBuild.exit();
     showBackdrop();
     ui.hide('hud');
+    window.GameCamera.showBar(false);
     ui.showOnly('scr-title');
   }
 
@@ -48,6 +49,7 @@
     window.GameBuild.exit();
     showBackdrop();
     ui.hide('hud');
+    window.GameCamera.showBar(false);
     ui.buildLevelGrid(LEVELS, stars, (lv) => {
       audio.play('tap');
       startLevel(lv);
@@ -64,7 +66,9 @@
     ui.showOnly(null);
     ui.show('hud');
     ui.setDust(0, 60);
+    window.GameCamera.showBar(true);
     window.GameBuild.enter();
+    window.GameRender.resetView();
   }
 
   function startLevel(level) {
@@ -72,7 +76,9 @@
     currentLevel = level;
     ui.showOnly(null); /* すべてのスクリーンを隠す */
     ui.show('hud');
+    window.GameCamera.showBar(true);
     game.start(level);
+    window.GameRender.resetView();
   }
 
   window.GameBuild.onStartDemolition = (level) => startLevel(level);
@@ -137,19 +143,24 @@
   });
 
   /* ---------- キャンバスへのタップ ---------- */
+  function gesturing() { return window.GameCamera && window.GameCamera.gesturing; }
   canvas.addEventListener('pointerdown', (e) => {
+    if (gesturing()) return; /* 2本指ジェスチャー中は1本指のタップ/なぞりを無視 */
     e.preventDefault();
     audio.unlock();
     if (scene === 'play') game.tap(e.clientX, e.clientY);
     else if (scene === 'build') window.GameBuild.strokeStart(e.clientX, e.clientY);
   });
   canvas.addEventListener('pointermove', (e) => {
+    if (gesturing()) return;
     if (scene === 'build') window.GameBuild.strokeMove(e.clientX, e.clientY);
   });
   window.addEventListener('pointerup', () => {
+    if (gesturing()) return;
     if (scene === 'build') window.GameBuild.strokeEnd();
   });
   window.addEventListener('pointercancel', () => {
+    if (gesturing()) return;
     if (scene === 'build') window.GameBuild.strokeEnd();
   });
 

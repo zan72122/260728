@@ -93,5 +93,27 @@
     },
   ];
 
-  window.GameLevels = { LEVELS, PALETTES, B, GROUND_Y: 600 };
+  /* ---------- そざい（マテリアル）と ブラシ ----------
+   * ブラシID: 0..4 = いろいたブロック（normal素材、いろちがい）
+   *           5..8 = そざいブロック（いし・き・ゴム・ガラス）
+   * MATERIALS: 物理特性（density/friction/restitution）と くだけやすさ(crumble)
+   *   crumble はぶつかった速さがこれを超えると砕けてほこりになる（Infinity＝くだけない） */
+  const MATERIALS = {
+    normal: { density: 0.001,  friction: 0.9, restitution: 0.02, crumble: 6 },
+    stone:  { density: 0.002,  friction: 1.0, restitution: 0.01, crumble: 9 },
+    wood:   { density: 0.0006, friction: 0.8, restitution: 0.05, crumble: 7 },
+    rubber: { density: 0.0008, friction: 0.9, restitution: 0.75, crumble: Infinity },
+    glass:  { density: 0.001,  friction: 0.4, restitution: 0.05, crumble: 2.5 },
+  };
+
+  /* BRUSHES[p].material が無ければ 'normal'（見た目は PALETTES と同じ色情報） */
+  const BRUSHES = [
+    PALETTES.coral, PALETTES.lemon, PALETTES.mint, PALETTES.sky, PALETTES.lilac,
+    { wall: '#9a9a94', shade: '#7d7d78', win: '#cfe6f5', material: 'stone' },
+    { wall: '#b98352', shade: '#96693f', win: '#e8c99a', material: 'wood' },
+    { wall: '#ff9ec7', shade: '#e078a8', win: '#ffd6ea', material: 'rubber' },
+    { wall: '#bfe6ef', shade: '#8fc7d8', win: '#e8f8fb', material: 'glass' },
+  ];
+
+  window.GameLevels = { LEVELS, PALETTES, MATERIALS, BRUSHES, B, GROUND_Y: 600 };
 })();

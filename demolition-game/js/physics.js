@@ -3,11 +3,16 @@
   'use strict';
 
   const { Engine, Composite, Bodies, Body, Events, Sleeping } = Matter;
-  const { B, GROUND_Y } = window.GameLevels;
+  const { B, GROUND_Y, BRUSHES, MATERIALS } = window.GameLevels;
 
   const DESTROY_R = B * 1.15;  /* 爆破でブロックが消える半径 */
   const PUSH_R = B * 4.0;      /* 吹き飛ばしの半径 */
-  const CRUMBLE_SPEED = 6;     /* この速さ以上でぶつかったブロックは砕ける */
+  const CRUMBLE_SPEED = 6;     /* meta.crumble が無いときのフォールバックしきい値 */
+
+  /* レイヤーごとの衝突カテゴリ（0=おく,1=なか,2=まえ）。
+   * ブロックは同じレイヤーどうし＋地面/おとなり(0x1)とだけ衝突する。 */
+  function layerCategory(layer) { return 0x0002 << (layer | 0); }
+  const GROUND_FILTER = { category: 0x0001, mask: 0xFFFF, group: 0 };
 
   const physics = {};
 
@@ -31,6 +36,7 @@
     /* 地面 */
     const ground = Bodies.rectangle(0, GROUND_Y + 80, 6000, 160, {
       isStatic: true, friction: 1, label: 'ground',
+      collisionFilter: GROUND_FILTER,
     });
     Composite.add(engine.world, ground);
 
@@ -38,27 +44,56 @@
     level.neighbors.forEach((n, i) => {
       const body = Bodies.rectangle(n.x, GROUND_Y - n.h / 2, n.w, n.h, {
         isStatic: true, label: 'neighbor',
+        collisionFilter: GROUND_FILTER,
       });
       body.plugin.neighborIndex = i;
       Composite.add(engine.world, body);
       state.neighbors.push({ spec: n, body, hit: false });
     });
 
+    /* 形状ごとにボディを生成する（tri=三角/cir=丸/それ以外=四角） */
+    function makeBlockBody(x, y, shape, matDef) {
+      const opts = {
+        friction: matDef.friction, frictionStatic: 5,
+        restitution: matDef.restitution, density: matDef.density,
+        label: 'block',
+      };
+      if (shape === 'tri') {
+        /* 底辺が下・頂点が上の二等辺三角形（セルいっぱい） */
+        const verts = [{ x: 0, y: -B / 2 }, { x: -B / 2, y: B / 2 }, { x: B / 2, y: B / 2 }];
+        try {
+          return Bodies.fromVertices(x, y, [verts], opts);
+        } catch (e) {
+          /* フォールバック：正三角形ポリゴンを回転して底辺を水平にする */
+          const poly = Bodies.polygon(x, y, 3, B * 0.58, opts);
+          Body.setAngle(poly, Math.PI / 2);
+          return poly;
+        }
+      }
+      if (shape === 'cir') {
+        return Bodies.circle(x, y, B * 0.48, opts);
+      }
+      return Bodies.rectangle(x, y, B, B, opts);
+    }
+
     /* ブロック1個を生成して登録する。
      * 動的ボディとして作ってから凍結する（生成時 isStatic:true だと
      * setStatic(false) で質量が復元されず物理が壊れるため） */
-    function makeBlock(spec, bi, col, row, palette) {
+    function makeBlock(spec, bi, col, row, layer, shape, palette, materialName) {
       const left = spec.x - (spec.cols * B) / 2;
       const x = left + col * B + B / 2;
       const y = GROUND_Y - B / 2 - row * B;
-      const body = Bodies.rectangle(x, y, B, B, {
-        friction: 0.9, frictionStatic: 5, restitution: 0.02,
-        label: 'block',
-      });
+      const matDef = MATERIALS[materialName] || MATERIALS.normal;
+      const body = makeBlockBody(x, y, shape, matDef);
       Body.setStatic(body, true);
+      const cat = layerCategory(layer);
+      body.collisionFilter = { category: cat, mask: cat | 0x0001, group: 0 };
       body.plugin.meta = {
-        bi, col, row, palette,
-        window: (row + col) % 2 === 0 && row > 0,
+        bi, col, row, layer, shape,
+        material: materialName || 'normal',
+        palette: palette || null,
+        crumble: matDef.crumble,
+        window: (materialName || 'normal') === 'normal' && (row + col) % 2 === 0 && row > 0,
         removed: false,
       };
       Composite.add(engine.world, body);
@@ -67,17 +102,22 @@
 
     /* 解体する建物：ブロックの積み上げ */
     if (level.customBlocks) {
-      /* 建築モード：任意配置のブロックリストから生成 */
+      /* 建築モード：任意配置のブロックリストから生成
+       * cb = { col, row, layer, brushP, shape } */
       const spec = level.buildings[0];
-      const blocks = level.customBlocks.map((cb) =>
-        makeBlock(spec, 0, cb.col, cb.row, cb.palette));
+      const blocks = level.customBlocks.map((cb) => {
+        const brush = (BRUSHES && BRUSHES[cb.brushP]) || (BRUSHES && BRUSHES[0]);
+        const layer = cb.layer != null ? cb.layer : 1;
+        const shape = cb.shape || 'sq';
+        return makeBlock(spec, 0, cb.col, cb.row, layer, shape, brush, brush && brush.material);
+      });
       state.buildings.push({ spec, blocks });
     } else {
       level.buildings.forEach((spec, bi) => {
         const blocks = [];
         for (let row = 0; row < spec.rows; row++) {
           for (let col = 0; col < spec.cols; col++) {
-            blocks.push(makeBlock(spec, bi, col, row, null));
+            blocks.push(makeBlock(spec, bi, col, row, 1, 'sq', null, 'normal'));
           }
         }
         state.buildings.push({ spec, blocks });
@@ -111,13 +151,15 @@
         } else if (speed > 3.5 && state.onImpact) {
           const pos = pair.collision.supports[0] || a.position;
           state.onImpact(pos.x, pos.y, speed);
-          /* 強くぶつかったブロックは砕けてほこりになる */
-          if (speed > CRUMBLE_SPEED) {
-            const faster =
-              (a.label === 'block' && (b.label !== 'block' ||
-                Math.hypot(a.velocity.x, a.velocity.y) >= Math.hypot(b.velocity.x, b.velocity.y)))
-                ? a : (b.label === 'block' ? b : null);
-            if (faster) state.toCrumble.push(faster);
+          /* 強くぶつかったブロックは砕けてほこりになる（しきい値はブロックごとの meta.crumble） */
+          const faster =
+            (a.label === 'block' && (b.label !== 'block' ||
+              Math.hypot(a.velocity.x, a.velocity.y) >= Math.hypot(b.velocity.x, b.velocity.y)))
+              ? a : (b.label === 'block' ? b : null);
+          if (faster) {
+            const th = (faster.plugin.meta && faster.plugin.meta.crumble != null)
+              ? faster.plugin.meta.crumble : CRUMBLE_SPEED;
+            if (speed > th) state.toCrumble.push(faster);
           }
         }
       }
