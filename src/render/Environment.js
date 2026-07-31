@@ -38,7 +38,7 @@ function box(cx, cy, cz, w, h, d) {
 }
 
 /** 2 点間を結ぶ円柱ジオメトリ（レール・パイプ・支柱の骨組み用）。 */
-function cylinderBetween(pA, pB, radiusA, radiusB, radialSegments = 8) {
+function cylinderBetween(pA, pB, radiusA, radiusB, radialSegments = 20) {
 	const dir = new THREE.Vector3().subVectors(pB, pA);
 	const rawLen = dir.length();
 	const len = Math.max(rawLen, 0.001);
@@ -352,7 +352,7 @@ function buildPool(sampler, envMap) {
 
 	// coping (縁石) + 階段
 	const concreteT = cloneTextureSet(concreteTextures(), 10, 3);
-	const copingGeo = new THREE.TorusGeometry(R + 0.15, 0.22, 12, 48);
+	const copingGeo = new THREE.TorusGeometry(R + 0.15, 0.22, 18, 48);
 	copingGeo.rotateX(Math.PI / 2);
 	copingGeo.translate(center.x, baseY + 0.12, center.z);
 
@@ -395,8 +395,8 @@ function buildPool(sampler, envMap) {
 		const a = new THREE.Vector3(rx, baseY + 0.95, rz);
 		const b = new THREE.Vector3(center.x + Math.cos(ang) * (R * 0.85), baseY + 0.3, center.z + Math.sin(ang) * (R * 0.85));
 		const c = new THREE.Vector3(center.x + Math.cos(ang) * (R * 0.7), baseY - depth * 0.35, center.z + Math.sin(ang) * (R * 0.7));
-		railGeos.push(cylinderBetween(a, b, 0.045, 0.045, 8));
-		railGeos.push(cylinderBetween(b, c, 0.045, 0.045, 8));
+		railGeos.push(cylinderBetween(a, b, 0.045, 0.045, 24));
+		railGeos.push(cylinderBetween(b, c, 0.045, 0.045, 24));
 	}
 	const rail = new THREE.Mesh(mergeSafe(railGeos), railMat);
 	rail.castShadow = true;
@@ -435,7 +435,7 @@ function buildPalms(sampler, envMap, wind) {
 		new THREE.Vector3(lean, trunkHeight, lean * 0.38),
 	], false, 'catmullrom', 0.4);
 	const baseR = 0.22, topR = 0.085;
-	const trunkGeo = new THREE.TubeGeometry(curve, 16, baseR, 9, false);
+	const trunkGeo = new THREE.TubeGeometry(curve, 16, baseR, 24, false);
 	taperTube(trunkGeo, curve, baseR, (t) => THREE.MathUtils.lerp(baseR, topR, t));
 	trunkGeo.computeVertexNormals();
 	trunkGeo.computeBoundingSphere();
@@ -552,13 +552,13 @@ function buildStartTower(track, sampler, envMap) {
 	const postR = 0.16;
 	const corners = [[-half, -half], [half, -half], [half, half], [-half, half]];
 	for (const [lx, lz] of corners) {
-		const g = new THREE.CylinderGeometry(postR, postR * 1.15, height, 12);
+		const g = new THREE.CylinderGeometry(postR, postR * 1.15, height, 24);
 		g.translate(lx, height / 2, lz);
 		metalGeos.push(place(g));
 	}
 	// 筋交い（背面 X ブレース）
-	metalGeos.push(place(cylinderBetween(new THREE.Vector3(-half, 0.15, -half), new THREE.Vector3(half, height * 0.55, -half), 0.05, 0.05, 8)));
-	metalGeos.push(place(cylinderBetween(new THREE.Vector3(half, 0.15, -half), new THREE.Vector3(-half, height * 0.55, -half), 0.05, 0.05, 8)));
+	metalGeos.push(place(cylinderBetween(new THREE.Vector3(-half, 0.15, -half), new THREE.Vector3(half, height * 0.55, -half), 0.05, 0.05, 20)));
+	metalGeos.push(place(cylinderBetween(new THREE.Vector3(half, 0.15, -half), new THREE.Vector3(-half, height * 0.55, -half), 0.05, 0.05, 20)));
 
 	// プラットフォーム床
 	woodGeos.push(place(box(0, height, 0, half * 2 + 0.4, 0.18, half * 2 + 0.4)));
@@ -578,8 +578,8 @@ function buildStartTower(track, sampler, envMap) {
 	addFlight(height * 0.5, height - 0.1, -half - 0.55, half * 0.1, -(half + 0.7));
 
 	// 階段の手すり
-	metalGeos.push(place(cylinderBetween(new THREE.Vector3(half + 0.7, 0.9, -half - 1.5), new THREE.Vector3(half + 0.7, height * 0.5 + 0.9, -half - 0.65), 0.035, 0.035, 8)));
-	metalGeos.push(place(cylinderBetween(new THREE.Vector3(-(half + 0.7), height * 0.5 + 0.9, -half - 0.55), new THREE.Vector3(-(half + 0.7), height + 0.9, half * 0.1), 0.035, 0.035, 8)));
+	metalGeos.push(place(cylinderBetween(new THREE.Vector3(half + 0.7, 0.9, -half - 1.5), new THREE.Vector3(half + 0.7, height * 0.5 + 0.9, -half - 0.65), 0.035, 0.035, 20)));
+	metalGeos.push(place(cylinderBetween(new THREE.Vector3(-(half + 0.7), height * 0.5 + 0.9, -half - 0.55), new THREE.Vector3(-(half + 0.7), height + 0.9, half * 0.1), 0.035, 0.035, 20)));
 
 	// プラットフォーム周囲の手すり
 	const railY = height + 0.9;
@@ -587,8 +587,8 @@ function buildStartTower(track, sampler, envMap) {
 	for (let i = 0; i < 4; i++) {
 		const a = new THREE.Vector3(ring[i][0], railY, ring[i][1]);
 		const b = new THREE.Vector3(ring[i + 1][0], railY, ring[i + 1][1]);
-		metalGeos.push(place(cylinderBetween(a, b, 0.03, 0.03, 8)));
-		metalGeos.push(place(cylinderBetween(new THREE.Vector3(ring[i][0], height, ring[i][1]), new THREE.Vector3(ring[i][0], railY, ring[i][1]), 0.025, 0.025, 6)));
+		metalGeos.push(place(cylinderBetween(a, b, 0.03, 0.03, 24)));
+		metalGeos.push(place(cylinderBetween(new THREE.Vector3(ring[i][0], height, ring[i][1]), new THREE.Vector3(ring[i][0], railY, ring[i][1]), 0.025, 0.025, 16)));
 	}
 
 	const woodMat = new THREE.MeshStandardMaterial({ map: wood.map, normalMap: wood.normalMap, roughnessMap: wood.roughnessMap, envMap: envMap || null, envMapIntensity: 0.5 });
@@ -603,7 +603,7 @@ function buildStartTower(track, sampler, envMap) {
 
 	// 屋根（キャノピー）
 	const canopy = cloneTextureSet(fiberglassTextures('#e8863a'), 4, 2);
-	const canopyGeo = new THREE.ConeGeometry(half * 1.7, 1.7, 8, 1, true);
+	const canopyGeo = new THREE.ConeGeometry(half * 1.7, 1.7, 24, 1, true);
 	canopyGeo.translate(0, height + 1.7 / 2 + 0.85, 0);
 	place(canopyGeo);
 	const canopyMat = new THREE.MeshStandardMaterial({

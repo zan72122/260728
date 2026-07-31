@@ -111,7 +111,6 @@ function turnRun(cursor, turn, radius, sweepRad, spacing = SPACING) {
 function buildCourse() {
   const raw = []; // { p: Vector3, radius, bank, tunnel, widthScale, section }
   let cursor = { pos: new THREE.Vector3(0, 74, 0), heading: new THREE.Vector3(0, 0, -1), pitch: 0.06 };
-  const start = cursor.pos.clone();
 
   const push = (nodes, section, attrs) => {
     for (const p of nodes) raw.push({ p, section, ...attrs });
@@ -209,6 +208,10 @@ function buildCourse() {
     r = straightRun(cursor, 14); push(r.nodes, 'F', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.1 }); cursor = r.cursor;
   }
 
+  // `start` is defined as the curve's true s=0 point (nodes[0]) rather than
+  // the pre-motion cursor, so it stays exactly consistent with what
+  // SplineTrack.frameAt(0).position will report.
+  const start = raw[0].p.clone();
   return { start, raw, endCursor: cursor };
 }
 

@@ -219,6 +219,14 @@ export class RiderPhysics {
     const tuck = THREE.MathUtils.clamp(inp.tuck || 0, 0, 1);
     const brake = THREE.MathUtils.clamp(inp.brake || 0, 0, 1);
 
+    // Non-contractual extras beyond the SPEC §4.3 state shape: a harmless
+    // echo of the last input, so ChaseCamera (which only receives `physics`,
+    // not raw input) can react to tuck for its FOV bonus. Any consumer that
+    // only knows the documented fields is unaffected.
+    this.state.tuck = tuck;
+    this.state.steer = steer;
+    this.state.brake = brake;
+
     const tune = this.tune;
     const clampedDt = Math.min(Math.max(dt || 0, 0), tune.maxDt);
     if (clampedDt <= 0) {
