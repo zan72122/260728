@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="description" content="AQUA VELOCITY — ブラウザで遊べる3Dウォータースライダーゲーム" />
+  <title>AQUA VELOCITY</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #030711;
+      color: #eaf6ff;
+      font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN",
+        "Hiragino Sans", "Yu Gothic", "Noto Sans JP", Meiryo, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+      overscroll-behavior: none;
+    }
+
+    #app {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(ellipse at 50% 30%, #0a1c33 0%, #030711 70%);
+    }
+
+    #app canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      outline: none;
+    }
+
+    #ui-root {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    #ui-root > * {
+      pointer-events: auto;
+    }
+
+    /* Boot/error/fallback screen — lives outside #app and #ui-root so it can
+       still be shown if module loading throws before either module takes
+       over rendering into those containers. */
+    #boot-fallback {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: #030711;
+    }
+
+    #boot-fallback.hidden {
+      display: none;
+    }
+
+    #boot-fallback .box {
+      max-width: 32rem;
+      text-align: center;
+      line-height: 1.7;
+    }
+
+    #boot-fallback h1 {
+      margin: 0 0 0.75em;
+      font-size: 1.4rem;
+      letter-spacing: 0.04em;
+      color: #7fe3ff;
+    }
+
+    #boot-fallback p {
+      margin: 0.4em 0;
+      font-size: 0.95rem;
+      color: #b9cbdc;
+    }
+
+    #boot-fallback code {
+      color: #ff8a8a;
+      font-size: 0.85em;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+
+    #initial-loading {
+      position: fixed;
+      inset: 0;
+      z-index: 500;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      align-items: center;
+      justify-content: center;
+      background: #030711;
+      transition: opacity 0.5s ease;
+    }
+
+    #initial-loading.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    #initial-loading .logo {
+      font-size: 1.5rem;
+      letter-spacing: 0.3em;
+      color: #7fe3ff;
+      text-shadow: 0 0 24px rgba(127, 227, 255, 0.6);
+    }
+
+    #initial-loading .spinner {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 3px solid rgba(127, 227, 255, 0.2);
+      border-top-color: #7fe3ff;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    noscript {
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #030711;
+      color: #eaf6ff;
+      text-align: center;
+      padding: 24px;
+      font-family: system-ui, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="ui-root"></div>
+
+  <!-- Shown until src/main.js confirms WebGL2 + finishes booting the engine.
+       main.js removes/hides this once the first frame is ready; it is also
+       reused to display fatal startup errors (module load failures, missing
+       WebGL2, etc.) so the user never sees a blank black page. -->
+  <div id="initial-loading">
+    <div class="logo">AQUA VELOCITY</div>
+    <div class="spinner"></div>
+  </div>
+
+  <div id="boot-fallback" class="hidden">
+    <div class="box">
+      <h1>読み込みに失敗しました</h1>
+      <p id="boot-fallback-message">
+        このブラウザまたは端末では AQUA VELOCITY を実行できません。
+      </p>
+      <p>最新版の Chrome / Edge / Firefox / Safari で WebGL2 を有効にしてお試しください。</p>
+      <code id="boot-fallback-detail"></code>
+    </div>
+  </div>
+
+  <noscript>
+    AQUA VELOCITY の実行には JavaScript が必要です。ブラウザの設定で JavaScript を有効にしてください。
+  </noscript>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
