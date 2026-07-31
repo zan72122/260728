@@ -33,7 +33,7 @@ import {
 // ファイル内に閉じて複製する）
 // ===========================================================================
 
-function cylinderBetween(pA, pB, radiusA, radiusB, radialSegments = 8) {
+function cylinderBetween(pA, pB, radiusA, radiusB, radialSegments = 20) {
 	const dir = new THREE.Vector3().subVectors(pB, pA);
 	const rawLen = dir.length();
 	const len = Math.max(rawLen, 0.001);
@@ -111,7 +111,7 @@ function buildSigns(track, envMap) {
 		const outward = f.radius * (f.widthScale || 1) + 2.2;
 		const groundPt = f.position.clone().addScaledVector(f.binormal, side * outward).addScaledVector(f.normal, -f.radius * 0.6);
 		const postTop = groundPt.clone().addScaledVector(up, 1.7);
-		postGeos.push(cylinderBetween(groundPt, postTop, 0.035, 0.045, 8));
+		postGeos.push(cylinderBetween(groundPt, postTop, 0.035, 0.045, 24));
 
 		const boardCenter = postTop.clone().addScaledVector(up, 0.5);
 		dummy.position.copy(boardCenter);
@@ -157,7 +157,7 @@ function buildFloodlights(track, envMap) {
 	const count = 16;
 
 	const bodyGeo = new THREE.BoxGeometry(0.34, 0.24, 0.5);
-	const armGeo = cylinderBetween(new THREE.Vector3(0, -0.35, 0), new THREE.Vector3(0, 0, 0), 0.03, 0.05, 8);
+	const armGeo = cylinderBetween(new THREE.Vector3(0, -0.35, 0), new THREE.Vector3(0, 0, 0), 0.03, 0.05, 24);
 	const housingGeo = mergeSafe([bodyGeo, armGeo]);
 	const metalSet = cloneTextureSet(metalTextures('#2c2f33'), 1, 1);
 	const housingMat = new THREE.MeshStandardMaterial({
@@ -229,12 +229,16 @@ function buildSeams(track, envMap) {
 			pts.push(track.surfaceAt(s, lateral, 0.025));
 		}
 		const curve = new THREE.CatmullRomCurve3(pts);
-		ringGeos.push(new THREE.TubeGeometry(curve, N, 0.03, 7, false));
+		// 継ぎ目リング自体は目立つので丸みを保つ (14 分割)。ボルトは全域で
+		// 数百個がひとつのバッファに焼き込まれる極小パーツなので、過剰な
+		// 分割はドローコールを増やさずとも頂点数だけを無駄に肥大化させる
+		// — 見た目に影響しない範囲でやや控えめにする。
+		ringGeos.push(new THREE.TubeGeometry(curve, N, 0.03, 14, false));
 
 		for (let j = 2; j < N; j += 4) {
 			const lateral = -1 + (2 * j) / N;
 			const p = track.surfaceAt(s, lateral, 0.03);
-			const g = new THREE.SphereGeometry(0.045, 8, 6);
+			const g = new THREE.SphereGeometry(0.045, 10, 8);
 			g.translate(p.x, p.y, p.z);
 			boltGeos.push(g);
 		}
@@ -279,9 +283,9 @@ function buildSupplyPipes(track, envMap) {
 	const p1 = p0.clone().add(new THREE.Vector3(0, 2.4, 0));
 	const p2 = p1.clone().addScaledVector(fwd, 3.5);
 	const p3 = p2.clone().add(new THREE.Vector3(0, -1.8, 0));
-	geos.push(cylinderBetween(p0, p1, 0.08, 0.08, 10));
-	geos.push(cylinderBetween(p1, p2, 0.07, 0.07, 10));
-	geos.push(cylinderBetween(p2, p3, 0.07, 0.07, 10));
+	geos.push(cylinderBetween(p0, p1, 0.08, 0.08, 24));
+	geos.push(cylinderBetween(p1, p2, 0.07, 0.07, 24));
+	geos.push(cylinderBetween(p2, p3, 0.07, 0.07, 24));
 
 	// コイル状のホース
 	const coilCenter = base.clone().addScaledVector(right, 3.2).addScaledVector(fwd, -3.5);
@@ -296,7 +300,7 @@ function buildSupplyPipes(track, envMap) {
 			coilCenter.z + Math.sin(a) * coilR,
 		));
 	}
-	geos.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(coilPts), 64, 0.035, 8, false));
+	geos.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(coilPts), 64, 0.035, 24, false));
 
 	const mesh = new THREE.Mesh(mergeSafe(geos), mat);
 	mesh.castShadow = true;
@@ -386,7 +390,7 @@ function buildFlags(track, envMap) {
 		map: metalSet.map, normalMap: metalSet.normalMap, roughnessMap: metalSet.roughnessMap,
 		envMap: envMap || null, envMapIntensity: 0.7, metalness: 0.6, roughness: 0.5,
 	});
-	const poleGeo = new THREE.CylinderGeometry(0.025, 0.03, 1.8, 8);
+	const poleGeo = new THREE.CylinderGeometry(0.025, 0.03, 1.8, 24);
 	poleGeo.translate(0, 0.9, 0);
 	const poles = new THREE.InstancedMesh(poleGeo, poleMat, placements.length);
 	poles.castShadow = true;
@@ -437,7 +441,7 @@ function buildBuoys(envMap) {
 	const count = 10;
 
 	const tex = buoyStripeTexture();
-	const geo = new THREE.SphereGeometry(0.28, 16, 12);
+	const geo = new THREE.SphereGeometry(0.28, 32, 16);
 	geo.scale(1, 0.65, 1);
 	const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.4, metalness: 0.05, envMap: envMap || null, envMapIntensity: 0.6 });
 	const buoys = new THREE.InstancedMesh(geo, mat, count);
@@ -482,7 +486,7 @@ function buildPottedPlants(track, envMap) {
 	}
 	if (placements.length === 0) return group;
 
-	const potGeo = new THREE.CylinderGeometry(0.22, 0.16, 0.32, 12);
+	const potGeo = new THREE.CylinderGeometry(0.22, 0.16, 0.32, 24);
 	potGeo.translate(0, 0.16, 0);
 	const potTex = cloneTextureSet(concreteTextures(), 1, 1);
 	const potMat = new THREE.MeshStandardMaterial({

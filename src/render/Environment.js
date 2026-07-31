@@ -557,8 +557,8 @@ function buildStartTower(track, sampler, envMap) {
 		metalGeos.push(place(g));
 	}
 	// 筋交い（背面 X ブレース）
-	metalGeos.push(place(cylinderBetween(new THREE.Vector3(-half, 0.15, -half), new THREE.Vector3(half, height * 0.55, -half), 0.05, 0.05, 20)));
-	metalGeos.push(place(cylinderBetween(new THREE.Vector3(half, 0.15, -half), new THREE.Vector3(-half, height * 0.55, -half), 0.05, 0.05, 20)));
+	metalGeos.push(place(cylinderBetween(new THREE.Vector3(-half, 0.15, -half), new THREE.Vector3(half, height * 0.55, -half), 0.05, 0.05, 24)));
+	metalGeos.push(place(cylinderBetween(new THREE.Vector3(half, 0.15, -half), new THREE.Vector3(-half, height * 0.55, -half), 0.05, 0.05, 24)));
 
 	// プラットフォーム床
 	woodGeos.push(place(box(0, height, 0, half * 2 + 0.4, 0.18, half * 2 + 0.4)));
@@ -578,8 +578,8 @@ function buildStartTower(track, sampler, envMap) {
 	addFlight(height * 0.5, height - 0.1, -half - 0.55, half * 0.1, -(half + 0.7));
 
 	// 階段の手すり
-	metalGeos.push(place(cylinderBetween(new THREE.Vector3(half + 0.7, 0.9, -half - 1.5), new THREE.Vector3(half + 0.7, height * 0.5 + 0.9, -half - 0.65), 0.035, 0.035, 20)));
-	metalGeos.push(place(cylinderBetween(new THREE.Vector3(-(half + 0.7), height * 0.5 + 0.9, -half - 0.55), new THREE.Vector3(-(half + 0.7), height + 0.9, half * 0.1), 0.035, 0.035, 20)));
+	metalGeos.push(place(cylinderBetween(new THREE.Vector3(half + 0.7, 0.9, -half - 1.5), new THREE.Vector3(half + 0.7, height * 0.5 + 0.9, -half - 0.65), 0.035, 0.035, 24)));
+	metalGeos.push(place(cylinderBetween(new THREE.Vector3(-(half + 0.7), height * 0.5 + 0.9, -half - 0.55), new THREE.Vector3(-(half + 0.7), height + 0.9, half * 0.1), 0.035, 0.035, 24)));
 
 	// プラットフォーム周囲の手すり
 	const railY = height + 0.9;
@@ -588,7 +588,7 @@ function buildStartTower(track, sampler, envMap) {
 		const a = new THREE.Vector3(ring[i][0], railY, ring[i][1]);
 		const b = new THREE.Vector3(ring[i + 1][0], railY, ring[i + 1][1]);
 		metalGeos.push(place(cylinderBetween(a, b, 0.03, 0.03, 24)));
-		metalGeos.push(place(cylinderBetween(new THREE.Vector3(ring[i][0], height, ring[i][1]), new THREE.Vector3(ring[i][0], railY, ring[i][1]), 0.025, 0.025, 16)));
+		metalGeos.push(place(cylinderBetween(new THREE.Vector3(ring[i][0], height, ring[i][1]), new THREE.Vector3(ring[i][0], railY, ring[i][1]), 0.025, 0.025, 24)));
 	}
 
 	const woodMat = new THREE.MeshStandardMaterial({ map: wood.map, normalMap: wood.normalMap, roughnessMap: wood.roughnessMap, envMap: envMap || null, envMapIntensity: 0.5 });
@@ -640,7 +640,7 @@ function buildLifeguardTower(sampler, envMap) {
 		legGeos.push(cylinderBetween(
 			new THREE.Vector3(cx + lx * 1.7, gy, cz + lz * 1.7),
 			new THREE.Vector3(cx + lx, gy + seatH, cz + lz),
-			0.07, 0.05, 20));
+			0.07, 0.05, 24));
 	}
 	for (let i = 1; i <= 2; i++) {
 		const t = i / 3;
@@ -649,11 +649,11 @@ function buildLifeguardTower(sampler, envMap) {
 			const [bx, bz] = corners[(s + 1) % 4];
 			const pa = new THREE.Vector3(cx + THREE.MathUtils.lerp(ax * 1.7, ax, t), gy + seatH * t, cz + THREE.MathUtils.lerp(az * 1.7, az, t));
 			const pb = new THREE.Vector3(cx + THREE.MathUtils.lerp(bx * 1.7, bx, t), gy + seatH * t, cz + THREE.MathUtils.lerp(bz * 1.7, bz, t));
-			legGeos.push(cylinderBetween(pa, pb, 0.035, 0.035, 14));
+			legGeos.push(cylinderBetween(pa, pb, 0.035, 0.035, 24));
 		}
 	}
 	// パラソル用ポールもここに合流させ、ドローコールを増やさない
-	legGeos.push(cylinderBetween(new THREE.Vector3(cx, gy + seatH + 0.6, cz), new THREE.Vector3(cx, gy + seatH + 1.75, cz), 0.03, 0.03, 16));
+	legGeos.push(cylinderBetween(new THREE.Vector3(cx, gy + seatH + 0.6, cz), new THREE.Vector3(cx, gy + seatH + 1.75, cz), 0.03, 0.03, 24));
 
 	const legMat = new THREE.MeshStandardMaterial({ map: metal.map, normalMap: metal.normalMap, roughnessMap: metal.roughnessMap, envMap: envMap || null, envMapIntensity: 0.8, metalness: 0.6, roughness: 0.5 });
 	const legs = new THREE.Mesh(mergeSafe(legGeos), legMat);
@@ -734,7 +734,7 @@ function buildParasols(sampler, envMap) {
 	const poles = new THREE.InstancedMesh(poleGeo, poleMat, COUNT);
 	poles.castShadow = true; poles.receiveShadow = true; poles.name = 'ParasolPoles';
 
-	const canopyGeo = new THREE.ConeGeometry(1.45, 0.6, 10, 1, true);
+	const canopyGeo = new THREE.ConeGeometry(1.45, 0.6, 24, 1, true);
 	canopyGeo.translate(0, 2.55, 0);
 	const canopyTex = cloneTextureSet(fiberglassTextures('#ffffff'), 5, 2);
 	const canopyMat = new THREE.MeshStandardMaterial({
@@ -797,7 +797,7 @@ function buildLoungers(sampler, envMap) {
 	backGeo.translate(0, 0.58, -0.95);
 	const legPositions = [[-0.27, 0.85], [0.27, 0.85], [-0.27, -0.85], [0.27, -0.85]];
 	const legGeos = legPositions.map(([lx, lz]) => cylinderBetween(
-		new THREE.Vector3(lx, 0, lz), new THREE.Vector3(lx, 0.42, lz), 0.022, 0.022, 6));
+		new THREE.Vector3(lx, 0, lz), new THREE.Vector3(lx, 0.42, lz), 0.022, 0.022, 24));
 	const loungerGeo = mergeSafe([bedGeo, backGeo, ...legGeos]);
 
 	const resin = cloneTextureSet(fiberglassTextures('#f5f2e9'), 2, 3);
@@ -858,10 +858,10 @@ function buildFence(sampler, envMap) {
 		if (sampler.distToTrack(x, z) < 10) { prev = null; continue; }
 		const y = sampler.heightAt(x, z);
 		const base = new THREE.Vector3(x, y, z);
-		geos.push(cylinderBetween(base, base.clone().add(new THREE.Vector3(0, 1.05, 0)), 0.035, 0.035, 6));
+		geos.push(cylinderBetween(base, base.clone().add(new THREE.Vector3(0, 1.05, 0)), 0.035, 0.035, 12));
 		if (prev) {
-			geos.push(cylinderBetween(prev.clone().add(new THREE.Vector3(0, 0.9, 0)), base.clone().add(new THREE.Vector3(0, 0.9, 0)), 0.02, 0.02, 5));
-			geos.push(cylinderBetween(prev.clone().add(new THREE.Vector3(0, 0.5, 0)), base.clone().add(new THREE.Vector3(0, 0.5, 0)), 0.02, 0.02, 5));
+			geos.push(cylinderBetween(prev.clone().add(new THREE.Vector3(0, 0.9, 0)), base.clone().add(new THREE.Vector3(0, 0.9, 0)), 0.02, 0.02, 10));
+			geos.push(cylinderBetween(prev.clone().add(new THREE.Vector3(0, 0.5, 0)), base.clone().add(new THREE.Vector3(0, 0.5, 0)), 0.02, 0.02, 10));
 		}
 		prev = base;
 	}
@@ -891,7 +891,7 @@ function buildWaterTower(sampler, envMap) {
 		legGeos.push(cylinderBetween(
 			new THREE.Vector3(cx + lx * legSpread, gy, cz + lz * legSpread),
 			new THREE.Vector3(cx + lx * legSpread * 0.28, gy + legH, cz + lz * legSpread * 0.28),
-			0.12, 0.09, 8));
+			0.12, 0.09, 24));
 	}
 	for (let i = 1; i <= 3; i++) {
 		const t = i / 4;
@@ -900,7 +900,7 @@ function buildWaterTower(sampler, envMap) {
 			const [bx, bz] = legCorners[(s + 1) % 4];
 			const pa = new THREE.Vector3(cx + THREE.MathUtils.lerp(ax * legSpread, ax * legSpread * 0.28, t), gy + legH * t, cz + THREE.MathUtils.lerp(az * legSpread, az * legSpread * 0.28, t));
 			const pb = new THREE.Vector3(cx + THREE.MathUtils.lerp(bx * legSpread, bx * legSpread * 0.28, t), gy + legH * t, cz + THREE.MathUtils.lerp(bz * legSpread, bz * legSpread * 0.28, t));
-			legGeos.push(cylinderBetween(pa, pb, 0.04, 0.04, 6));
+			legGeos.push(cylinderBetween(pa, pb, 0.04, 0.04, 24));
 		}
 	}
 	const legMat = new THREE.MeshStandardMaterial({ map: metal.map, normalMap: metal.normalMap, roughnessMap: metal.roughnessMap, envMap: envMap || null, envMapIntensity: 0.9, metalness: 0.75, roughness: 0.45 });
@@ -1091,7 +1091,7 @@ function buildBackgroundSlides(sampler, envMap) {
 			pts.push(new THREE.Vector3(cx + Math.cos(a) * cfg.radius, baseY + cfg.height * (1 - t) + 2, cz + Math.sin(a) * cfg.radius));
 		}
 		const curve = new THREE.CatmullRomCurve3(pts);
-		const tube = new THREE.TubeGeometry(curve, 90, 0.85, 16, false);
+		const tube = new THREE.TubeGeometry(curve, 90, 0.85, 24, false);
 		geos.push(tintGeo(tube, cfg.tint));
 
 		for (let i = 6; i < N; i += 10) {
@@ -1099,7 +1099,7 @@ function buildBackgroundSlides(sampler, envMap) {
 			const a = t * Math.PI * 2 * cfg.turns;
 			const px = cx + Math.cos(a) * cfg.radius, pz = cz + Math.sin(a) * cfg.radius;
 			const py = baseY + cfg.height * (1 - t) + 2;
-			const legG = cylinderBetween(new THREE.Vector3(px, sampler.heightAt(px, pz), pz), new THREE.Vector3(px, py - 0.9, pz), 0.12, 0.12, 8);
+			const legG = cylinderBetween(new THREE.Vector3(px, sampler.heightAt(px, pz), pz), new THREE.Vector3(px, py - 0.9, pz), 0.12, 0.12, 24);
 			geos.push(tintGeo(legG, [0.55, 0.55, 0.55]));
 		}
 	}
