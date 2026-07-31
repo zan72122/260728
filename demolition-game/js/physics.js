@@ -296,48 +296,52 @@
     for (const [ly, pts] of byLayer) wakeCorridorAbove(state, ly, pts);
   };
 
-  /* A2: 眠り続けた動的ブロックの再凍結／A3: 同時アクティブバジェット。
+  /* A2: 眠り続けた動的ブロックの再凍結（0.25秒ごと呼び出し）。
    * isLegacy(state) のときは呼ばれない（既存6ステージのsettled判定タイミングに影響させない）。 */
-  function periodicScan(state) {
-    const dynBlocks = [];
+  function reSleepScan(state) {
     for (const bld of state.buildings) {
       for (const blk of bld.blocks) {
         if (blk.plugin.meta.removed || blk.isStatic) continue;
-        dynBlocks.push(blk);
-      }
-    }
-
-    /* A2: isSleeping が RESLEEP_TIME 秒続いたブロックを再凍結する。
-     * isSleeping中のみ凍結するので空中で固まることはない。 */
-    for (const blk of dynBlocks) {
-      const meta = blk.plugin.meta;
-      if (blk.isSleeping) {
-        meta.sleepT = (meta.sleepT || 0) + RESLEEP_SCAN_DT;
-        if (meta.sleepT >= RESLEEP_TIME) {
-          Body.setStatic(blk, true);
+        const meta = blk.plugin.meta;
+        if (blk.isSleeping) {
+          meta.sleepT = (meta.sleepT || 0) + RESLEEP_SCAN_DT;
+          if (meta.sleepT >= RESLEEP_TIME) {
+            Body.setStatic(blk, true);
+            meta.sleepT = 0;
+          }
+        } else {
           meta.sleepT = 0;
         }
-      } else {
-        meta.sleepT = 0;
       }
     }
+  }
 
-    /* A3: 動的ブロック数が ACTIVE_MAX を超えたら、超過分を速度の遅い順に処理する。
-     * GamePerf は別エージェント実装中の可能性があるため毎回参照（未定義でも動く）。 */
+  /* A3: 同時アクティブバジェット。動的ブロック数が ACTIVE_MAX を超えたら、
+   * 超過分を速度の遅い順に処理する（遅い→即凍結、速い→crumble化）。
+   * 起爆や局所ウェイクで一気に大量のブロックが動的化した直後でも上限を超えたまま
+   * 描画/次フレームへ進まないよう、毎 physics.update 呼び出しごとに実行する
+   * （isLegacy(state) のときは呼ばれない）。
+   * GamePerf は別エージェント実装中の可能性があるため毎回参照（未定義でも動く）。 */
+  function enforceActiveBudget(state) {
     const ACTIVE_MAX = (window.GamePerf && window.GamePerf.activeMax) || ACTIVE_MAX_DEFAULT;
-    const alive = dynBlocks.filter((blk) => !blk.isStatic);
-    if (alive.length > ACTIVE_MAX) {
-      const excess = alive.length - ACTIVE_MAX;
-      alive.sort((a, b) => speedOf(a) - speedOf(b));
-      for (let i = 0; i < excess; i++) {
-        const blk = alive[i];
-        if (blk.plugin.meta.removed) continue;
-        if (speedOf(blk) < 0.5) {
-          Body.setStatic(blk, true);
-          blk.plugin.meta.sleepT = 0;
-        } else {
-          state.toCrumble.push(blk);
-        }
+    const alive = [];
+    for (const bld of state.buildings) {
+      for (const blk of bld.blocks) {
+        if (blk.plugin.meta.removed || blk.isStatic) continue;
+        alive.push(blk);
+      }
+    }
+    if (alive.length <= ACTIVE_MAX) return;
+    const excess = alive.length - ACTIVE_MAX;
+    alive.sort((a, b) => speedOf(a) - speedOf(b));
+    for (let i = 0; i < excess; i++) {
+      const blk = alive[i];
+      if (blk.plugin.meta.removed) continue;
+      if (speedOf(blk) < 0.5) {
+        Body.setStatic(blk, true);
+        blk.plugin.meta.sleepT = 0;
+      } else {
+        state.toCrumble.push(blk);
       }
     }
   }
@@ -356,10 +360,13 @@
     const legacy = isLegacy(state);
 
     if (!legacy) {
+      /* A3は毎tick：起爆直後の一気ウェイクでも上限超過を1フレームで解消する */
+      enforceActiveBudget(state);
+      /* A2は0.25秒ごと：頻度は低くてよい（凍結タイミングの精度は重要でない） */
       state.scanAcc = (state.scanAcc || 0) + dt;
       if (state.scanAcc >= RESLEEP_SCAN_DT) {
         state.scanAcc -= RESLEEP_SCAN_DT;
-        periodicScan(state);
+        reSleepScan(state);
       }
     }
 
