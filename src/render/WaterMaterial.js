@@ -157,8 +157,14 @@ export function createFlowingWaterMaterial(opts = {}) {
   const sunDir = (sunDirection ? sunDirection.clone() : sharedSunDirection.clone()).normalize();
 
   material.onBeforeCompile = (shader) => {
+    // SplineTrack.buildWaterGeometry() は aS を s/length (0..1 正規化) で
+    // 書き出す。ライダー側 (RiderPhysics.state.s) はメートル単位なので、
+    // シェーダ内でメートルに戻すための係数を渡す。
+    const trackLength = track && typeof track.length === 'number' && track.length > 0 ? track.length : 650;
+
     shader.uniforms.uTime = { value: elapsedTime };
     shader.uniforms.uFlowSpeed = { value: 0 };
+    shader.uniforms.uTrackLength = { value: trackLength };
     shader.uniforms.uRiderS = { value: 0 };
     shader.uniforms.uRiderLateral = { value: 0 };
     shader.uniforms.uRiderSpeed = { value: 0 };
@@ -202,6 +208,7 @@ varying float vS;
 
 uniform float uTime;
 uniform float uFlowSpeed;
+uniform float uTrackLength;
 uniform float uRiderS;
 uniform float uRiderLateral;
 uniform float uRiderSpeed;
@@ -219,8 +226,12 @@ ${AQ_LIB_GLSL}
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
 
-// ---- ドメイン: (弧長 s, 断面深度) を流速ベクトルでスクロール ----
-vec2 aqBaseDomain = vec2(vS, vDepth * 9.0);
+// vS は s/length に正規化された値 (SplineTrack.buildWaterGeometry) なので
+// メートルに戻す。uRiderS (RiderPhysics.state.s) はメートル単位。
+float aqSMeters = vS * uTrackLength;
+
+// ---- ドメイン: (弧長 s[m], 断面深度) を流速ベクトルでスクロール ----
+vec2 aqBaseDomain = vec2(aqSMeters, vDepth * 9.0);
 vec2 aqFlowScroll = vFlow * (uTime * max(uFlowSpeed, 0.6));
 
 // ---- 泡・白波: 壁際 (aDepth 小) ほど、流速が速いほど濃い筋状ノイズ ----
@@ -232,7 +243,7 @@ float aqSpeedy = smoothstep(3.0, 18.0, uFlowSpeed);
 float aqFoamMask = clamp(aqFoamRaw * mix(0.12, 1.0, aqShallow) * mix(0.35, 1.15, aqSpeedy), 0.0, 1.3);
 
 // ---- ライダーの航跡: 後方 0〜25m、lateral 近傍ほど強い V 字 ----
-float aqAlong = uRiderS - vS;
+float aqAlong = uRiderS - aqSMeters;
 float aqLongMask = step(0.0, aqAlong) * (1.0 - smoothstep(0.0, 25.0, aqAlong));
 float aqWakeMask = 0.0;
 if (aqLongMask > 0.001) {

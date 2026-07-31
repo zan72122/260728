@@ -23,8 +23,9 @@ import * as THREE from 'three';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-const SPACING = 7.5;        // default metres/node
-const HELIX_SPACING = 9.5;  // the helix has a large radius so can afford sparser nodes
+const SPACING = 6.5;         // default metres/node for curved (pitch/turn) segments
+const STRAIGHT_SPACING = 13; // straight segments have no curvature to track, so can be sparser
+const HELIX_SPACING = 8.5;   // the helix has a large radius so can afford somewhat sparser nodes
 
 function stepsFor(arcLen, spacing = SPACING) {
   return Math.max(1, Math.round(arcLen / spacing));
@@ -40,7 +41,7 @@ function stepsFor(arcLen, spacing = SPACING) {
  * ------------------------------------------------------------------ */
 
 // Straight run (constant heading, constant pitch).
-function straightRun(cursor, dist, spacing = SPACING) {
+function straightRun(cursor, dist, spacing = STRAIGHT_SPACING) {
   const steps = stepsFor(dist, spacing);
   const dir = cursor.heading.clone().multiplyScalar(Math.cos(cursor.pitch));
   dir.y = -Math.sin(cursor.pitch);
@@ -116,7 +117,7 @@ function buildCourse() {
     for (const p of nodes) raw.push({ p, section, ...attrs });
   };
 
-  const HELIX_CRUISE_PITCH = 0.115;
+  const HELIX_CRUISE_PITCH = 0.082;
 
   /* ---- A. Launch: short runway then a swooping drop into the helix's
    *       cruise pitch (lands exactly on HELIX_CRUISE_PITCH so B can start
@@ -126,8 +127,8 @@ function buildCourse() {
   {
     let r;
     r = straightRun(cursor, 16); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
-    r = pitchRun(cursor, 0.78, 17); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-    r = pitchRun(cursor, HELIX_CRUISE_PITCH, 19); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.72, 20); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = pitchRun(cursor, HELIX_CRUISE_PITCH, 33, 5); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
   }
 
   /* ---- B. High-speed helix: ~1.95 turns, strong bank ---- */
@@ -155,17 +156,19 @@ function buildCourse() {
     r = straightRun(cursor, 50); push(r.nodes, 'C', { radius: 4.9, bank: 0, tunnel: true, widthScale: 0.92 }); cursor = r.cursor;
   }
 
-  /* ---- D. Bowl / wave: alternating S-bends, lateral G ---- */
+  /* ---- D. Bowl / wave: alternating S-bends, lateral G. No pitch "settle"
+   *       segment here — C already leaves the cursor at a pitch close
+   *       enough that the first bend can absorb the difference itself,
+   *       which avoids a lone short node between two long-arc neighbours
+   *       (that mismatch is what overshoots into a sub-12m kink). ---- */
   {
     let r;
-    r = pitchRun(cursor, 0.15, 22); push(r.nodes, 'D', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-
     const bends = [
       { turn: 1, radius: 21, sweep: 0.85 },
       { turn: -1, radius: 20, sweep: 1.05 },
       { turn: 1, radius: 23, sweep: 0.95 },
       { turn: -1, radius: 21, sweep: 0.90 },
-      { turn: 1, radius: 22, sweep: 0.75 },
+      { turn: 1, radius: 26, sweep: 0.75 },
     ];
     for (const b of bends) {
       r = turnRun(cursor, b.turn, b.radius, b.sweep);
@@ -179,22 +182,30 @@ function buildCourse() {
     }
   }
 
-  /* ---- E. Airtime: short kicker up, crest, short descent ---- */
+  /* ---- E. Airtime: short kicker up, crest, short descent. Pitch swings
+   *       fairly quickly here, so use bigger radii and denser spacing than
+   *       the default — a sparse node chain tracks an intended arc poorly
+   *       right where several direction changes are stacked close together,
+   *       and the realised (spline) curvature can overshoot well past any
+   *       single segment's own design radius. ---- */
   {
     let r;
-    r = pitchRun(cursor, -0.20, 15); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-    r = straightRun(cursor, 11); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-    r = pitchRun(cursor, 0.25, 16); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-    r = straightRun(cursor, 10); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    const eSpacing = 3.75;
+    r = pitchRun(cursor, -0.13, 36, eSpacing); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = straightRun(cursor, 10, eSpacing); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.17, 38, eSpacing); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = straightRun(cursor, 9, eSpacing); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
   }
 
   /* ---- F. Last drop: steep (not literally vertical) plunge, then a
-   *       generous pull-out curve into a short flat run-in to the pool. ---- */
+   *       generous pull-out curve into a short flat run-in to the pool.
+   *       Denser spacing at both pitch transitions for the same reason
+   *       as section E. ---- */
   {
     let r;
-    r = pitchRun(cursor, 0.72, 20); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
-    r = straightRun(cursor, 20); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
-    r = pitchRun(cursor, 0.05, 22); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.1 }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.68, 30, 4.5); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
+    r = straightRun(cursor, 18); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.05, 28, 6); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.1 }); cursor = r.cursor;
     r = straightRun(cursor, 14); push(r.nodes, 'F', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.1 }); cursor = r.cursor;
   }
 

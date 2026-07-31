@@ -269,12 +269,7 @@ export class RiderPhysics {
 
       if (this._airCounter >= tune.airHysteresisSteps) {
         this._launchAirborne(frame);
-        if (!st.airborne) {
-          // Launch declined to arm (shouldn't normally happen); fall through
-          // to grounded integration this substep instead of doing nothing.
-        } else {
-          return;
-        }
+        return;
       }
 
       const dvdt = this._longitudinalAccel(st.speed, frame.slope, tuck, brake);
@@ -395,31 +390,40 @@ export class RiderPhysics {
       this._airVel.addScaledVector(this._airVel, -drag / airSpeed);
     }
 
+    // Deviation-triggered homing (measured against last frame's closest-point
+    // estimate, accurate to within one frame of motion). This is NOT a
+    // clock: a straight-ish ballistic path inherently and legitimately
+    // diverges from a tightly curving chute the longer it's airborne (a
+    // ~15m-radius turn at 25 m/s can leave you 8+ m from the centerline
+    // after just one second — verified directly, not a search bug). Rather
+    // than ever teleporting the rider back onto the track once a flight
+    // goes on too long (which would violate "always smooth"), we pull the
+    // trajectory itself back in as soon as it strays past a generous
+    // distance from the nearest surface — ordinary jumps, which stay close
+    // to the chute they launched from, never reach this threshold and are
+    // completely unaffected.
+    const n0 = this.track.surfaceNormalAt(st.s, st.lateral);
+    const surf0 = this.track.surfaceAt(st.s, st.lateral, tune.riderFloat);
+    const deviation = this._tmpV3.subVectors(this._airPos, surf0);
+    const devLen = deviation.length();
+    const homing = devLen > tune.homingDeviationThreshold;
+
     // `lateral` gently relaxes toward center while airborne (the rider
     // naturally settling mid-flight — steer's cosmetic tilt, per spec, is
-    // layered on top in _syncPose and never touches this). This is also
-    // what keeps the system robust: on a long flight through a strongly
-    // curving/twisting section, a *frozen* lateral offset can reference a
-    // point on the chute that has drifted far from where the free 3D
-    // parabola actually is. Relaxing toward the well-behaved centerline
-    // keeps the reference surface predictable the longer a flight runs.
-    const relaxRate = st.airTime > tune.homingAssistStart
-      ? tune.airLateralRelaxRate + tune.airLateralRelaxRateHoming
-      : tune.airLateralRelaxRate;
+    // layered on top in _syncPose and never touches this). Relaxing toward
+    // the well-behaved centerline also keeps the reference surface used
+    // above predictable, and relaxes faster once homing is active.
+    const relaxRate = homing ? tune.airLateralRelaxRate + tune.airLateralRelaxRateHoming : tune.airLateralRelaxRate;
     st.lateral = THREE.MathUtils.damp(st.lateral, 0, relaxRate, dt);
     st.lateralVel = THREE.MathUtils.damp(st.lateralVel, 0, relaxRate, dt);
 
-    // Homing assist: rather than ever teleporting the rider back onto the
-    // track (which would violate "always smooth"), once a flight has gone
-    // on unusually long we gently — and smoothly — steer the trajectory
-    // back toward the track's surface so a *natural* crossing (not a forced
-    // snap) always resolves it in bounded time.
-    if (st.airTime > tune.homingAssistStart) {
-      const n0 = this.track.surfaceNormalAt(st.s, st.lateral);
-      const surf0 = this.track.surfaceAt(st.s, st.lateral, tune.riderFloat);
-      const height = this._tmpV3.subVectors(this._airPos, surf0).dot(n0);
-      const assist = Math.min(tune.homingAssistMax, (st.airTime - tune.homingAssistStart) * tune.homingAssistRamp);
-      this._airVel.addScaledVector(n0, -Math.sign(height || 1) * assist * dt);
+    if (homing && devLen > 1e-4) {
+      const excess = devLen - tune.homingDeviationThreshold;
+      const assist = Math.min(tune.homingAssistMax, excess * tune.homingAssistRamp);
+      // Pull directly toward the nearest surface point (not just along its
+      // normal) — in a tight curve the deviation is mostly sideways, not
+      // just "too high".
+      this._airVel.addScaledVector(deviation, (-assist * dt) / devLen);
     }
 
     this._airPos.addScaledVector(this._airVel, dt);
