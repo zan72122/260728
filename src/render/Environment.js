@@ -729,7 +729,7 @@ function buildParasols(sampler, envMap) {
 
 	const poleGeo = new THREE.CylinderGeometry(0.035, 0.045, 2.4, 8);
 	poleGeo.translate(0, 1.2, 0);
-	const metal = cloneTextureSet(metalTextures('#cfd4d6'), 1, 3);
+	const metal = cloneTextureSet(metalTextures('#d8dde0'), 1, 3);
 	const poleMat = new THREE.MeshStandardMaterial({ map: metal.map, normalMap: metal.normalMap, roughnessMap: metal.roughnessMap, envMap: envMap || null, envMapIntensity: 0.9, metalness: 0.7, roughness: 0.4 });
 	const poles = new THREE.InstancedMesh(poleGeo, poleMat, COUNT);
 	poles.castShadow = true; poles.receiveShadow = true; poles.name = 'ParasolPoles';
@@ -884,7 +884,7 @@ function buildWaterTower(sampler, envMap) {
 	const gy = sampler.heightAt(cx, cz);
 	const legH = 8.5, legSpread = 2.4, tankH = 3.2, tankR = 2.1;
 
-	const metal = cloneTextureSet(metalTextures('#7f8a8f'), 1, 4);
+	const metal = cloneTextureSet(metalTextures('#767c82'), 1, 4);
 	const legGeos = [];
 	const legCorners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 	for (const [lx, lz] of legCorners) {

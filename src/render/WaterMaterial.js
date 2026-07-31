@@ -295,7 +295,11 @@ normal = aqBumpNormal(aqPosDx, aqPosDy, normal, aqHx, aqHy);
 
 	float aqNdv = clamp(dot(geometryNormal, aqViewDir), 0.0, 1.0);
 	float aqFres = F_Schlick(0.02, 1.0, aqNdv);
+#ifdef USE_ENVMAP
 	vec3 aqSky = getIBLRadiance(aqViewDir, geometryNormal, clamp(material.roughness, 0.035, 0.32));
+#else
+	vec3 aqSky = uShallowColor;
+#endif
 	outgoingLight = mix(outgoingLight, aqSky * uEnvBoost, clamp(aqFres * 0.6, 0.0, 0.85));
 
 	// ---- コースティクス風スペックルハイライト (太陽方向の高次スペキュラ) ----
@@ -497,7 +501,11 @@ normal = aqBumpNormal(aqPosDx, aqPosDy, normal, aqHx, aqHy);
 
 	float aqNdv = clamp(dot(geometryNormal, aqViewDir), 0.0, 1.0);
 	float aqFres = F_Schlick(0.02, 1.0, aqNdv);
+#ifdef USE_ENVMAP
 	vec3 aqSky = getIBLRadiance(aqViewDir, geometryNormal, clamp(material.roughness, 0.02, 0.28));
+#else
+	vec3 aqSky = uDeepColor;
+#endif
 	outgoingLight = mix(outgoingLight, aqSky * uEnvBoost, clamp(aqFres * 0.7, 0.0, 0.9));
 
 	vec3 aqHalf = normalize(aqSunVS + aqViewDir);

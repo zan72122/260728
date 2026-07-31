@@ -107,6 +107,7 @@ const DEFAULTS = {
   airDragCoef: 0.0035,
   landingSpeedCap: 29.5,
   sRefineIters: 4,
+  sRefineMaxStep: 2.5,
 
   // integration
   substep: 1 / 120,
@@ -418,11 +419,17 @@ export class RiderPhysics {
     // Closest-point refinement (Newton-style, projecting the offset onto the
     // tangent) instead of naive dead-reckoning by forward speed: verified
     // necessary for steep post-jump terrain, where the chute surface drops
-    // away faster than dead-reckoned arc length would suggest.
+    // away faster than dead-reckoned arc length would suggest. Each step is
+    // clamped so a strongly curving/twisting section (where the projection
+    // can have more than one near-root) can't make the search leap to a
+    // distant, unrelated point in one jump — it stays a *local* refinement.
     let sEst = st.s;
     for (let i = 0; i < tune.sRefineIters; i++) {
       const f = this.track.frameAt(sEst);
-      const delta = this._tmpV1.subVectors(this._airPos, f.position).dot(f.tangent);
+      const delta = THREE.MathUtils.clamp(
+        this._tmpV1.subVectors(this._airPos, f.position).dot(f.tangent),
+        -tune.sRefineMaxStep, tune.sRefineMaxStep
+      );
       sEst = THREE.MathUtils.clamp(sEst + delta, 0, this.track.length);
     }
     st.s = sEst;
@@ -498,7 +505,13 @@ export class RiderPhysics {
       this._smoothedPos.copy(rawPos);
       this._firstFrame = false;
     } else if (dt > 0) {
-      const t = 1 - Math.exp(-tune.poseSmoothRate * dt);
+      // Track tightly while airborne (and briefly after landing, while the
+      // grace window is active): the raw target is a perfectly smooth
+      // ballistic path with no jitter risk, so a tighter rate here only
+      // shrinks the lag behind a fast-moving body — it's what keeps the
+      // grounded<->airborne seam visually seamless.
+      const rate = st.airborne || this._groundGrace > 0 ? tune.poseSmoothRateAirborne : tune.poseSmoothRate;
+      const t = 1 - Math.exp(-rate * dt);
       this._smoothedQuat.slerp(this._tmpQuat, t);
       this._smoothedPos.lerp(rawPos, t);
     }
