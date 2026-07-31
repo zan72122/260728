@@ -8,6 +8,12 @@
 // change, minimum curve radius, no self-crossing) can be tuned by editing a
 // handful of named constants instead of hundreds of coordinates.
 //
+// Node spacing is derived from each segment's own arc length via a single
+// target-spacing constant (roughly constant metres/node everywhere) so that
+// no two adjacent segments meet with wildly mismatched spacing — that
+// mismatch is what makes a centripetal Catmull-Rom spline overshoot into a
+// sharp, unwanted kink at the seam.
+//
 // Section order along the course (all letters map to a contiguous s-range,
 // exported below as SECTION_BOUNDS for the other modules / TrackMaterial):
 //   A Launch -> B High-speed helix -> C Dark tunnel -> D Bowl / wave
@@ -16,6 +22,13 @@
 import * as THREE from 'three';
 
 const UP = new THREE.Vector3(0, 1, 0);
+
+const SPACING = 7.5;        // default metres/node
+const HELIX_SPACING = 9.5;  // the helix has a large radius so can afford sparser nodes
+
+function stepsFor(arcLen, spacing = SPACING) {
+  return Math.max(1, Math.round(arcLen / spacing));
+}
 
 /* ------------------------------------------------------------------ *
  *  Cursor-based path builders
@@ -26,19 +39,11 @@ const UP = new THREE.Vector3(0, 1, 0);
  *  heading*cos(pitch) - UP*sin(pitch).
  * ------------------------------------------------------------------ */
 
-function cloneCursor(c) {
-  return { pos: c.pos.clone(), heading: c.heading.clone(), pitch: c.pitch };
-}
-
-function travelDir(cursor) {
-  const d = cursor.heading.clone().multiplyScalar(Math.cos(cursor.pitch));
-  d.y = -Math.sin(cursor.pitch);
-  return d;
-}
-
 // Straight run (constant heading, constant pitch).
-function straightRun(cursor, dist, steps) {
-  const dir = travelDir(cursor);
+function straightRun(cursor, dist, spacing = SPACING) {
+  const steps = stepsFor(dist, spacing);
+  const dir = cursor.heading.clone().multiplyScalar(Math.cos(cursor.pitch));
+  dir.y = -Math.sin(cursor.pitch);
   const stepDist = dist / steps;
   const pos = cursor.pos.clone();
   const nodes = [];
@@ -52,10 +57,11 @@ function straightRun(cursor, dist, steps) {
 // Vertical-plane curve: heading fixed, pitch ramps cursor.pitch -> pitchEnd.
 // `radius` is the true radius of curvature of the vertical arc (>=12 keeps
 // SPEC's curve-radius requirement satisfied by construction).
-function pitchRun(cursor, pitchEnd, radius, steps) {
+function pitchRun(cursor, pitchEnd, radius, spacing = SPACING) {
   const pitchStart = cursor.pitch;
   const sweep = pitchEnd - pitchStart;
   const arcLen = Math.abs(sweep) * radius;
+  const steps = stepsFor(arcLen, spacing);
   const stepArc = arcLen / steps;
   const pos = cursor.pos.clone();
   const nodes = [];
@@ -72,7 +78,7 @@ function pitchRun(cursor, pitchEnd, radius, steps) {
 // Horizontal turn (heading rotates by turn*sweepRad, turn=+1 left/-1 right)
 // swept at constant pitch, so it also steadily descends like a helix when
 // pitch != 0. `radius` is the horizontal turn radius.
-function turnRun(cursor, turn, radius, sweepRad, steps) {
+function turnRun(cursor, turn, radius, sweepRad, spacing = SPACING) {
   const H0 = cursor.heading.clone();
   const leftN = H0.clone().applyAxisAngle(UP, Math.PI / 2);
   const center = cursor.pos.clone().addScaledVector(leftN, radius * turn);
@@ -80,6 +86,7 @@ function turnRun(cursor, turn, radius, sweepRad, steps) {
   radiusVec0.y = 0;
 
   const arcLenTotal = radius * sweepRad;
+  const steps = stepsFor(arcLenTotal, spacing);
   const drop = Math.tan(cursor.pitch) * arcLenTotal;
 
   const nodes = [];
@@ -106,64 +113,67 @@ function buildCourse() {
   const start = cursor.pos.clone();
 
   const push = (nodes, section, attrs) => {
-    for (const p of nodes) {
-      raw.push({ p, section, ...attrs });
-    }
+    for (const p of nodes) raw.push({ p, section, ...attrs });
   };
 
-  /* ---- A. Launch: short runway then a swooping drop ---- */
+  const HELIX_CRUISE_PITCH = 0.115;
+
+  /* ---- A. Launch: short runway then a swooping drop into the helix's
+   *       cruise pitch (lands exactly on HELIX_CRUISE_PITCH so B can start
+   *       turning immediately with no separate "settle" segment — those
+   *       tend to be short relative to their neighbours and make a
+   *       Catmull-Rom spline overshoot at the seam). ---- */
   {
     let r;
-    r = straightRun(cursor, 12, 3); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
-    r = pitchRun(cursor, 0.95, 17, 4); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-    r = pitchRun(cursor, 0.30, 19, 3); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = straightRun(cursor, 16); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.78, 17); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = pitchRun(cursor, HELIX_CRUISE_PITCH, 19); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
   }
 
-  /* ---- B. High-speed helix: ~1.9 turns, strong bank ---- */
+  /* ---- B. High-speed helix: ~1.95 turns, strong bank ---- */
   {
-    let r;
-    r = pitchRun(cursor, 0.12, 20, 2); push(r.nodes, 'B', { radius: 5.5, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-
     const turn = 1; // left-handed spiral
-    const sweepRad = 1.9 * Math.PI * 2;
-    const steps = 18;
-    r = turnRun(cursor, turn, 17, sweepRad, steps);
-    for (let i = 0; i < r.nodes.length; i++) {
-      const frac = (i + 1) / r.nodes.length;
-      const ramp = THREE.MathUtils.smoothstep(frac, 0, 0.18) * (1 - THREE.MathUtils.smoothstep(frac, 0.82, 1));
+    const sweepRad = 1.95 * Math.PI * 2;
+    const r = turnRun(cursor, turn, 21, sweepRad, HELIX_SPACING);
+    const nNodes = r.nodes.length;
+    for (let i = 0; i < nNodes; i++) {
+      const frac = (i + 1) / nNodes;
+      const ramp = THREE.MathUtils.smoothstep(frac, 0, 0.16) * (1 - THREE.MathUtils.smoothstep(frac, 0.84, 1));
       const bankMag = 0.55 + 0.30 * ramp; // 0.55 .. 0.85 rad through the body of the spiral
       raw.push({ p: r.nodes[i], section: 'B', radius: 5.5, bank: -turn * bankMag, tunnel: false, widthScale: 1.0 });
     }
     cursor = r.cursor;
   }
 
-  /* ---- C. Dark tunnel: mostly straight, one gentle bend, closed tube ---- */
+  /* ---- C. Dark tunnel: mostly straight, one gentle bend, closed tube.
+   *       Pitch barely changes from the helix's cruise value, so no settle
+   *       segment is inserted before it either. ---- */
   {
     let r;
-    r = pitchRun(cursor, 0.085, 26, 2); push(r.nodes, 'C', { radius: 4.9, bank: 0, tunnel: false, widthScale: 0.95 }); cursor = r.cursor;
-    r = straightRun(cursor, 42, 5); push(r.nodes, 'C', { radius: 4.9, bank: 0, tunnel: true, widthScale: 0.92 }); cursor = r.cursor;
-    r = turnRun(cursor, -1, 34, 0.4, 4); push(r.nodes, 'C', { radius: 4.9, bank: -0.12, tunnel: true, widthScale: 0.92 }); cursor = r.cursor;
-    r = straightRun(cursor, 34, 4); push(r.nodes, 'C', { radius: 4.9, bank: 0, tunnel: true, widthScale: 0.92 }); cursor = r.cursor;
+    r = straightRun(cursor, 56); push(r.nodes, 'C', { radius: 4.9, bank: 0, tunnel: true, widthScale: 0.92 }); cursor = r.cursor;
+    r = turnRun(cursor, -1, 32, 0.4); push(r.nodes, 'C', { radius: 4.9, bank: -0.12, tunnel: true, widthScale: 0.92 }); cursor = r.cursor;
+    r = straightRun(cursor, 50); push(r.nodes, 'C', { radius: 4.9, bank: 0, tunnel: true, widthScale: 0.92 }); cursor = r.cursor;
   }
 
   /* ---- D. Bowl / wave: alternating S-bends, lateral G ---- */
   {
     let r;
-    r = pitchRun(cursor, 0.15, 22, 2); push(r.nodes, 'D', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.15, 22); push(r.nodes, 'D', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
 
     const bends = [
-      { turn: 1, radius: 19, sweep: 0.85, steps: 3 },
-      { turn: -1, radius: 18, sweep: 1.05, steps: 4 },
-      { turn: 1, radius: 21, sweep: 0.95, steps: 3 },
-      { turn: -1, radius: 19, sweep: 0.90, steps: 3 },
+      { turn: 1, radius: 21, sweep: 0.85 },
+      { turn: -1, radius: 20, sweep: 1.05 },
+      { turn: 1, radius: 23, sweep: 0.95 },
+      { turn: -1, radius: 21, sweep: 0.90 },
+      { turn: 1, radius: 22, sweep: 0.75 },
     ];
     for (const b of bends) {
-      r = turnRun(cursor, b.turn, b.radius, b.sweep, b.steps);
-      const bankMag = 0.42;
-      for (let i = 0; i < r.nodes.length; i++) {
-        const frac = (i + 1) / r.nodes.length;
+      r = turnRun(cursor, b.turn, b.radius, b.sweep);
+      const nNodes = r.nodes.length;
+      for (let i = 0; i < nNodes; i++) {
+        const frac = (i + 1) / nNodes;
         const ramp = THREE.MathUtils.smoothstep(frac, 0, 0.3) * (1 - THREE.MathUtils.smoothstep(frac, 0.7, 1));
-        raw.push({ p: r.nodes[i], section: 'D', radius: 5.7, bank: -b.turn * bankMag * (0.4 + 0.6 * ramp), tunnel: false, widthScale: 1.12 });
+        raw.push({ p: r.nodes[i], section: 'D', radius: 5.7, bank: -b.turn * 0.42 * (0.4 + 0.6 * ramp), tunnel: false, widthScale: 1.12 });
       }
       cursor = r.cursor;
     }
@@ -172,19 +182,20 @@ function buildCourse() {
   /* ---- E. Airtime: short kicker up, crest, short descent ---- */
   {
     let r;
-    r = pitchRun(cursor, -0.24, 15, 3); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-    r = straightRun(cursor, 8, 2); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-    r = pitchRun(cursor, 0.30, 16, 4); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-    r = straightRun(cursor, 7, 2); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = pitchRun(cursor, -0.20, 15); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = straightRun(cursor, 11); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.25, 16); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = straightRun(cursor, 10); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
   }
 
-  /* ---- F. Last drop: near-vertical plunge into the pool ---- */
+  /* ---- F. Last drop: steep (not literally vertical) plunge, then a
+   *       generous pull-out curve into a short flat run-in to the pool. ---- */
   {
     let r;
-    r = pitchRun(cursor, 1.18, 23, 6); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
-    r = straightRun(cursor, 20, 3); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
-    r = pitchRun(cursor, 0.04, 25, 6); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.1 }); cursor = r.cursor;
-    r = straightRun(cursor, 9, 2); push(r.nodes, 'F', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.1 }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.72, 20); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
+    r = straightRun(cursor, 20); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.05, 22); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.1 }); cursor = r.cursor;
+    r = straightRun(cursor, 14); push(r.nodes, 'F', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.1 }); cursor = r.cursor;
   }
 
   return { start, raw, endCursor: cursor };
@@ -227,7 +238,6 @@ function computeDerived() {
   const sAtNode = (i) => lengthAtT(i / (l - 1));
 
   const bounds = {};
-  let boundaryStart = 0;
   const order = ['A', 'B', 'C', 'D', 'E', 'F'];
   let idx = 0;
   for (const key of order) {
@@ -237,9 +247,7 @@ function computeDerived() {
     const sEnd = endIdx >= l ? total : sAtNode(endIdx);
     bounds[key] = [sStart, sEnd];
     idx = endIdx;
-    boundaryStart = sEnd;
   }
-  void boundaryStart;
 
   return { total, bounds };
 }

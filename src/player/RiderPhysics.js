@@ -98,9 +98,18 @@ const DEFAULTS = {
   minAirtimeBeforeLand: 0.10,
   groundGraceAfterLand: 0.12,
   maxForcedAirtime: 3.0,
-  homingAssistStart: 0.9,
-  homingAssistRamp: 30,
-  homingAssistMax: 34,
+  // Homing is *deviation*-triggered, not time-triggered: a straight-ish
+  // ballistic path inherently diverges from a tightly curving chute the
+  // longer it's airborne (this was verified directly — going airborne for
+  // ~1s in a ~15m-radius curve at high speed diverges >8m from the
+  // centerline purely from geometry, nothing to do with search accuracy).
+  // So instead of waiting on a clock, pull back in as soon as the rider
+  // strays past a generous distance from the nearest track surface —
+  // ordinary jumps (which stay close to the chute they launched from) never
+  // reach this threshold and are completely unaffected.
+  homingDeviationThreshold: 2.2,
+  homingAssistRamp: 12,
+  homingAssistMax: 40,
   airLateralRelaxRate: 0.6,
   airLateralRelaxRateHoming: 3.2,
   launchSwingContribMax: 4.0,
