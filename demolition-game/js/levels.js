@@ -45,7 +45,7 @@
       sockets: [{ b: 0, col: 0, row: 0 }, { b: 0, col: 0, row: 3 }],
       zone: { l: -460, r: 118 },
       dustGreen: 60,
-      clearRatio: 0.5, /* がれきの山を少しゆるめに許容 */
+      clearRatio: 0.58, /* がれきの山をゆるめに許容（低FPS環境での揺れ対策） */
       hintPlace: 'ひかるところを たっぷ！',
       hintBoom: 'おうちの ないほうへ たおそう！',
     },
