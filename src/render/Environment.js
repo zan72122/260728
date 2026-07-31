@@ -640,7 +640,7 @@ function buildLifeguardTower(sampler, envMap) {
 		legGeos.push(cylinderBetween(
 			new THREE.Vector3(cx + lx * 1.7, gy, cz + lz * 1.7),
 			new THREE.Vector3(cx + lx, gy + seatH, cz + lz),
-			0.07, 0.05, 8));
+			0.07, 0.05, 20));
 	}
 	for (let i = 1; i <= 2; i++) {
 		const t = i / 3;
@@ -649,11 +649,11 @@ function buildLifeguardTower(sampler, envMap) {
 			const [bx, bz] = corners[(s + 1) % 4];
 			const pa = new THREE.Vector3(cx + THREE.MathUtils.lerp(ax * 1.7, ax, t), gy + seatH * t, cz + THREE.MathUtils.lerp(az * 1.7, az, t));
 			const pb = new THREE.Vector3(cx + THREE.MathUtils.lerp(bx * 1.7, bx, t), gy + seatH * t, cz + THREE.MathUtils.lerp(bz * 1.7, bz, t));
-			legGeos.push(cylinderBetween(pa, pb, 0.035, 0.035, 6));
+			legGeos.push(cylinderBetween(pa, pb, 0.035, 0.035, 14));
 		}
 	}
 	// パラソル用ポールもここに合流させ、ドローコールを増やさない
-	legGeos.push(cylinderBetween(new THREE.Vector3(cx, gy + seatH + 0.6, cz), new THREE.Vector3(cx, gy + seatH + 1.75, cz), 0.03, 0.03, 6));
+	legGeos.push(cylinderBetween(new THREE.Vector3(cx, gy + seatH + 0.6, cz), new THREE.Vector3(cx, gy + seatH + 1.75, cz), 0.03, 0.03, 16));
 
 	const legMat = new THREE.MeshStandardMaterial({ map: metal.map, normalMap: metal.normalMap, roughnessMap: metal.roughnessMap, envMap: envMap || null, envMapIntensity: 0.8, metalness: 0.6, roughness: 0.5 });
 	const legs = new THREE.Mesh(mergeSafe(legGeos), legMat);
@@ -670,7 +670,7 @@ function buildLifeguardTower(sampler, envMap) {
 	group.add(seat);
 
 	const canopy = cloneTextureSet(fiberglassTextures('#e0483f'), 4, 2);
-	const canopyGeo = new THREE.ConeGeometry(1.6, 0.7, 10, 1, true);
+	const canopyGeo = new THREE.ConeGeometry(1.6, 0.7, 24, 1, true);
 	canopyGeo.translate(cx, gy + seatH + 2.0, cz);
 	const canopyMat = new THREE.MeshStandardMaterial({ map: canopy.map, normalMap: canopy.normalMap, roughnessMap: canopy.roughnessMap, envMap: envMap || null, envMapIntensity: 0.6, side: THREE.DoubleSide });
 	const canopyMesh = new THREE.Mesh(canopyGeo, canopyMat);
@@ -727,7 +727,7 @@ function buildParasols(sampler, envMap) {
 	const group = new THREE.Group(); group.name = 'Parasols';
 	const COUNT = 20;
 
-	const poleGeo = new THREE.CylinderGeometry(0.035, 0.045, 2.4, 8);
+	const poleGeo = new THREE.CylinderGeometry(0.035, 0.045, 2.4, 24);
 	poleGeo.translate(0, 1.2, 0);
 	const metal = cloneTextureSet(metalTextures('#d8dde0'), 1, 3);
 	const poleMat = new THREE.MeshStandardMaterial({ map: metal.map, normalMap: metal.normalMap, roughnessMap: metal.roughnessMap, envMap: envMap || null, envMapIntensity: 0.9, metalness: 0.7, roughness: 0.4 });
