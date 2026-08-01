@@ -298,5 +298,12 @@ export function createPostFX(renderer, scene, camera) {
   // up front so the very first frame is already correctly sized.
   setSize(initSize.x, initSize.y);
 
+  // TEMP DIAGNOSTIC HOOK (V3 camera/postfx pass) — read-only introspection
+  // for the Playwright screenshot harness in scratchpad/. No gameplay
+  // effect. Remove before final handoff.
+  if (typeof window !== 'undefined') {
+    window.__av3PostFX = { speedUniforms, state, lensDroplets };
+  }
+
   return { composer, setSize, update, render, dispose };
 }

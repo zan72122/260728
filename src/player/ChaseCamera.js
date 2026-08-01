@@ -122,6 +122,11 @@ export class ChaseCamera {
 
     this.camera.fov = this._fov;
     this.camera.updateProjectionMatrix();
+
+    // TEMP DIAGNOSTIC HOOK (V3 camera/postfx pass) — read-only introspection
+    // for the Playwright screenshot harness in scratchpad/. No gameplay
+    // effect. Remove before final handoff.
+    if (typeof window !== 'undefined') window.__av3ChaseCamera = this;
   }
 
   setMode(mode) {
