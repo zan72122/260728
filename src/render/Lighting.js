@@ -24,7 +24,11 @@ export function createLighting(scene, sunDirection) {
   const lightDir = (sunDirection ? sunDirection.clone() : new THREE.Vector3(0.35, 0.85, 0.35)).normalize();
 
   // ---- 太陽 (DirectionalLight) ----
-  const sun = new THREE.DirectionalLight(0xfff0dd, 3.0);
+  // V1 修正: Sky.js の SKY_BRIGHTNESS=0.13 ハックを撤去して IBL を正しい
+  // 明るさに戻したのに合わせ、主光源としての存在感 (はっきりした陰影・
+  // ハイライト) を確保するため 3.0 → 3.4 に (SPEC 6 の「DirectionalLight
+  // は 2〜4 程度が適正」の範囲内)。
+  const sun = new THREE.DirectionalLight(0xfff0dd, 3.4);
   sun.position.copy(lightDir).multiplyScalar(SUN_DISTANCE);
   sun.target.position.set(0, 0, 0);
   scene.add(sun.target);

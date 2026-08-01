@@ -5,35 +5,49 @@
 // (SPEC/Engine.js 準拠) なので addons/objects/SkyMesh.js (WebGPU 専用の
 // TSL 版) ではなく addons/objects/Sky.js を使う。
 //
-// 外部画像は一切使わない: Sky 自体がプロシージャルなシェーダ、
-// レンズフレアの模様も CanvasTexture で自前生成する。
+// 外部画像は一切使わない: Sky 自体がプロシージャルなシェーダ。
+//
+// V1 修正: 太陽のレンズフレア (CanvasTexture のリング数枚を addons/Lensflare
+// で重ねる演出) は、タイトル画面で画面を斜めに横切るピンク/緑の巨大な虹色の
+// 帯として破綻していたため撤去した。SPEC も「控えめに」としか要求しておらず、
+// 演出上の必須要素ではない。ブルームは PostFX.js 側で別途かかる。
 
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 
-// 夏の午後の斜光
-const ELEVATION_DEG = 18;
+// 夏の午後、日差しが十分に高く回った時間帯 (SPEC 4.7: 「夏の午後の斜光」)。
+// V1 修正: 18° は低すぎて地平線減衰項が支配的になり、シーン全体が暗く
+// 赤黒く沈む原因の一つだった。35〜45°のレンジ中央付近まで太陽を上げる。
+const ELEVATION_DEG = 38;
 const AZIMUTH_DEG = 145;
-const TURBIDITY = 3;
-const RAYLEIGH = 1.4;
-const MIE_COEFFICIENT = 0.005;
-const MIE_DIRECTIONAL_G = 0.82;
+// V1 ラウンド2: 実機スクリーンショットで確認したところ turbidity=3/
+// rayleigh=2/mie 大きめの組み合わせは、露出を絞ってもなお太陽周辺の Mie
+// ハローが広く強すぎ、PostFX のブルーム+色収差と組み合わさって画面を
+// 斜めに横切る虹色の帯として残った (Sky.js 自身に addons/Lensflare は
+// もう存在しないので、これは Preetham シェーダ自身の太陽面/Mie 項が
+// そのまま HDR で明るすぎることが原因と特定)。turbidity をやや上げて
+// 大気減衰 (Fex) を強め、mie 系を絞ってハロー自体を小さく暗くする。
+const TURBIDITY = 4.5;
+const RAYLEIGH = 1.6;
+const MIE_COEFFICIENT = 0.0025;
+const MIE_DIRECTIONAL_G = 0.68;
 
-// 統合修正: three/addons/objects/Sky.js のフラグメントシェーダを直接読んで
-// 確認したところ、太陽強度に固定の内部定数 EE=1000.0 と太陽面項の別係数
-// *19000.0 を使い、Preetham モデルの物理量をほぼ生の linear HDR で出力する
-// (シェーダ自身が持つ #include <tonemapping_fragment> は EffectComposer 経由
-// では target が non-null のため無効 — PostFX.js の解説どおり)。特にこの
-// シーンの低い太陽高度 (18°、夏の午後の斜光) では地平線側の減衰項が強く効き、
-// turbidity/rayleigh を(公式デモの既定値まで含め)調整しても実機ではほぼ
-// 改善しないほど大きな値になることを確認した。空自体の見た目と、ここから
-// PMREM で焼く envMap 経由で全 PBR マテリアルに配られる IBL 強度の両方の
-// 大元がこの1点なので、シェーダの最終出力そのものを onBeforeCompile で
-// 下の SKY_BRIGHTNESS 倍しておくのが最小かつ確実なレバー。
-const SKY_BRIGHTNESS = 0.13;
+// 前任者の修正撤廃 (V1): three/addons/objects/Sky.js は太陽強度に固定の内部
+// 定数 EE=1000 (+太陽面項の *19000) を使い、Preetham モデルの物理量を
+// ほぼ生の linear HDR で出力する。これは意図的な設計で、
+// ACESFilmicToneMapping で最終的に圧縮される前提の値であり、
+// `renderer.toneMappingExposure` で調整するのが正攻法。
+// 前任者はここに `SKY_BRIGHTNESS = 0.13` という一律 87% カットのシェーダ
+// パッチ (onBeforeCompile) を入れていたが、これは空の見た目だけでなく
+// 下の PMREMGenerator が焼く envMap (= 全 PBR マテリアルの IBL) まで
+// 一緒に握り潰してしまい、シーン全体が暗く陰影の死んだ絵になっていた
+// 主因だった。物理パラメータ (turbidity/rayleigh/mie) と
+// Engine.js の toneMappingExposure だけで露出を作る方針に戻す。
 
-const FOG_COLOR = 0xdccdaa; // 空に近い暖色系のヘイズ
+// V1 修正: 前は暖色 (砂色) すぎて、露出を上げると画面全体が黄土色〜ベージュに
+// 転んでしまい「青空」に見えなかった。晴天の遠景ヘイズらしい、ごく淡い
+// 空色寄りの白に変更 (水平線が白っぽく霞むのは残しつつ、色相を青側に)。
+const FOG_COLOR = 0xcfe1ea;
 const FOG_DENSITY = 0.0018;
 
 function computeSunDirection() {
@@ -42,69 +56,6 @@ function computeSunDirection() {
   const dir = new THREE.Vector3();
   dir.setFromSphericalCoords(1, phi, theta);
   return dir;
-}
-
-// ---- プロシージャルなレンズフレア用テクスチャ (CanvasTexture) ----
-function makeGlowTexture(size) {
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const r = size / 2;
-  const grad = ctx.createRadialGradient(r, r, 0, r, r, r);
-  grad.addColorStop(0.0, 'rgba(255,255,255,1.0)');
-  grad.addColorStop(0.18, 'rgba(255,245,220,0.95)');
-  grad.addColorStop(0.45, 'rgba(255,224,170,0.28)');
-  grad.addColorStop(1.0, 'rgba(255,220,160,0.0)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, size, size);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.needsUpdate = true;
-  return tex;
-}
-
-function makeRingTexture(size) {
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const r = size / 2;
-  const grad = ctx.createRadialGradient(r, r, r * 0.25, r, r, r * 0.5);
-  grad.addColorStop(0.0, 'rgba(255,255,255,0.0)');
-  grad.addColorStop(0.55, 'rgba(210,232,255,0.55)');
-  grad.addColorStop(0.8, 'rgba(210,232,255,0.18)');
-  grad.addColorStop(1.0, 'rgba(210,232,255,0.0)');
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.arc(r, r, r * 0.92, 0, Math.PI * 2);
-  ctx.fill();
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.needsUpdate = true;
-  return tex;
-}
-
-function addLensflare(scene, sunDirection) {
-  try {
-    const lensflare = new Lensflare();
-    const glow = makeGlowTexture(256);
-    const ring = makeRingTexture(128);
-
-    lensflare.addElement(new LensflareElement(glow, 340, 0.0, new THREE.Color(0xfff4dd)));
-    lensflare.addElement(new LensflareElement(ring, 55, 0.32, new THREE.Color(0xbfe0ff)));
-    lensflare.addElement(new LensflareElement(ring, 28, 0.58, new THREE.Color(0xffe6c0)));
-    lensflare.addElement(new LensflareElement(ring, 85, 0.88, new THREE.Color(0xffffff)));
-    lensflare.addElement(new LensflareElement(ring, 18, 1.0, new THREE.Color(0xbfe0ff)));
-
-    const sunDistance = 3500;
-    lensflare.position.copy(sunDirection).multiplyScalar(sunDistance);
-    scene.add(lensflare);
-    return lensflare;
-  } catch (e) {
-    // レンズフレアは演出上のオプション。失敗しても Sky 全体は成立させる。
-    return null;
-  }
 }
 
 /**
@@ -118,22 +69,6 @@ export function createSky(scene, renderer) {
   sky.scale.setScalar(450000);
   sky.renderOrder = -1000;
   scene.add(sky);
-
-  // See SKY_BRIGHTNESS comment above. Must be attached before anything ever
-  // renders this material (PMREM bake below included), which it is here.
-  const skyBrightnessUniform = { value: SKY_BRIGHTNESS };
-  sky.material.onBeforeCompile = (shader) => {
-    shader.uniforms.uSkyBrightness = skyBrightnessUniform;
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        'uniform float mieDirectionalG;',
-        'uniform float mieDirectionalG;\nuniform float uSkyBrightness;'
-      )
-      .replace(
-        'gl_FragColor = vec4( retColor, 1.0 );',
-        'gl_FragColor = vec4( retColor * uSkyBrightness, 1.0 );'
-      );
-  };
 
   const skyUniforms = sky.material.uniforms;
   skyUniforms['turbidity'].value = TURBIDITY;
@@ -151,9 +86,6 @@ export function createSky(scene, renderer) {
   pmremGenerator.dispose();
 
   scene.environment = envMap;
-
-  // ---- 太陽のレンズフレア (控えめ) ----
-  addLensflare(scene, sunDirection);
 
   // ---- 遠景の大気感: 近景をぼやけさせない程度の薄い FogExp2 ----
   scene.fog = new THREE.FogExp2(FOG_COLOR, FOG_DENSITY);

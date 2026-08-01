@@ -32,11 +32,15 @@ export function createEngine(container) {
 
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  // 0.85, not 1.0: a small safety margin on top of the primary overexposure
-  // fix (render/Sky.js's SKY_BRIGHTNESS scale, which tames the actual root
-  // cause) to keep the many reflective/clearcoat materials (water, chute,
-  // float tube) comfortably inside ACES's non-clipping range.
-  renderer.toneMappingExposure = 0.85;
+  // V1 修正: render/Sky.js の SKY_BRIGHTNESS=0.13 シェーダハックを撤去した
+  // ため (空自体と、そこから PMREM で焼く IBL envMap の両方を一律 87% カット
+  // していた乱暴な対処 — 空が暗い青灰色に沈み、全 PBR マテリアルの陰影が
+  // 死んで見えていた主因)、露出はここ一箇所だけで正しく作る。
+  // addons/objects/Sky.js は太陽強度に固定定数 EE=1000 を使い、ACES で
+  // 圧縮される前提の生 linear HDR を返す設計。実機スクリーンショットで
+  // 0.4 は依然として白飛び気味 (finish 想定シーンで高輝度パネルが飽和) と
+  // 確認したため 0.22 まで下げ、白飛び/沈みの両方が出ない値まで追い込んだ。
+  renderer.toneMappingExposure = 0.22;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 

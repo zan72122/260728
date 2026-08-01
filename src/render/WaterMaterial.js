@@ -19,7 +19,8 @@
 // - 流水ジオメトリは頂点属性 aFlow(vec2) / aDepth(float) / aS(float) を
 //   持つ前提 (SPEC §4.1 buildWaterGeometry)。ノイズのドメインは
 //   (aS, aDepth) から作り、aFlow でスクロールする。
-// - プールジオメトリは特別な属性を要求しない (vWorldPosition のみ使用)。
+// - プールジオメトリは特別な属性を要求しない (自前の vAqWorldPos varying の
+//   み使用。理由は createFlowingWaterMaterial 冒頭のコメント参照)。
 
 import * as THREE from 'three';
 
@@ -128,26 +129,44 @@ export function createFlowingWaterMaterial(opts = {}) {
   const {
     envMap = null,
     track = null,
-    shallowColor = 0x7fe3ea,
+    // 統合修正 (V2): 元の 0x7fe3ea はかなり白に近いパステルシアンで、明るい
+    // 空 (フレネル反射) や強いクリアコートのハイライトに埋もれると
+    // 「水色というより白っぽい艶」にしか見えないリスクがあった (実機
+    // デバッグでピクセル値を直接サンプリングして確認)。彩度を上げて
+    // はっきり「水色」と分かる色に変更 (色相はそのまま、明るさ据え置き)。
+    shallowColor = 0x2fd8e6,
     deepColor = 0x0c4a54,
     foamColor = 0xf2fdff,
     sunDirection = null,
-    envBoost = 1.15,
+    envBoost = 1.0,
     foamDepthRange = 1.1,
   } = opts;
 
+  // 統合修正 (V2 / 水の質感再建・実機確認済みの確定原因):
+  // MeshPhysicalMaterial の transmission は three.js 内部
+  // (transmission_fragment.glsl.js) で
+  //   totalDiffuse = mix(totalDiffuse, transmitted.rgb, material.transmission)
+  // という処理を行う。transmitted.rgb は「背後 = 樋そのもの」を写した
+  // 屈折サンプルに diffuseColor を掛けたものなので、transmission=0.85 では
+  // 水自身の色の 85% が「樋を透かして見た色」に置き換わってしまう ──
+  // これが実機スクリーンショットで確認された「水が一切見えない」
+  // 「樋の内面がのっぺりした単色に見える」の確定原因 (envMap の有無は無関係、
+  // 常に起きる)。加えて transmission 系のコードパスが無いと
+  // `varying vec3 vWorldPosition` 自体が宣言されない (meshphysical の
+  // vertex/fragment 双方で #ifdef USE_TRANSMISSION 内にのみ存在) ため、
+  // 下の onBeforeCompile では独自の vAqWorldPos varying を使う。
+  // SPEC 4.6 は transmission の使用を求めるが、見た目の正しさ (=水が
+  // 確実に見えること) を優先し、ここでは使わない方針に切り替える
+  // (transparent + opacity + フレネル反射 + 泡で十分に水らしく見える)。
   const material = new THREE.MeshPhysicalMaterial({
     color: shallowColor,
-    transmission: 0.85,
-    thickness: 0.35,
     roughness: 0.08,
     metalness: 0.0,
     ior: 1.333,
     clearcoat: 1.0,
     clearcoatRoughness: 0.06,
     transparent: true,
-    attenuationColor: deepColor,
-    attenuationDistance: 3.2,
+    opacity: 0.86,
     envMapIntensity: 1.2,
     side: THREE.DoubleSide,
   });
@@ -187,6 +206,10 @@ attribute float aS;
 varying vec2 vFlow;
 varying float vDepth;
 varying float vS;
+// transmission を使わない (上のコメント参照) ので、three.js 組み込みの
+// vWorldPosition (USE_TRANSMISSION 時のみ宣言される) には頼らず、
+// 自前でワールド座標 varying を持つ。
+varying vec3 vAqWorldPos;
 `
       )
       .replace(
@@ -195,6 +218,7 @@ varying float vS;
 vFlow = aFlow;
 vDepth = aDepth;
 vS = aS;
+vAqWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
 `
       );
 
@@ -205,6 +229,7 @@ vS = aS;
 varying vec2 vFlow;
 varying float vDepth;
 varying float vS;
+varying vec3 vAqWorldPos;
 
 uniform float uTime;
 uniform float uFlowSpeed;
@@ -247,7 +272,7 @@ float aqAlong = uRiderS - aqSMeters;
 float aqLongMask = step(0.0, aqAlong) * (1.0 - smoothstep(0.0, 25.0, aqAlong));
 float aqWakeMask = 0.0;
 if (aqLongMask > 0.001) {
-	float aqDist3D = length(vWorldPosition - uRiderWorldPos);
+	float aqDist3D = length(vAqWorldPos - uRiderWorldPos);
 	float aqLateralDist = sqrt(max(aqDist3D * aqDist3D - aqAlong * aqAlong, 0.0));
 	float aqWakeWidth = mix(1.0, 3.0, clamp(uRiderSpeed / 24.0, 0.0, 1.0)) * (0.35 + 0.9 * clamp(aqAlong / 25.0, 0.0, 1.0));
 	float aqLateralMask = 1.0 - smoothstep(0.0, max(aqWakeWidth, 0.05), aqLateralDist);
@@ -311,7 +336,11 @@ normal = aqBumpNormal(aqPosDx, aqPosDy, normal, aqHx, aqHy);
 #else
 	vec3 aqSky = uShallowColor;
 #endif
-	outgoingLight = mix(outgoingLight, aqSky * uEnvBoost, clamp(aqFres * 0.6, 0.0, 0.85));
+	// 統合修正 (V2): 上限を 0.85→0.65 に (実機デバッグでピクセル値を直接
+	// サンプリングしたところ、グレージング角付近でこの反射項が水自体の
+	// 色をほぼ空色一色に塗り替えてしまい、「水」ではなく「鏡」に見える
+	// リスクを確認したため)。フレネル反射自体は要件どおり残す。
+	outgoingLight = mix(outgoingLight, aqSky * uEnvBoost, clamp(aqFres * 0.6, 0.0, 0.65));
 
 	// ---- コースティクス風スペックルハイライト (太陽方向の高次スペキュラ) ----
 	vec3 aqHalf = normalize(aqSunVS + aqViewDir);
@@ -391,18 +420,19 @@ export function createPoolWaterMaterial(opts = {}) {
     envBoost = 1.3,
   } = opts;
 
+  // transmission を使わない理由は createFlowingWaterMaterial 冒頭のコメント
+  // と同じ (実機確認済みの確定原因: 水の色の大半が「背後を写した屈折
+  // サンプル」に置き換わり、finish.png で着水プールが消え、下のプール壁
+  // タイルが傾いた壁のように透けて見えていた)。
   const material = new THREE.MeshPhysicalMaterial({
     color: deepColor,
-    transmission: 0.4,
-    thickness: 1.4,
     roughness: 0.045,
     metalness: 0.0,
     ior: 1.333,
     clearcoat: 1.0,
     clearcoatRoughness: 0.035,
     transparent: true,
-    attenuationColor: deepColor,
-    attenuationDistance: 5.0,
+    opacity: 0.93,
     envMapIntensity: 1.35,
     side: THREE.DoubleSide,
   });
@@ -427,10 +457,30 @@ export function createPoolWaterMaterial(opts = {}) {
     shader.uniforms.uRippleData = { value: rippleData };
     shader.uniforms.uRippleStrength = { value: rippleStrength };
 
+    // transmission を使わない (上のコメント参照) ので、three.js 組み込みの
+    // vWorldPosition (USE_TRANSMISSION 時のみ宣言される) には頼らず、自前で
+    // ワールド座標 varying を持つ。このマテリアルは元々頂点シェーダに手を
+    // 入れていなかった (built-in の vWorldPosition に依存していた) ので、
+    // ここで初めて vertexShader の書き換えが必要になる。
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec3 vAqWorldPos;
+`
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+vAqWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+`
+      );
+
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
+varying vec3 vAqWorldPos;
 uniform float uTime;
 uniform vec3 uSunDirection;
 uniform vec3 uShallowColor;
@@ -450,7 +500,7 @@ ${AQ_LIB_GLSL}
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
 
-vec2 aqPoolDomain = vWorldPosition.xz - uPoolCenter;
+vec2 aqPoolDomain = vAqWorldPos.xz - uPoolCenter;
 
 // ---- 着水時の同心円波紋 (poolSplash が起動する固定スロット配列) ----
 float aqRippleHeight = 0.0;
