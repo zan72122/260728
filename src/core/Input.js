@@ -159,6 +159,12 @@ export class Input {
   // ---------------------------------------------------------------------
 
   _onKeyDown(e) {
+    // Let Ctrl/Cmd/Alt combos (reload, devtools, browser shortcuts, ...)
+    // through untouched — only plain key presses are game input. Shift is
+    // deliberately excluded from this check since ShiftLeft/Right *is* one
+    // of our own control keys (tuck).
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
     const code = e.code;
     if (SCHEME_CODES.has(code)) e.preventDefault();
     if (!this._keysDown.has(code)) {
