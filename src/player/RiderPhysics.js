@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ANGLE_MAX as TRACK_ANGLE_MAX } from '../track/SplineTrack.js';
 
 /**
  * RiderPhysics — the "軽快に滑る爽快感" (nimble, exhilarating sliding feel) engine.
@@ -85,7 +86,12 @@ const GRAVITY = 9.81;
 const GRAVITY_VEC = new THREE.Vector3(0, -GRAVITY, 0);
 
 const DEFAULTS = {
-  angleMax: THREE.MathUtils.degToRad(84), // U-arc angle span mapped from lateral -1..1
+  // Integration fix: this used to be its own hardcoded degToRad(84) (1.466
+  // rad), a 17% mismatch against the actual half-pipe wall sweep SplineTrack
+  // renders (ANGLE_MAX = 1.25 rad, track/SplineTrack.js). That mismatch made
+  // "speed -> climbs the wall" not line up with where the wall is actually
+  // drawn. Import and share the real value instead.
+  angleMax: TRACK_ANGLE_MAX, // U-arc angle span mapped from lateral -1..1
   riderFloat: 0.35, // tube float height above the chute surface [m]
 
   // longitudinal
@@ -215,6 +221,7 @@ export class RiderPhysics {
     this._groundGrace = 0;
     this._splashImpulse = 0;
     this._firstFrame = true;
+    this._finishEaseT = 0;
 
     this.reset();
   }
@@ -237,6 +244,7 @@ export class RiderPhysics {
     this._splashImpulse = 0;
     this._airVel.set(0, 0, 0);
     this._firstFrame = true;
+    this._finishEaseT = 0;
 
     this._syncPose(0, 0, 0);
   }
@@ -550,6 +558,23 @@ export class RiderPhysics {
       rawPos = this.track.surfaceAt(st.s, st.lateral, tune.riderFloat);
       rawUp = this.track.surfaceNormalAt(st.s, st.lateral);
       rawForward = this.track.frameAt(st.s).tangent;
+    }
+
+    // Integration fix: the chute's own s-parametrisation stops at
+    // track.length, well short of (and higher/drier than) the actual
+    // landing pool a few metres further along — the "finished" branch above
+    // in _integrateSubstep never advances s, so without this the rider used
+    // to freeze at the chute's exit lip, ~3-4m above/short of the pool
+    // water instead of appearing to splash into it. Once finished, ease the
+    // *rendered* position/orientation (never the simulated s/lateral) over
+    // ~1.4s toward the supplied pool landing point and a level, floating
+    // orientation. Purely cosmetic — does not affect this.state.s.
+    if (st.finished && tune.poolLandingPos) {
+      this._finishEaseT = Math.min(this._finishEaseT + Math.max(dt, 0), 4);
+      const easeT = THREE.MathUtils.clamp(this._finishEaseT / 1.4, 0, 1);
+      const ease = easeT * easeT * (3 - 2 * easeT);
+      rawPos.lerp(tune.poolLandingPos, ease);
+      rawUp.lerp(UP_AXIS, ease).normalize();
     }
 
     st.contactPoint.copy(this.track.surfaceAt(st.s, st.lateral, 0));

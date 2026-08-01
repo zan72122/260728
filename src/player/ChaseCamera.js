@@ -172,9 +172,23 @@ export class ChaseCamera {
       lift += tune.chaseAirExtraLift;
     }
 
-    const targetS = Math.max(0, st.s - dist);
+    const rawTargetS = st.s - dist;
     const targetLateral = THREE.MathUtils.clamp(st.lateral * tune.lateralPullFactor, -1, 1);
-    const idealPos = this.track.surfaceAt(targetS, targetLateral, lift);
+    // Integration fix: right at ride start (s ~ 0), clamping targetS to 0
+    // put the "ideal" camera point at the same spot as the rider (who is
+    // also near s=0) — the camera ended up buried inside the rider model
+    // for the first couple of seconds. When there isn't `dist` metres of
+    // track behind the rider yet, extrapolate backward from s=0 along its
+    // tangent instead of clamping, so the camera still has clearance.
+    let idealPos;
+    if (rawTargetS < 0) {
+      const f0 = this.track.frameAt(0);
+      idealPos = this.track
+        .surfaceAt(0, targetLateral, lift)
+        .addScaledVector(f0.tangent, rawTargetS);
+    } else {
+      idealPos = this.track.surfaceAt(rawTargetS, targetLateral, lift);
+    }
 
     if (!this._posInitialized) {
       this._camPos.copy(idealPos);

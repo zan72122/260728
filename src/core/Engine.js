@@ -32,7 +32,11 @@ export function createEngine(container) {
 
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  // 0.85, not 1.0: a small safety margin on top of the primary overexposure
+  // fix (render/Sky.js's SKY_BRIGHTNESS scale, which tames the actual root
+  // cause) to keep the many reflective/clearcoat materials (water, chute,
+  // float tube) comfortably inside ACES's non-clipping range.
+  renderer.toneMappingExposure = 0.85;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 

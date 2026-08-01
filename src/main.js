@@ -18,7 +18,7 @@ import { Input } from './core/Input.js';
 import { PHASE, GameState } from './core/GameState.js';
 
 import { SplineTrack } from './track/SplineTrack.js';
-import { TRACK_DESIGN } from './track/TrackDesign.js';
+import { TRACK_DESIGN, SECTION_BOUNDS } from './track/TrackDesign.js';
 
 import { RiderPhysics } from './player/RiderPhysics.js';
 import { RiderModel } from './player/RiderModel.js';
@@ -26,17 +26,16 @@ import { ChaseCamera } from './player/ChaseCamera.js';
 
 import {
   createFlowingWaterMaterial,
-  createPoolWaterMaterial,
   updateWater,
+  poolSplash,
 } from './render/WaterMaterial.js';
 import { createSky } from './render/Sky.js';
 import { createLighting } from './render/Lighting.js';
 import { createEnvironment } from './render/Environment.js';
 import { createProps } from './render/Props.js';
-import { fiberglassTextures } from './render/TextureLab.js';
+import { createChuteMaterial, createShellMaterial } from './track/TrackMaterial.js';
 
 import { SprayParticles } from './fx/SprayParticles.js';
-import { LensDroplets } from './fx/LensDroplets.js';
 import { createPostFX } from './render/PostFX.js';
 
 import { AudioEngine } from './audio/AudioEngine.js';
@@ -87,54 +86,45 @@ function armAudioUnlock(audioEngine) {
   window.addEventListener('touchstart', unlock, { once: true, passive: true });
 }
 
-function applyTiling(...textures) {
-  for (const tex of textures) {
-    if (!tex) continue;
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
-    tex.needsUpdate = true;
+// Integration fix: Hud.js's own section-name-from-progress fallback
+// (sectionForFraction) uses hand-guessed fraction thresholds because it has
+// no access to the real per-section s-ranges A2's course generator computes
+// (TrackDesign.js's SECTION_BOUNDS) — Hud.js's own contract (SPEC 4.11)
+// explicitly defers to `extra.sectionName` when supplied, so this module
+// (which does have TRACK_DESIGN) supplies the real one instead of leaving
+// the guess in charge (it was visibly wrong for a ~90m stretch each at the
+// B/C and C/D seams — e.g. showing "ボウル / ウェーブ" while still well
+// inside the dark tunnel).
+const SECTION_LABELS = {
+  A: 'ローンチ',
+  B: '高速ヘリックス',
+  C: 'ダークトンネル',
+  D: 'ボウル / ウェーブ',
+  E: 'エアタイム区間',
+  F: 'ラストドロップ',
+};
+function sectionNameForS(s) {
+  for (const key of ['A', 'B', 'C', 'D', 'E', 'F']) {
+    const [s0, s1] = SECTION_BOUNDS[key];
+    if (s < s1 || key === 'F') return SECTION_LABELS[key];
+    void s0;
   }
+  return SECTION_LABELS.F;
 }
 
 // Chute/shell (the solid slide tube) need a Mesh + PBR material; SplineTrack
-// only hands back raw BufferGeometry for them (SPEC 4.1), so this module —
-// the integrator — builds the material. TrackMaterial.js's export shape
-// isn't part of the documented contract (SPEC section 4 has no entry for
-// it), so rather than guess at an unspecified API we build a proper PBR
-// material here from the fully-documented TextureLab helper (SPEC 4.8),
-// which is exactly what a fiberglass slide tube is made of.
-function buildChuteMaterial(envMap) {
-  const { map, normalMap, roughnessMap } = fiberglassTextures('#22b8e0');
-  applyTiling(map, normalMap, roughnessMap);
-  return new THREE.MeshPhysicalMaterial({
-    map,
-    normalMap,
-    roughnessMap,
-    envMap: envMap || null,
-    envMapIntensity: 1.1,
-    clearcoat: 0.7,
-    clearcoatRoughness: 0.2,
-    roughness: 1,
-    metalness: 0,
-    side: THREE.DoubleSide,
-  });
-}
-
-function buildShellMaterial(envMap) {
-  const { map, normalMap, roughnessMap } = fiberglassTextures('#e4dcc8');
-  applyTiling(map, normalMap, roughnessMap);
-  return new THREE.MeshPhysicalMaterial({
-    map,
-    normalMap,
-    roughnessMap,
-    envMap: envMap || null,
-    envMapIntensity: 0.6,
-    clearcoat: 0.15,
-    clearcoatRoughness: 0.6,
-    roughness: 1,
-    metalness: 0,
-    side: THREE.DoubleSide,
-  });
+// only hands back raw BufferGeometry for them (SPEC 4.1). Integration fix:
+// this used to build its own generic single-colour material from
+// fiberglassTextures() directly, which silently dropped TrackMaterial.js's
+// per-section colour blend (SPEC "ローンチ=青 → ヘリックス=ターコイズ →
+// トンネル=濃紺 → ラスト=白"). createChuteMaterial(track)/createShellMaterial()
+// give a strictly better result (region colour + otherwise the same FRP
+// look) and envMap is applied the same way main.js always applied it, so
+// this is now a straight call into A2's dedicated module instead.
+function applyEnvMap(material, envMap, intensity) {
+  if (envMap) material.envMap = envMap;
+  if (intensity != null) material.envMapIntensity = intensity;
+  return material;
 }
 
 // ---------------------------------------------------------------------
@@ -219,13 +209,19 @@ async function boot() {
   await nextFrame();
 
   bootStage = 'track meshes';
-  const chuteMesh = new THREE.Mesh(track.buildChuteGeometry(), buildChuteMaterial(skyResult.envMap));
+  const chuteMesh = new THREE.Mesh(
+    track.buildChuteGeometry(),
+    applyEnvMap(createChuteMaterial(track), skyResult.envMap, 1.1)
+  );
   chuteMesh.name = 'chute';
   chuteMesh.castShadow = true;
   chuteMesh.receiveShadow = true;
   scene.add(chuteMesh);
 
-  const shellMesh = new THREE.Mesh(track.buildShellGeometry(), buildShellMaterial(skyResult.envMap));
+  const shellMesh = new THREE.Mesh(
+    track.buildShellGeometry(),
+    applyEnvMap(createShellMaterial(), skyResult.envMap, 0.85)
+  );
   shellMesh.name = 'shell';
   shellMesh.receiveShadow = true;
   scene.add(shellMesh);
@@ -240,21 +236,16 @@ async function boot() {
   const supports = track.buildSupports();
   if (supports) scene.add(supports);
 
-  if (Array.isArray(TRACK_DESIGN.poolCenter)) {
-    const poolRadius = TRACK_DESIGN.poolRadius || 14;
-    const poolGeo = new THREE.CircleGeometry(poolRadius, 64);
-    poolGeo.rotateX(-Math.PI / 2);
-    const poolMat = createPoolWaterMaterial({ envMap: skyResult.envMap });
-    const poolMesh = new THREE.Mesh(poolGeo, poolMat);
-    poolMesh.name = 'landingPool';
-    poolMesh.position.set(
-      TRACK_DESIGN.poolCenter[0],
-      TRACK_DESIGN.poolCenter[1],
-      TRACK_DESIGN.poolCenter[2]
-    );
-    poolMesh.receiveShadow = true;
-    scene.add(poolMesh);
-  }
+  // Integration fix: this block used to build its own flat "landingPool"
+  // disc from TRACK_DESIGN.poolCenter/poolRadius directly. Environment.js's
+  // buildPool() (called below, in the "environment & props" stage) already
+  // builds the real pool at the same coordinates — walls, floor, steps,
+  // handrail, and its own createPoolWaterMaterial() water surface — so this
+  // was a second, plain water disc floating ~0.5m above the real one
+  // (Y=0.6 hardcoded here vs. Environment's Y ~= baseHeight+0.05) with a
+  // mismatched ripple centre (this mesh never passed center/radius to
+  // createPoolWaterMaterial, so poolSplash() ripples rendered at the
+  // origin instead of the real pool). Removed; Environment.js owns the pool.
   screens.showLoading(55);
   await nextFrame();
 
@@ -267,7 +258,18 @@ async function boot() {
   await nextFrame();
 
   bootStage = 'player';
-  const physics = new RiderPhysics(track);
+  // Approximate world-space pool-water landing point (integration fix, see
+  // the finish-easing block in RiderPhysics.js#_syncPose): TRACK_DESIGN only
+  // gives us the pool's x/z + a nominal y that Environment.js's real terrain
+  // sampler doesn't actually use, so this is a close approximation of the
+  // real water surface, not an exact read of it — good enough for a smooth
+  // cosmetic ease, not meant to be pixel-perfect.
+  const poolLandingPos = new THREE.Vector3(
+    TRACK_DESIGN.poolCenter[0],
+    0.1,
+    TRACK_DESIGN.poolCenter[2]
+  );
+  const physics = new RiderPhysics(track, { poolLandingPos });
   physics.reset();
   const riderModel = new RiderModel();
   scene.add(riderModel.object3D);
@@ -280,7 +282,12 @@ async function boot() {
   bootStage = 'fx';
   const spray = new SprayParticles(scene);
   if (spray.object3D) scene.add(spray.object3D);
-  const lensDroplets = new LensDroplets();
+  // Integration fix: this used to also construct its own standalone
+  // LensDroplets() here, but its `.pass` was never added to any
+  // EffectComposer (createPostFX() below builds its own separate
+  // LensDroplets instance internally and wires *that* one's pass into the
+  // real composer chain per SPEC 4.9) — this stray instance rendered
+  // nothing and its update() call below was pure dead work every frame.
   const postfx = createPostFX(renderer, scene, camera);
   screens.showLoading(93);
   await nextFrame();
@@ -367,6 +374,13 @@ async function boot() {
     pendingResult = gameState.finish();
     slowMoActive = true;
     slowMoTimer = 0;
+    // Integration fix: poolSplash() (WaterMaterial.js) and playSplash()
+    // (AudioEngine.js) were both fully implemented but never called from
+    // anywhere, so the landing pool never actually rippled and no splash
+    // sound played on finish — only the (unrelated) finish chime did.
+    const impactSpeed = Math.max(1, physics.state.speed || 0);
+    poolSplash(poolLandingPos, THREE.MathUtils.clamp(impactSpeed / 14, 0.6, 2.5));
+    audioEngine.playSplash(THREE.MathUtils.clamp(impactSpeed / 16, 0.5, 2));
     audioEngine.playFinish();
   }
 
@@ -464,7 +478,6 @@ async function boot() {
 
       if (ctx.isRiding) emitSpray();
       spray.update(simDt, camera);
-      lensDroplets.update(simDt, { speed: ctx.speed, splashRate: ctx.splashRate });
 
       environment.update(simDt, ctx.focusPos);
       skyResult.update(simDt);
@@ -478,7 +491,12 @@ async function boot() {
         gForce: ctx.gForce,
       });
 
-      hud.update(physics.state, { timeMs: gameState.timeMs, bestMs: gameState.bestMs });
+      hud.update(physics.state, {
+        timeMs: gameState.timeMs,
+        bestMs: gameState.bestMs,
+        trackLength: track.length,
+        sectionName: physics.state.finished ? 'フィニッシュ' : sectionNameForS(ctx.s),
+      });
 
       postfx.update(simDt, {
         speed: ctx.speed,

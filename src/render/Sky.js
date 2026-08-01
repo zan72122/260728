@@ -20,6 +20,19 @@ const RAYLEIGH = 1.4;
 const MIE_COEFFICIENT = 0.005;
 const MIE_DIRECTIONAL_G = 0.82;
 
+// 統合修正: three/addons/objects/Sky.js のフラグメントシェーダを直接読んで
+// 確認したところ、太陽強度に固定の内部定数 EE=1000.0 と太陽面項の別係数
+// *19000.0 を使い、Preetham モデルの物理量をほぼ生の linear HDR で出力する
+// (シェーダ自身が持つ #include <tonemapping_fragment> は EffectComposer 経由
+// では target が non-null のため無効 — PostFX.js の解説どおり)。特にこの
+// シーンの低い太陽高度 (18°、夏の午後の斜光) では地平線側の減衰項が強く効き、
+// turbidity/rayleigh を(公式デモの既定値まで含め)調整しても実機ではほぼ
+// 改善しないほど大きな値になることを確認した。空自体の見た目と、ここから
+// PMREM で焼く envMap 経由で全 PBR マテリアルに配られる IBL 強度の両方の
+// 大元がこの1点なので、シェーダの最終出力そのものを onBeforeCompile で
+// 下の SKY_BRIGHTNESS 倍しておくのが最小かつ確実なレバー。
+const SKY_BRIGHTNESS = 0.13;
+
 const FOG_COLOR = 0xdccdaa; // 空に近い暖色系のヘイズ
 const FOG_DENSITY = 0.0018;
 
@@ -105,6 +118,22 @@ export function createSky(scene, renderer) {
   sky.scale.setScalar(450000);
   sky.renderOrder = -1000;
   scene.add(sky);
+
+  // See SKY_BRIGHTNESS comment above. Must be attached before anything ever
+  // renders this material (PMREM bake below included), which it is here.
+  const skyBrightnessUniform = { value: SKY_BRIGHTNESS };
+  sky.material.onBeforeCompile = (shader) => {
+    shader.uniforms.uSkyBrightness = skyBrightnessUniform;
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        'uniform float mieDirectionalG;',
+        'uniform float mieDirectionalG;\nuniform float uSkyBrightness;'
+      )
+      .replace(
+        'gl_FragColor = vec4( retColor, 1.0 );',
+        'gl_FragColor = vec4( retColor * uSkyBrightness, 1.0 );'
+      );
+  };
 
   const skyUniforms = sky.material.uniforms;
   skyUniforms['turbidity'].value = TURBIDITY;
