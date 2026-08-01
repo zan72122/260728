@@ -69,12 +69,17 @@ import * as THREE from 'three';
 // Tunable constants — validated by numerically integrating this exact model
 // at the fixed 1/120s step the game uses, first against a mock SplineTrack
 // (constant and full-course slope/curvature profiles) and then against the
-// real SplineTrack/TRACK_DESIGN once available. Measured bands: baseline
-// (no input) run ~63s covering 8-18.5 m/s (spec target 60-90s), full-tuck
-// ~37-39s reaching ~22-24 m/s, gForce 2-4G through the banked helix and
-// tight corners, lateral tracks the analytic banked-turn equilibrium exactly
-// and never diverges, no NaN/instability across 30-40-seed fuzz tests with
-// randomized steer/tuck/brake on both the mock and the real track.
+// real SplineTrack/TRACK_DESIGN once available. gForce 2-4G through the
+// banked helix and tight corners, lateral tracks the analytic banked-turn
+// equilibrium exactly and never diverges, no NaN/instability across 30-40-
+// seed fuzz tests with randomized steer/tuck/brake on both the mock and the
+// real track.
+//
+// Longitudinal band re-measured after the integration pass's speed-tuning
+// fix (see the comment directly on the longitudinal block below): baseline
+// (no input) ~50-56s covering ~12-20 m/s, full-tuck ~26-29s reaching
+// ~22-27 m/s peak. Re-verified against the real course with the headless
+// harness in the task notes (fixed-1/120s integration, no rendering).
 // ---------------------------------------------------------------------------
 const GRAVITY = 9.81;
 const GRAVITY_VEC = new THREE.Vector3(0, -GRAVITY, 0);
@@ -84,15 +89,30 @@ const DEFAULTS = {
   riderFloat: 0.35, // tube float height above the chute surface [m]
 
   // longitudinal
-  dragK1: 0.035,
-  dragK2: 0.0068,
-  tuckDragMul: 0.6, // -40% quadratic drag under full tuck
-  tuckThrust: 0.9,
-  currentAssist: 0.12, // constant "flowing water" push, m/s^2
+  //
+  // INTEGRATION FIX (post-hoc, by the integration pass — see task notes):
+  // the original tuning above this comment was validated to run 8-18.5 m/s
+  // (no input) / 16-22.4 m/s (full tuck), which sits almost entirely below
+  // the speed range PostFX/ChaseCamera/Hud map their speed-sensation FX
+  // across (originally 8->30 m/s) — so the "fast/exhilarating" visual
+  // feedback (radial blur, chromatic aberration, FOV stretch) barely ever
+  // engaged during normal play. dragK1/dragK2 are lowered ~10%, currentAssist
+  // (the constant "flowing water" push) is raised ~3x, and tuck is made a
+  // much bigger lever (tuckDragMul/tuckThrust) so cruising is noticeably
+  // brisk even with no input at all (measured: ~12 m/s avg / ~20 m/s peak),
+  // and committing to tuck is a dramatic, rewarding speed boost (measured:
+  // ~22 m/s avg / ~27 m/s peak) — comfortably inside the widened FX range
+  // (see PostFX.js/ChaseCamera.js/Hud.js) without breaking the lateral/
+  // airborne models (unaffected by this section) or the wall clamp.
+  dragK1: 0.0315,
+  dragK2: 0.00612,
+  tuckDragMul: 0.26, // -74% quadratic drag under full tuck (was -40%)
+  tuckThrust: 1.0,
+  currentAssist: 0.37, // constant "flowing water" push, m/s^2 (was 0.12)
   brakeBase: 1.6,
   brakeSpeedGain: 0.30,
-  governorSpeed: 27.5,
-  governorStrength: 0.62,
+  governorSpeed: 29, // was 27.5 — raised so the natural drag/thrust balance
+  governorStrength: 0.5, // (not this soft cap) sets the ~27-28 m/s peak
 
   // lateral
   lateralGain: 1.7,
