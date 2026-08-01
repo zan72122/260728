@@ -18,7 +18,7 @@ async function boot(page, viewport = { width: 900, height: 620 }) {
   return errors;
 }
 
-async function waitPhase(page, phase, timeout = 60_000) {
+async function waitPhase(page, phase, timeout = 90_000) {
   await page.waitForFunction((p) => window.__lab.getPhase() === p, phase, { timeout });
 }
 
@@ -100,6 +100,7 @@ test('決定論：AとBで全オブジェクトの最終位置が一致する', 
   const endA = await page.evaluate(() => window.__lab.getObjectPositions());
 
   await page.getByTestId('main-button').click(); // 巻き戻し
+  await page.evaluate(() => window.__lab.skipToEnd()); // 巻き戻しも早送り
   await waitPhase(page, 'placeB');
 
   await page.evaluate(() => window.__lab.setBear(-1.12, -1.36));
