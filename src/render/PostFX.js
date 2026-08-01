@@ -160,13 +160,19 @@ export function createPostFX(renderer, scene, camera) {
   const initSize = renderer.getSize(new THREE.Vector2());
   const initPixelRatio = renderer.getPixelRatio();
 
-  // Bloom: deliberately restrained (SPEC 4.9 exact numbers) — only the
-  // brightest highlights (sun, water sparkle) should bloom at all.
+  // Bloom: deliberately restrained — only the brightest highlights (sun,
+  // water sparkle) should bloom at all. V4 washout fix: this pass runs on
+  // the *pre-tonemap linear HDR* buffer (see the file header), where with
+  // toneMappingExposure=0.22 ordinary mid-tones already sit well above the
+  // old 0.85 threshold — so the whole frame bloomed and the entire ride
+  // read as a white haze (confirmed in live screenshots at speed). The
+  // threshold must be expressed in HDR units: 4.0 keeps it to genuine
+  // highlights (sun disc, specular glints) and restores contrast.
   const bloomPass = new UnrealBloomPass(
     new THREE.Vector2(Math.max(1, initSize.x * initPixelRatio), Math.max(1, initSize.y * initPixelRatio)),
-    0.35,
-    0.5,
-    0.85
+    0.32,
+    0.45,
+    4.0
   );
   composer.addPass(bloomPass);
 
@@ -238,26 +244,32 @@ export function createPostFX(renderer, scene, camera) {
     const tunnel = !!params.tunnel;
     const splashRate = THREE.MathUtils.clamp(params.splashRate ?? 0, 0, 1);
 
-    // Radial blur: 0 at low speed, 0.6 at top speed, with a small extra kick
-    // under high G / airborne (SPEC 4.9). Range re-matched by the
-    // integration pass to RiderPhysics.js's real measured speed band
-    // (no-input ~12-20 m/s, full-tuck ~22-27 m/s) instead of the original
-    // 8->30 m/s, which sat mostly above what the rider ever reaches.
+    // Radial blur: 0 at low speed, ramping with the measured speed band
+    // (no-input ~12-20 m/s, full-tuck ~22-27 m/s), with a small extra kick
+    // under high G / airborne (SPEC 4.9). V4 washout fix: the old peak of
+    // 0.6 sampled more than half-way to screen centre, smearing the bright
+    // chute over the entire frame at speed — together with the bloom
+    // threshold bug this erased all detail. Capped so the streaking stays
+    // a periphery effect and the course remains readable at full tuck.
     const speedT = THREE.MathUtils.clamp((speed - 6) / (27 - 6), 0, 1);
-    let blur = speedT * 0.6;
-    blur += THREE.MathUtils.clamp((gForce - 1.3) / 1.7, 0, 1) * 0.14;
-    if (airborne) blur += 0.1;
-    speedUniforms.uBlurStrength.value = THREE.MathUtils.clamp(blur, 0, 0.78);
+    let blur = speedT * 0.28;
+    blur += THREE.MathUtils.clamp((gForce - 1.3) / 1.7, 0, 1) * 0.08;
+    if (airborne) blur += 0.05;
+    speedUniforms.uBlurStrength.value = THREE.MathUtils.clamp(blur, 0, 0.4);
 
-    // Chromatic aberration: speed-linked, capped around 2-3px equivalent.
-    const chromaPx = THREE.MathUtils.lerp(0.0, 2.6, speedT) + (airborne ? 0.3 : 0.0);
+    // Chromatic aberration: speed-linked, capped around 2px equivalent.
+    const chromaPx = THREE.MathUtils.lerp(0.0, 2.0, speedT) + (airborne ? 0.3 : 0.0);
     const resW = speedUniforms.uResolution.value.x || 1;
     speedUniforms.uChromaAmount.value = chromaPx / resW;
 
     // Tunnel: strong vignette + dropped exposure, both time-smoothed so
     // entering/exiting reads as an eye-adaptation cue rather than a snap.
-    state.vignette = approach(state.vignette, tunnel ? 0.8 : 0.26, dt, tunnel ? 2.4 : 1.4);
-    state.exposure = approach(state.exposure, tunnel ? 0.5 : 1.0, dt, tunnel ? 2.2 : 1.3);
+    // V4: the real darkness now comes from the scene itself (main.js dims
+    // scene.environmentIntensity/hemi inside the tunnel), so the post
+    // exposure drop is softer than before — it's the eye-adaptation layer,
+    // not the only source of dark.
+    state.vignette = approach(state.vignette, tunnel ? 0.72 : 0.26, dt, tunnel ? 2.4 : 1.4);
+    state.exposure = approach(state.exposure, tunnel ? 0.62 : 1.0, dt, tunnel ? 2.2 : 1.3);
 
     if (tunnel) {
       state.wasTunnel = true;

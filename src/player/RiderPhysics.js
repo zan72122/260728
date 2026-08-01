@@ -92,7 +92,10 @@ const DEFAULTS = {
   // "speed -> climbs the wall" not line up with where the wall is actually
   // drawn. Import and share the real value instead.
   angleMax: TRACK_ANGLE_MAX, // U-arc angle span mapped from lateral -1..1
-  riderFloat: 0.35, // tube float height above the chute surface [m]
+  riderFloat: 0.26, // tube float height above the chute surface [m] — V4:
+  // lowered from 0.35 so the tube visibly sits *in* the flowing water
+  // (water surface lift peaks at ~0.3m mid-trough) instead of hovering
+  // dry above it; wake/foam now read as coming off the tube.
 
   // longitudinal
   //
@@ -300,7 +303,7 @@ export class RiderPhysics {
         const frame = this.track.frameAt(st.s);
         const drag = tune.dragK1 * st.speed + tune.dragK2 * st.speed * st.speed + 0.4;
         st.speed = Math.max(0, st.speed - drag * dt);
-        const la = this._lateralAccel(st.lateral, st.lateralVel, st.speed, 0, frame.radius, 0, frame.binormal, frame.normal);
+        const la = this._lateralAccel(st.lateral, st.lateralVel, st.speed, 0, frame.radius, 0, frame.binormal, frame.normal, frame.angleMax);
         st.lateralVel = THREE.MathUtils.clamp(st.lateralVel + la * dt, -tune.maxLateralVel, tune.maxLateralVel);
         st.lateral = THREE.MathUtils.clamp(st.lateral + st.lateralVel * dt, -1.05, 1.05);
         st.gForce = THREE.MathUtils.damp(st.gForce, 1, 3, dt);
@@ -323,11 +326,11 @@ export class RiderPhysics {
       const dvdt = this._longitudinalAccel(st.speed, frame.slope, tuck, brake);
       st.speed = Math.max(0, st.speed + dvdt * dt);
 
-      const la = this._lateralAccel(st.lateral, st.lateralVel, st.speed, frame.curvature, frame.radius, steer, frame.binormal, frame.normal);
+      const la = this._lateralAccel(st.lateral, st.lateralVel, st.speed, frame.curvature, frame.radius, steer, frame.binormal, frame.normal, frame.angleMax);
       st.lateralVel = THREE.MathUtils.clamp(st.lateralVel + la * dt, -tune.maxLateralVel, tune.maxLateralVel);
       st.lateral = THREE.MathUtils.clamp(st.lateral + st.lateralVel * dt, -1.05, 1.05);
 
-      const radial = this._radialG(st.lateral, st.lateralVel, st.speed, frame.curvature, frame.radius, frame.binormal, frame.normal);
+      const radial = this._radialG(st.lateral, st.lateralVel, st.speed, frame.curvature, frame.radius, frame.binormal, frame.normal, frame.angleMax);
       st.gForce = Math.min(9, Math.sqrt(radial * radial + dvdt * dvdt) / GRAVITY);
 
       st.s += st.speed * dt;
@@ -366,12 +369,16 @@ export class RiderPhysics {
    * needed. At bank=0 this reduces exactly to the textbook
    * -g*sin(theta)/r + curvature*v^2*cos(theta)/r.
    */
-  _lateralAccel(lateral, lateralVel, speed, curvature, radius, steer, binormal, normal) {
+  _lateralAccel(lateral, lateralVel, speed, curvature, radius, steer, binormal, normal, angleMax) {
     const tune = this.tune;
-    const theta = lateral * tune.angleMax;
+    // V4: the U-profile's wall sweep is a per-node design attribute now
+    // (SplineTrack frameAt().angleMax); tune.angleMax stays as the fallback
+    // so the model still works against tracks that don't provide it.
+    const aMax = angleMax || tune.angleMax;
+    const theta = lateral * aMax;
     const gx = GRAVITY_VEC.dot(binormal) + curvature * speed * speed;
     const gy = GRAVITY_VEC.dot(normal);
-    let a = ((gx * Math.cos(theta) + gy * Math.sin(theta)) * tune.lateralGain) / (tune.angleMax * radius);
+    let a = ((gx * Math.cos(theta) + gy * Math.sin(theta)) * tune.lateralGain) / (aMax * radius);
     a += steer * tune.steerForce * this._steerEffectiveness(speed);
     a -= tune.lateralDamping * lateralVel;
 
@@ -386,10 +393,11 @@ export class RiderPhysics {
   }
 
   /** Same bank-aware gravity projection as _lateralAccel, for the "how hard pressed into the tube" display quantity. */
-  _radialG(lateral, lateralVel, speed, curvature, radius, binormal, normal) {
+  _radialG(lateral, lateralVel, speed, curvature, radius, binormal, normal, angleMax) {
     const tune = this.tune;
-    const theta = lateral * tune.angleMax;
-    const thetaDot = lateralVel * tune.angleMax;
+    const aMax = angleMax || tune.angleMax;
+    const theta = lateral * aMax;
+    const thetaDot = lateralVel * aMax;
     const gx = GRAVITY_VEC.dot(binormal) + curvature * speed * speed;
     const gy = GRAVITY_VEC.dot(normal);
     return gx * Math.sin(theta) - gy * Math.cos(theta) + radius * thetaDot * thetaDot;

@@ -15,7 +15,15 @@ import { createShellMaterial } from './TrackMaterial.js';
  *  Tunable shape constants
  * ------------------------------------------------------------------ */
 
-const ANGLE_MAX = 1.25;            // rad — half-pipe wall sweep, lateral=±1
+const ANGLE_MAX = 1.25;            // rad — default half-pipe wall sweep, lateral=±1.
+// V4: the sweep is now a per-node design attribute (TrackDesign `angleMax`,
+// defaulting to this constant) interpolated along s like radius/bank/
+// widthScale — so sections can be shallow open flumes, deep banked
+// half-pipes or wide bowls instead of one identical profile for 600m.
+// This constant remains the fallback and the value RiderPhysics imports
+// as its own default.
+const ANGLE_MIN_CLAMP = 0.9;       // rad — interpolation guard band for angleMax
+const ANGLE_MAX_CLAMP = 1.6;
 const FLARE_START = 0.8;           // |lateral| where the top lip starts flaring outward
 const FLARE_AMOUNT = 0.22;         // m — extra outward bulge at |lateral| = 1
 const LUT_SAMPLES = 6000;          // uniform-t samples backing the arc-length / frame LUT
@@ -25,7 +33,9 @@ const SHELL_ROOF_THICKNESS = 0.18; // m — outward offset of the tunnel roof sh
 
 const WATER_LATERAL = 0.85;        // water spans lateral in [-WATER_LATERAL, WATER_LATERAL]
 const WATER_LIFT_MIN = 0.06;       // m — water height above the chute floor near the edges
-const WATER_LIFT_MAX = 0.25;       // m — water height above the chute floor at the centre
+const WATER_LIFT_MAX = 0.3;        // m — water height above the chute floor at the centre
+// (V4: raised 0.25 -> 0.3 together with RiderPhysics riderFloat 0.35 -> 0.26
+// so the tube visibly rides *in* the water instead of hovering above it.)
 
 const SLIT_SPACING = 6.0;          // m — spacing between tunnel ceiling light-slits
 const SLIT_WIDTH = 0.9;            // m — arc-length width of each slit
@@ -218,11 +228,13 @@ export class SplineTrack {
     const nodeRadius = nodes.map((n) => (n.radius != null ? n.radius : 5));
     const nodeBank = nodes.map((n) => (n.bank != null ? n.bank : 0));
     const nodeWidth = nodes.map((n) => (n.widthScale != null ? n.widthScale : 1));
+    const nodeAngle = nodes.map((n) => (n.angleMax != null ? n.angleMax : ANGLE_MAX));
     const nodeTunnel = nodes.map((n) => !!n.tunnel);
 
     const radii = new Float64Array(N + 1);
     const banks = new Float64Array(N + 1);
     const widthScales = new Float64Array(N + 1);
+    const angleMaxes = new Float64Array(N + 1);
     const tunnels = new Uint8Array(N + 1);
 
     for (let i = 0; i <= N; i++) {
@@ -238,6 +250,13 @@ export class SplineTrack {
       radii[i] = catmullRom1D(nodeRadius[im1], nodeRadius[i0], nodeRadius[i1], nodeRadius[i2], frac);
       banks[i] = catmullRom1D(nodeBank[im1], nodeBank[i0], nodeBank[i1], nodeBank[i2], frac);
       widthScales[i] = catmullRom1D(nodeWidth[im1], nodeWidth[i0], nodeWidth[i1], nodeWidth[i2], frac);
+      // Clamp against Catmull-Rom overshoot at section seams — the profile
+      // sweep must stay in a range where both the flare shape and the
+      // physics' small-angle assumptions remain sane.
+      angleMaxes[i] = THREE.MathUtils.clamp(
+        catmullRom1D(nodeAngle[im1], nodeAngle[i0], nodeAngle[i1], nodeAngle[i2], frac),
+        ANGLE_MIN_CLAMP, ANGLE_MAX_CLAMP
+      );
       tunnels[i] = (frac < 0.5 ? nodeTunnel[i0] : nodeTunnel[i1]) ? 1 : 0;
     }
 
@@ -265,6 +284,7 @@ export class SplineTrack {
     this._radii = radii;
     this._banks = banks;
     this._widthScales = widthScales;
+    this._angleMaxes = angleMaxes;
     this._tunnels = tunnels;
     this._curvature = curvature;
     this._slope = slope;
@@ -327,11 +347,12 @@ export class SplineTrack {
 
     const radius = THREE.MathUtils.lerp(this._radii[i0], this._radii[i1], frac);
     const widthScale = THREE.MathUtils.lerp(this._widthScales[i0], this._widthScales[i1], frac);
+    const angleMax = THREE.MathUtils.lerp(this._angleMaxes[i0], this._angleMaxes[i1], frac);
     const curvature = THREE.MathUtils.lerp(this._curvature[i0], this._curvature[i1], frac);
     const slope = THREE.MathUtils.lerp(this._slope[i0], this._slope[i1], frac);
     const tunnel = !!(frac < 0.5 ? this._tunnels[i0] : this._tunnels[i1]);
 
-    return { position, tangent, normal, binormal, curvature, radius, bank, slope, tunnel, widthScale };
+    return { position, tangent, normal, binormal, curvature, radius, bank, slope, tunnel, widthScale, angleMax };
   }
 
   // Inward ("rider-side") unit normal to the circular profile at the given
@@ -346,7 +367,7 @@ export class SplineTrack {
   surfaceAt(s, lateral, lift = 0) {
     const f = this.frameAt(s);
     const r = f.radius * f.widthScale;
-    const angle = lateral * ANGLE_MAX;
+    const angle = lateral * f.angleMax;
     const ca = Math.cos(angle);
     const sa = Math.sin(angle);
 
@@ -365,7 +386,7 @@ export class SplineTrack {
   surfaceNormalAt(s, lateral) {
     const f = this.frameAt(s);
     const r = f.radius * f.widthScale;
-    const angle = lateral * ANGLE_MAX;
+    const angle = lateral * f.angleMax;
     const abs = Math.abs(lateral);
 
     const flare = FLARE_AMOUNT * THREE.MathUtils.smoothstep(abs, FLARE_START, 1.0);
@@ -378,7 +399,7 @@ export class SplineTrack {
 
     const n = new THREE.Vector3()
       .addScaledVector(tProf, flareDeriv)
-      .addScaledVector(baseN, ANGLE_MAX * (r + flare));
+      .addScaledVector(baseN, f.angleMax * (r + flare));
 
     return n.normalize();
   }
@@ -437,7 +458,7 @@ export class SplineTrack {
       const r = f.radius * f.widthScale;
       for (let j = 0; j < roofNumLat; j++) {
         const u = j / roofLatDiv;
-        const phi = ANGLE_MAX + u * (2 * Math.PI - 2 * ANGLE_MAX);
+        const phi = f.angleMax + u * (2 * Math.PI - 2 * f.angleMax);
         const ca = Math.cos(phi);
         const sa = Math.sin(phi);
         const n = this._innerDirAt(f, phi, new THREE.Vector3());
@@ -528,7 +549,7 @@ export class SplineTrack {
       const r = f.radius * f.widthScale;
       for (let j = 0; j < roofNumLat; j++) {
         const u = j / roofLatDiv;
-        const phi = ANGLE_MAX + u * (2 * Math.PI - 2 * ANGLE_MAX);
+        const phi = f.angleMax + u * (2 * Math.PI - 2 * f.angleMax);
         const ca = Math.cos(phi);
         const sa = Math.sin(phi);
         const inward = this._innerDirAt(f, phi, new THREE.Vector3());

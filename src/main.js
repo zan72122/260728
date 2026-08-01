@@ -211,7 +211,10 @@ async function boot() {
   bootStage = 'track meshes';
   const chuteMesh = new THREE.Mesh(
     track.buildChuteGeometry(),
-    applyEnvMap(createChuteMaterial(track), skyResult.envMap, 1.1)
+    // V4: envMapIntensity now stays at the value TrackMaterial itself sets
+    // (0.5) — the old 1.1 override was a major contributor to the all-white
+    // washout (bright-sky IBL mirrored across the whole chute interior).
+    applyEnvMap(createChuteMaterial(track), skyResult.envMap)
   );
   chuteMesh.name = 'chute';
   chuteMesh.castShadow = true;
@@ -220,7 +223,7 @@ async function boot() {
 
   const shellMesh = new THREE.Mesh(
     track.buildShellGeometry(),
-    applyEnvMap(createShellMaterial(), skyResult.envMap, 0.85)
+    applyEnvMap(createShellMaterial(), skyResult.envMap, 0.55)
   );
   shellMesh.name = 'shell';
   shellMesh.receiveShadow = true;
@@ -280,7 +283,10 @@ async function boot() {
   await nextFrame();
 
   bootStage = 'fx';
-  const spray = new SprayParticles(scene);
+  // V4 fix: pass the renderer so SprayParticles reads the real drawing-buffer
+  // height for its point-size math (it used to fall back to
+  // window.innerHeight * dpr, which drifts from the composer's size).
+  const spray = new SprayParticles(scene, { renderer });
   if (spray.object3D) scene.add(spray.object3D);
   // Integration fix: this used to also construct its own standalone
   // LensDroplets() here, but its `.pass` was never added to any
@@ -313,6 +319,23 @@ async function boot() {
   // -------------------------------------------------------------------
   // run-time state
   // -------------------------------------------------------------------
+
+  // --- tunnel ambience (V4) ------------------------------------------
+  // The tunnel used to rely on PostFX exposure alone to feel dark; the
+  // scene's own lighting (IBL envMap baked from the open sky + hemisphere
+  // fill) kept illuminating the closed tube at full outdoor strength, so
+  // the "dark tunnel" read as a white pipe. Cross-fade the scene-level
+  // ambient terms down while inside; the sun stays, so the light-slit
+  // shafts and their moving pools of light become the tunnel's look.
+  const hemiBaseIntensity = lighting.hemi ? lighting.hemi.intensity : 0;
+  let tunnelBlend = 0;
+  function updateTunnelAmbience(dt, inTunnel) {
+    tunnelBlend = THREE.MathUtils.damp(tunnelBlend, inTunnel ? 1 : 0, inTunnel ? 2.4 : 1.6, dt);
+    scene.environmentIntensity = THREE.MathUtils.lerp(1.0, 0.22, tunnelBlend);
+    if (lighting.hemi) {
+      lighting.hemi.intensity = hemiBaseIntensity * THREE.MathUtils.lerp(1.0, 0.3, tunnelBlend);
+    }
+  }
 
   let accumulator = 0;
   let titleS = 0;
@@ -476,12 +499,18 @@ async function boot() {
 
       updateWater(simDt, { riderS: ctx.s, riderLateral: ctx.lateral, speed: ctx.speed });
 
+      // V4 fix: forward the real sun direction — without it the spray
+      // shader's backlit glow / sun glints used a hardcoded default that
+      // pointed nowhere near the actual sun (Sky.js: elevation 38°,
+      // azimuth 145°).
       if (ctx.isRiding) emitSpray();
-      spray.update(simDt, camera);
+      spray.update(simDt, camera, { sunDirection: skyResult.sunDirection });
 
       environment.update(simDt, ctx.focusPos);
+      if (props && props.userData && props.userData.update) props.userData.update(simDt);
       skyResult.update(simDt);
       lighting.update(simDt, ctx.focusPos);
+      updateTunnelAmbience(simDt, ctx.tunnel);
 
       audioEngine.update(simDt, {
         speed: ctx.speed,

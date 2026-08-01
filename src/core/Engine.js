@@ -40,7 +40,9 @@ export function createEngine(container) {
   // 圧縮される前提の生 linear HDR を返す設計。実機スクリーンショットで
   // 0.4 は依然として白飛び気味 (finish 想定シーンで高輝度パネルが飽和) と
   // 確認したため 0.22 まで下げ、白飛び/沈みの両方が出ない値まで追い込んだ。
-  renderer.toneMappingExposure = 0.22;
+  // V4: ブルーム閾値バグ (PostFX.js 参照) とチュートの過剰な envMap 反射を
+  // 直した上で再測定し、コントラストが立つ 0.19 に微調整。
+  renderer.toneMappingExposure = 0.19;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 

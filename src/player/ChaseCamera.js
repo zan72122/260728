@@ -17,35 +17,27 @@ const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const ORIGIN = new THREE.Vector3(0, 0, 0);
 
 const DEFAULTS = {
-  // chase framing. NOTE (V3 integration fix): SPEC.md §4.4 does not actually
-  // pin exact metres — it only requires "camera never embedded in the
-  // chute" + the FOV/roll/lag/shake behaviour below. The previous 3.2-4.5m
-  // behind / 1.1-1.8m above pairing (mis-attributed to the spec in an
-  // earlier pass) put the camera so low and so close, relative to this
-  // track's actual ~5-6.5m cross-section radius (SplineTrack ANGLE_MAX=
-  // 1.25rad half-pipe), that the near chute wall/floor read as empty space
-  // around the rider — confirmed by screenshotting both values live (see
-  // task notes): at old lift (1.1-1.8m, only ~20-30% of the wall height)
-  // the camera barely clears the rider's own float height (0.35m) and the
-  // downward pitch toward the look-target was too shallow to bring the
-  // trough surface into frame. Raising lift (more downward pitch onto the
-  // water/floor, more of the U-cross-section visible converging around the
-  // rider) and pulling dist in slightly (the near surface reads at a more
-  // legible size) fixes this while keeping the same spring/leash/FOV logic.
-  chaseDistMin: 2.6,
-  chaseDistMax: 3.8,
-  chaseLiftMin: 2.2,
-  chaseLiftMax: 3.1,
+  // chase framing (V4 visual-variety pass): the V3 tuning (lift 2.2-3.1m,
+  // look-ahead 2.4m) pitched the camera steeply down into the trough, so
+  // the frame was filled almost entirely by the near-uniform chute interior
+  // — horizon, environment and the course ahead were cropped out, which is
+  // what made every second of the ride look the same. Framing now sits low
+  // (just above the rider's eye line) and looks far down-track, so the lip
+  // of the chute, upcoming curves, drops and the resort/sea backdrop all
+  // stay in frame and sweep past as the course turns. The spring/leash/FOV
+  // machinery below is unchanged, so "camera never embedded in the chute"
+  // (SPEC §4.4) still holds by construction.
+  chaseDistMin: 3.4,
+  chaseDistMax: 4.6,
+  chaseLiftMin: 1.35,
+  chaseLiftMax: 1.8,
   chaseAirExtraDist: 1.7, // pull back further when airborne so the arc reads
-  chaseAirExtraLift: 0.55,
-  lateralPullFactor: 0.45, // was 0.7 — too much lateral pull rode the camera
-  // up onto the (steeply banked, up to ~0.85rad) helix wall right along
-  // with the rider, tipping the "up" reference and losing the opposite
-  // wall from frame; a softer pull keeps the camera nearer the trough's
-  // own centre so both walls stay legible while still favouring the
-  // rider's side enough to keep them framed.
-  lookAheadDist: 2.4, // was 3.2 — a closer look-target steepens the
-  // camera's downward pitch onto the trough/water surface (see above).
+  chaseAirExtraLift: 0.9,
+  lateralPullFactor: 0.45, // too much lateral pull rides the camera up the
+  // (steeply banked, up to ~0.85rad) helix wall right along with the rider,
+  // tipping the "up" reference and losing the opposite wall from frame.
+  lookAheadDist: 9.0, // long look-ahead keeps the camera's pitch shallow so
+  // the course ahead + horizon stay in frame (the core of the V4 reframe).
 
   // chase spring-damper
   springStiffness: 68,

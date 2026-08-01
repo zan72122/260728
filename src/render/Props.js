@@ -341,6 +341,24 @@ function buildTunnelLightBeams(track, envMap) {
 	beams.frustumCulled = false;
 	beams.name = 'TunnelLightBeams';
 
+	// Per-instance shimmer phase (0..2π), consumed by the group-level update
+	// hook below: the beams slowly breathe in brightness like dust drifting
+	// through real light shafts, instead of being frozen at build time.
+	const phases = new Float32Array(placementsS.length);
+	for (let i = 0; i < phases.length; i++) phases[i] = Math.random() * Math.PI * 2;
+	const baseOpacity = 1.0;
+	let beamTime = 0;
+	group.userData.update = (dt) => {
+		beamTime += Math.max(dt || 0, 0);
+		// One shared material — animate a slow ensemble breathing plus a
+		// faster low-amplitude flicker. (Per-instance opacity would need a
+		// custom shader; the ensemble pulse reads almost as well for a
+		// fraction of the complexity.)
+		const slow = 0.78 + 0.22 * Math.sin(beamTime * 0.55 + phases[0]);
+		const flicker = 1.0 + 0.05 * Math.sin(beamTime * 5.1);
+		mat.opacity = baseOpacity * slow * flicker;
+	};
+
 	const dummy = new THREE.Object3D();
 	placementsS.forEach((s, i) => {
 		const f = track.frameAt(s);
@@ -552,6 +570,16 @@ export function createProps(track, envMap) {
 	group.add(buildFlags(track, envMap));
 	group.add(buildBuoys(envMap));
 	group.add(buildPottedPlants(track, envMap));
+
+	// Aggregate the per-builder animation hooks (currently: tunnel light-beam
+	// shimmer) into one group-level update. The SPEC return type stays a
+	// plain THREE.Group; callers that ignore userData.update lose nothing.
+	const childUpdates = group.children
+		.map((child) => child.userData && child.userData.update)
+		.filter(Boolean);
+	group.userData.update = (dt) => {
+		for (const fn of childUpdates) fn(dt);
+	};
 
 	return group;
 }

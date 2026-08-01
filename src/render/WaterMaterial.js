@@ -158,16 +158,22 @@ export function createFlowingWaterMaterial(opts = {}) {
   // SPEC 4.6 は transmission の使用を求めるが、見た目の正しさ (=水が
   // 確実に見えること) を優先し、ここでは使わない方針に切り替える
   // (transparent + opacity + フレネル反射 + 泡で十分に水らしく見える)。
+  // V4 washout fix: clearcoat 1.0 @ roughness 0.06 + envMapIntensity 1.2
+  // mirrored the bright summer sky across the entire flowing surface — at
+  // the chase camera's grazing angle the water read as a white sheet, not
+  // water (same mechanism as the chute material's washout, see
+  // TrackMaterial.js). Softer coat + reduced IBL keeps the wet sparkle
+  // while letting the aqua body colour and foam streaks show.
   const material = new THREE.MeshPhysicalMaterial({
     color: shallowColor,
     roughness: 0.08,
     metalness: 0.0,
     ior: 1.333,
-    clearcoat: 1.0,
-    clearcoatRoughness: 0.06,
+    clearcoat: 0.55,
+    clearcoatRoughness: 0.12,
     transparent: true,
-    opacity: 0.86,
-    envMapIntensity: 1.2,
+    opacity: 0.88,
+    envMapIntensity: 0.75,
     side: THREE.DoubleSide,
   });
 
@@ -262,10 +268,13 @@ vec2 aqFlowScroll = vFlow * (uTime * max(uFlowSpeed, 0.6));
 // ---- 泡・白波: 壁際 (aDepth 小) ほど、流速が速いほど濃い筋状ノイズ ----
 vec2 aqFoamDomain = vec2(aqBaseDomain.x * 0.30, aqBaseDomain.y * 2.4) - aqFlowScroll * vec2(1.5, 0.4);
 float aqFoamN = aqWarp(aqFoamDomain, uTime);
-float aqFoamRaw = smoothstep(0.52, 0.88, aqFoamN);
+// V4: 泡の閾値と床(深部)側の下限を引き上げ。旧値 (0.52/0.88, 深部係数 0.12)
+// では、引きのカメラから見ると泡の筋がほぼ知覚できず「水が流れている」
+// 情報が絵から消えていた (実機スクリーンショットで確認)。
+float aqFoamRaw = smoothstep(0.46, 0.84, aqFoamN);
 float aqShallow = 1.0 - smoothstep(0.0, uFoamDepthRange, vDepth);
 float aqSpeedy = smoothstep(3.0, 18.0, uFlowSpeed);
-float aqFoamMask = clamp(aqFoamRaw * mix(0.12, 1.0, aqShallow) * mix(0.35, 1.15, aqSpeedy), 0.0, 1.3);
+float aqFoamMask = clamp(aqFoamRaw * mix(0.22, 1.0, aqShallow) * mix(0.35, 1.15, aqSpeedy), 0.0, 1.3);
 
 // ---- ライダーの航跡: 後方 0〜25m、lateral 近傍ほど強い V 字 ----
 float aqAlong = uRiderS - aqSMeters;
@@ -280,7 +289,7 @@ if (aqLongMask > 0.001) {
 	if (aqWakeEnvelope > 0.001) {
 		float aqWakeRipple = 0.5 + 0.5 * sin(aqLateralDist * 2.6 - aqAlong * 0.55);
 		float aqWakeTurb = aqWarp(vec2(aqAlong * 0.5, aqLateralDist * 1.6), uTime * 1.3);
-		aqWakeMask = aqWakeEnvelope * clamp(aqWakeRipple * 0.6 + aqWakeTurb * 0.7, 0.0, 1.0) * 1.1;
+		aqWakeMask = aqWakeEnvelope * clamp(aqWakeRipple * 0.6 + aqWakeTurb * 0.7, 0.0, 1.0) * 1.35;
 	}
 }
 
@@ -340,7 +349,9 @@ normal = aqBumpNormal(aqPosDx, aqPosDy, normal, aqHx, aqHy);
 	// サンプリングしたところ、グレージング角付近でこの反射項が水自体の
 	// 色をほぼ空色一色に塗り替えてしまい、「水」ではなく「鏡」に見える
 	// リスクを確認したため)。フレネル反射自体は要件どおり残す。
-	outgoingLight = mix(outgoingLight, aqSky * uEnvBoost, clamp(aqFres * 0.6, 0.0, 0.65));
+	// V4: チェイスカメラの低い視点 (グレージング角が常態) では 0.65 でも
+	// なお水面全体が空色に塗り替わっていたため 0.45 まで引き下げ。
+	outgoingLight = mix(outgoingLight, aqSky * uEnvBoost, clamp(aqFres * 0.55, 0.0, 0.45));
 
 	// ---- コースティクス風スペックルハイライト (太陽方向の高次スペキュラ) ----
 	vec3 aqHalf = normalize(aqSunVS + aqViewDir);

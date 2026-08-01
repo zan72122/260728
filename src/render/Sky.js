@@ -50,7 +50,9 @@ const MIE_DIRECTIONAL_G = 0.72;
 // 転んでしまい「青空」に見えなかった。晴天の遠景ヘイズらしい、ごく淡い
 // 空色寄りの白に変更 (水平線が白っぽく霞むのは残しつつ、色相を青側に)。
 const FOG_COLOR = 0xcfe1ea;
-const FOG_DENSITY = 0.0018;
+// V4: 0.0018 -> 0.0013 — 中距離 (50-150m) の支柱・地形・遠景まで白く霞み、
+// 走行中の「景色の変化」を塗り潰す一因になっていたため少し晴らす。
+const FOG_DENSITY = 0.0013;
 
 function computeSunDirection() {
   const phi = THREE.MathUtils.degToRad(90 - ELEVATION_DEG);

@@ -164,6 +164,11 @@ function deriveColorStops() {
 export function createChuteMaterial(track) {
   const { map, normalMap, roughnessMap } = buildFRPDetailMaps(3);
 
+  // V4 washout fix: clearcoat 0.8 + envMapIntensity 1.1 mirrored the very
+  // bright summer sky across the entire interior, drowning the per-section
+  // colour blend below in a white sheen (confirmed in live screenshots —
+  // the turquoise helix read as plain white). Softer coat + reduced IBL
+  // keeps the wet-FRP look while letting the region tint actually show.
   const material = new THREE.MeshPhysicalMaterial({
     map,
     normalMap,
@@ -172,9 +177,9 @@ export function createChuteMaterial(track) {
     color: 0xffffff,
     roughness: 1.0,
     metalness: 0.0,
-    clearcoat: 0.8,
-    clearcoatRoughness: 0.1,
-    envMapIntensity: 1.1,
+    clearcoat: 0.4,
+    clearcoatRoughness: 0.18,
+    envMapIntensity: 0.5,
     side: THREE.DoubleSide,
   });
 

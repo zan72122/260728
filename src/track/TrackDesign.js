@@ -118,6 +118,15 @@ function buildCourse() {
 
   const HELIX_CRUISE_PITCH = 0.082;
 
+  // V4 cross-section variety: `angleMax` (the U-profile's wall sweep, rad)
+  // is now a per-node attribute, interpolated along s by SplineTrack just
+  // like radius/bank/widthScale. Each section gets its own silhouette
+  // instead of one identical profile for the whole course:
+  //   A shallow open flume -> B deep banked half-pipe -> C tube (roof
+  //   seam near the default) -> D wide open bowl -> E low open kicker
+  //   -> F tall containment walls for the near-vertical drop.
+  const ANGLE = { A: 1.1, B: 1.42, C: 1.25, D: 1.5, E: 1.02, F: 1.32 };
+
   /* ---- A. Launch: short runway then a swooping drop into the helix's
    *       cruise pitch (lands exactly on HELIX_CRUISE_PITCH so B can start
    *       turning immediately with no separate "settle" segment — those
@@ -125,9 +134,9 @@ function buildCourse() {
    *       Catmull-Rom spline overshoot at the seam). ---- */
   {
     let r;
-    r = straightRun(cursor, 16); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
-    r = pitchRun(cursor, 0.72, 20); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-    r = pitchRun(cursor, HELIX_CRUISE_PITCH, 33, 5); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = straightRun(cursor, 16); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.05, angleMax: ANGLE.A }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.72, 20); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.0, angleMax: ANGLE.A }); cursor = r.cursor;
+    r = pitchRun(cursor, HELIX_CRUISE_PITCH, 33, 5); push(r.nodes, 'A', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.0, angleMax: ANGLE.A }); cursor = r.cursor;
   }
 
   /* ---- B. High-speed helix: ~1.95 turns, strong bank ---- */
@@ -140,7 +149,7 @@ function buildCourse() {
       const frac = (i + 1) / nNodes;
       const ramp = THREE.MathUtils.smoothstep(frac, 0, 0.16) * (1 - THREE.MathUtils.smoothstep(frac, 0.84, 1));
       const bankMag = 0.55 + 0.30 * ramp; // 0.55 .. 0.85 rad through the body of the spiral
-      raw.push({ p: r.nodes[i], section: 'B', radius: 5.5, bank: -turn * bankMag, tunnel: false, widthScale: 1.0 });
+      raw.push({ p: r.nodes[i], section: 'B', radius: 5.5, bank: -turn * bankMag, tunnel: false, widthScale: 1.0, angleMax: ANGLE.B });
     }
     cursor = r.cursor;
   }
@@ -150,9 +159,9 @@ function buildCourse() {
    *       segment is inserted before it either. ---- */
   {
     let r;
-    r = straightRun(cursor, 56); push(r.nodes, 'C', { radius: 4.9, bank: 0, tunnel: true, widthScale: 0.92 }); cursor = r.cursor;
-    r = turnRun(cursor, -1, 32, 0.4); push(r.nodes, 'C', { radius: 4.9, bank: -0.12, tunnel: true, widthScale: 0.92 }); cursor = r.cursor;
-    r = straightRun(cursor, 50); push(r.nodes, 'C', { radius: 4.9, bank: 0, tunnel: true, widthScale: 0.92 }); cursor = r.cursor;
+    r = straightRun(cursor, 56); push(r.nodes, 'C', { radius: 4.9, bank: 0, tunnel: true, widthScale: 0.92, angleMax: ANGLE.C }); cursor = r.cursor;
+    r = turnRun(cursor, -1, 32, 0.4); push(r.nodes, 'C', { radius: 4.9, bank: -0.12, tunnel: true, widthScale: 0.92, angleMax: ANGLE.C }); cursor = r.cursor;
+    r = straightRun(cursor, 50); push(r.nodes, 'C', { radius: 4.9, bank: 0, tunnel: true, widthScale: 0.92, angleMax: ANGLE.C }); cursor = r.cursor;
   }
 
   /* ---- D. Bowl / wave: alternating S-bends, lateral G. No pitch "settle"
@@ -175,7 +184,7 @@ function buildCourse() {
       for (let i = 0; i < nNodes; i++) {
         const frac = (i + 1) / nNodes;
         const ramp = THREE.MathUtils.smoothstep(frac, 0, 0.3) * (1 - THREE.MathUtils.smoothstep(frac, 0.7, 1));
-        raw.push({ p: r.nodes[i], section: 'D', radius: 5.7, bank: -b.turn * 0.42 * (0.4 + 0.6 * ramp), tunnel: false, widthScale: 1.12 });
+        raw.push({ p: r.nodes[i], section: 'D', radius: 5.7, bank: -b.turn * 0.42 * (0.4 + 0.6 * ramp), tunnel: false, widthScale: 1.12, angleMax: ANGLE.D });
       }
       cursor = r.cursor;
     }
@@ -190,10 +199,10 @@ function buildCourse() {
   {
     let r;
     const eSpacing = 3.75;
-    r = pitchRun(cursor, -0.13, 36, eSpacing); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-    r = straightRun(cursor, 10, eSpacing); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-    r = pitchRun(cursor, 0.17, 38, eSpacing); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
-    r = straightRun(cursor, 9, eSpacing); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0 }); cursor = r.cursor;
+    r = pitchRun(cursor, -0.13, 36, eSpacing); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0, angleMax: ANGLE.E }); cursor = r.cursor;
+    r = straightRun(cursor, 10, eSpacing); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0, angleMax: ANGLE.E }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.17, 38, eSpacing); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0, angleMax: ANGLE.E }); cursor = r.cursor;
+    r = straightRun(cursor, 9, eSpacing); push(r.nodes, 'E', { radius: 5.0, bank: 0, tunnel: false, widthScale: 1.0, angleMax: ANGLE.E }); cursor = r.cursor;
   }
 
   /* ---- F. Last drop: steep (not literally vertical) plunge, then a
@@ -202,10 +211,10 @@ function buildCourse() {
    *       as section E. ---- */
   {
     let r;
-    r = pitchRun(cursor, 0.68, 30, 4.5); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
-    r = straightRun(cursor, 18); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.05 }); cursor = r.cursor;
-    r = pitchRun(cursor, 0.05, 28, 6); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.1 }); cursor = r.cursor;
-    r = straightRun(cursor, 14); push(r.nodes, 'F', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.1 }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.68, 30, 4.5); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.05, angleMax: ANGLE.F }); cursor = r.cursor;
+    r = straightRun(cursor, 18); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.05, angleMax: ANGLE.F }); cursor = r.cursor;
+    r = pitchRun(cursor, 0.05, 28, 6); push(r.nodes, 'F', { radius: 5.3, bank: 0, tunnel: false, widthScale: 1.1, angleMax: ANGLE.F }); cursor = r.cursor;
+    r = straightRun(cursor, 14); push(r.nodes, 'F', { radius: 5.2, bank: 0, tunnel: false, widthScale: 1.1, angleMax: ANGLE.F }); cursor = r.cursor;
   }
 
   // `start` is defined as the curve's true s=0 point (nodes[0]) rather than
@@ -223,6 +232,7 @@ const nodes = raw.map((n) => ({
   bank: n.bank,
   tunnel: n.tunnel,
   widthScale: n.widthScale,
+  angleMax: n.angleMax,
 }));
 
 /* ------------------------------------------------------------------ *
