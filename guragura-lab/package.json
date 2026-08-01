@@ -1,0 +1,21 @@
+{
+  "name": "guragura-lab",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "4歳児向け 地震・防災物理ゲーム「ぐらぐらラボ」",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "cannon-es": "^0.20.0",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "vite": "^8.2.0"
+  }
+}

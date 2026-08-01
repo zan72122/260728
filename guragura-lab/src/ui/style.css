@@ -1,0 +1,321 @@
+/* ぐらぐらラボ — 全画面・文字なしUI
+ * ヘッダー/フッターなし。UIはDOMレイヤーに置き、地震中も揺れない。 */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  background: #ffe9f2;
+  font-family: system-ui, sans-serif;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+}
+
+#scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#ui-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* iOSノッチ/ホームバー回避 */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    calc(env(safe-area-inset-bottom)) env(safe-area-inset-left);
+}
+
+#ui-layer > * {
+  pointer-events: auto;
+}
+
+/* ---- 大きなメインボタン（ぐらぐら/巻き戻し/もう一回） ---- */
+
+/* ボタン本体のボックスは動かさず、::before（円盤）だけを脈動させる。
+ * 自動テストのアクション判定と当たり判定を安定させるため。 */
+.big-button {
+  position: absolute;
+  bottom: max(20px, calc(env(safe-area-inset-bottom) + 12px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: clamp(84px, 15vmin, 120px);
+  height: clamp(84px, 15vmin, 120px);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  transition: opacity 0.3s ease;
+}
+
+.big-button::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ff8fab, #f6538e);
+  box-shadow:
+    0 8px 0 #c73b73,
+    0 14px 24px rgba(199, 59, 115, 0.35);
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    background 0.3s ease;
+  animation: breathe 2.2s ease-in-out infinite;
+}
+
+.big-button:active::before {
+  transform: translateY(6px);
+  box-shadow:
+    0 2px 0 #c73b73,
+    0 6px 12px rgba(199, 59, 115, 0.35);
+}
+
+.big-button svg {
+  width: 62%;
+  height: 62%;
+  pointer-events: none;
+  position: relative;
+}
+
+.big-button:active svg {
+  translate: 0 6px;
+}
+
+.big-button.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.big-button.hidden::before {
+  animation: none;
+}
+
+.big-button.mode-rewind::before {
+  background: linear-gradient(145deg, #8ecbff, #4a90e2);
+  box-shadow:
+    0 8px 0 #2f6cb5,
+    0 14px 24px rgba(47, 108, 181, 0.35);
+}
+
+.big-button.mode-rewind:active::before {
+  box-shadow:
+    0 2px 0 #2f6cb5,
+    0 6px 12px rgba(47, 108, 181, 0.35);
+}
+
+.big-button.mode-again::before {
+  background: linear-gradient(145deg, #ffd66b, #ffb020);
+  box-shadow:
+    0 8px 0 #d18a00,
+    0 14px 24px rgba(209, 138, 0, 0.35);
+}
+
+.big-button.mode-again:active::before {
+  box-shadow:
+    0 2px 0 #d18a00,
+    0 6px 12px rgba(209, 138, 0, 0.35);
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    scale: 1;
+  }
+  50% {
+    scale: 1.06;
+  }
+}
+
+/* ---- 右上の小さいアイコン列（最小限の常時表示） ---- */
+
+.corner-buttons {
+  position: absolute;
+  top: max(14px, calc(env(safe-area-inset-top) + 8px));
+  right: max(14px, calc(env(safe-area-inset-right) + 8px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.icon-button {
+  width: clamp(44px, 7.5vmin, 58px);
+  height: clamp(44px, 7.5vmin, 58px);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 3px 10px rgba(120, 80, 100, 0.25);
+  transition: transform 0.12s ease, opacity 0.3s ease;
+  backdrop-filter: blur(4px);
+}
+
+.icon-button:active {
+  transform: scale(0.9);
+}
+
+.icon-button svg {
+  width: 58%;
+  height: 58%;
+  pointer-events: none;
+}
+
+.icon-button.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* サブメニュー（メニューアイコンから展開） */
+.submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.28s ease;
+}
+
+.submenu.open {
+  max-height: 300px;
+}
+
+/* ---- くまの結果バッジ（○/注意を絵で示す） ---- */
+
+.result-badge {
+  position: absolute;
+  top: max(14px, calc(env(safe-area-inset-top) + 8px));
+  left: max(14px, calc(env(safe-area-inset-left) + 8px));
+  width: clamp(64px, 12vmin, 96px);
+  height: clamp(64px, 12vmin, 96px);
+  border-radius: 26%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 14px rgba(120, 80, 100, 0.3);
+  opacity: 0;
+  scale: 0.5;
+  transition: opacity 0.35s ease, scale 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none !important;
+}
+
+.result-badge.show {
+  opacity: 1;
+  scale: 1;
+}
+
+.result-badge svg {
+  width: 74%;
+  height: 74%;
+}
+
+/* A/B比較パネル：2つのバッジを並べる */
+.compare-panel {
+  position: absolute;
+  top: max(14px, calc(env(safe-area-inset-top) + 8px));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 14px;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none !important;
+}
+
+.compare-panel.show {
+  opacity: 1;
+}
+
+.compare-slot {
+  width: clamp(64px, 12vmin, 96px);
+  height: clamp(64px, 12vmin, 96px);
+  border-radius: 26%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 14px rgba(120, 80, 100, 0.3);
+  position: relative;
+}
+
+.compare-slot svg {
+  width: 74%;
+  height: 74%;
+}
+
+/* Aスロットはゴースト＝半透明の枠で示す */
+.compare-slot.slot-a {
+  outline: 3px dashed rgba(74, 144, 226, 0.65);
+  outline-offset: 3px;
+}
+
+/* ---- 手のヒント（ドラッグできることを示す） ---- */
+
+.hand-hint {
+  position: absolute;
+  width: clamp(56px, 10vmin, 84px);
+  height: clamp(56px, 10vmin, 84px);
+  pointer-events: none !important;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  animation: hint-drag 2.4s ease-in-out infinite;
+}
+
+.hand-hint.show {
+  opacity: 0.95;
+}
+
+@keyframes hint-drag {
+  0%,
+  15% {
+    translate: 0 0;
+  }
+  45%,
+  60% {
+    translate: min(9vmin, 70px) calc(min(4vmin, 30px) * -1);
+  }
+  90%,
+  100% {
+    translate: 0 0;
+  }
+}
+
+/* ---- 画面全体のフラッシュ（巻き戻し演出） ---- */
+
+.rewind-veil {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 50%, rgba(180, 220, 255, 0.0), rgba(140, 190, 255, 0.55));
+  opacity: 0;
+  pointer-events: none !important;
+  transition: opacity 0.3s ease;
+}
+
+.rewind-veil.show {
+  opacity: 1;
+}
