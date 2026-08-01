@@ -27,7 +27,7 @@ const S = {
 
 const DRIVE_DURATION = 17;   // 試運転の長さ（秒）：受け入れ条件の 15〜20 秒
 const CRUISE = 215;          // 巡航速度（ワールド単位/秒）
-const RABBIT_SCALE = 1.15;
+const BEAR_SCALE = 1.2;
 const NEED_STROKES = 3;      // ポンプの必要回数
 const INFLATION_STEPS = [0.08, 0.42, 0.73, 1.0];
 
@@ -67,7 +67,7 @@ export class Game {
       squash: 0,
     };
     this.rearRot = 0;
-    this.rabbit = { mood: 'idle', blink: 0, blinkTimer: 1.5, riding: true, hopT: 1, cheer: 0 };
+    this.bear = { mood: 'idle', blink: 0, blinkTimer: 1.5, riding: true, hopT: 1, cheer: 0 };
     this.touchCount = 0;
     this.leakTimer = 0;
     this.pump = { in: 0, handle: 0, grab: null, strokes: 0, armed: true, pulse: 0, shake: 0 };
@@ -338,13 +338,13 @@ export class Game {
       || this.state === S.PUMP || this.state === S.SPIN
       || (this.state === S.INTRO && this.st > 3.5);
     const L = this.L;
-    // うさぎが降りて横に立っているときは、その分だけ画面を右に寄せる
-    const standing = this.rabbit.hopT < 0.5;
+    // こぐまが降りて横に立っているときは、その分だけ画面を右に寄せる
+    const standing = this.bear.hopT < 0.5;
     const wideOff = this.state === S.FINALE ? 135 : (standing ? 100 : 20);
     // 画面が大きいほど寄りすぎないようにする（タブレットで車輪が巨大にならない）
-    const closeW = clamp(L.min * 0.78, 290, 470);
+    const closeW = clamp(L.min * 0.7, 265, 430);
     if (close) this.setView(this.trike.x + A.TRIKE.frontHub[0], closeW, 260, 0.8);
-    else this.setView(this.trike.x + wideOff, L.portrait ? 440 : 800, 400, 0.82);
+    else this.setView(this.trike.x + wideOff, L.portrait ? 465 : 810, 400, 0.82);
 
     const c = this.cam;
     if (!c.init) {
@@ -364,7 +364,7 @@ export class Game {
   }
 
   updateBlink(dt) {
-    const r = this.rabbit;
+    const r = this.bear;
     r.blinkTimer -= dt;
     if (r.blinkTimer <= 0) {
       r.blinkTimer = rand(2.2, 5.5);
@@ -404,9 +404,9 @@ export class Game {
   /* ------------------------------------------------------------ 各場面 */
 
   upTitle(dt) {
-    this.rabbit.riding = false;
-    this.rabbit.hopT = 0;
-    this.rabbit.mood = 'idle';
+    this.bear.riding = false;
+    this.bear.hopT = 0;
+    this.bear.mood = 'idle';
     this.wheel.targetInflation = 0.08;
     if (this.wheel.hole.reveal > 0) this.wheel.hole.reveal = approach(this.wheel.hole.reveal, 0, 6, dt);
     const p = this.pointer;
@@ -415,8 +415,8 @@ export class Game {
       this.audio.bell();
       this.go(S.INTRO);
       this.trike.x = -540;
-      this.rabbit.riding = true;
-      this.rabbit.hopT = 1;
+      this.bear.riding = true;
+      this.bear.hopT = 1;
     }
   }
 
@@ -429,23 +429,23 @@ export class Game {
       const d = this.trike.x - prev;
       this.wheel.rot += d / this.wheel.r;
       this.rearRot += d / A.TRIKE.rearR;
-      this.rabbit.mood = this.st > T * 0.55 ? 'worried' : 'idle';
+      this.bear.mood = this.st > T * 0.55 ? 'worried' : 'idle';
       if (Math.random() < dt * 8) this.fx.dust(this.trike.x - 60, -4, -1);
       this.leak(dt, 0.6);
       this.trackRoughness(dt);
     } else if (this.st < T + 1.5) {
       // 降りる。穴が見やすい向き（右斜め上）で車輪を止める
       this.spinHoleUp(dt);
-      this.rabbit.mood = 'sad';
+      this.bear.mood = 'sad';
       const u = clamp((this.st - T - 0.25) / 0.7, 0, 1);
-      this.rabbit.hopT = 1 - easeOutCubic(u);
-      if (this.rabbit.hopT <= 0) this.rabbit.riding = false;
+      this.bear.hopT = 1 - easeOutCubic(u);
+      if (this.bear.hopT <= 0) this.bear.riding = false;
       this.leak(dt, 0.9);
     } else {
       this.spinHoleUp(dt);
-      this.rabbit.riding = false;
-      this.rabbit.hopT = 0;
-      this.rabbit.mood = 'sad';
+      this.bear.riding = false;
+      this.bear.hopT = 0;
+      this.bear.mood = 'sad';
       this.leak(dt, 0.9);
       if (this.st > T + 2.2) this.go(S.TOUCH);
     }
@@ -468,7 +468,7 @@ export class Game {
   upTouch(dt) {
     const w = this.wheel;
     const p = this.pointer;
-    this.rabbit.mood = this.touchCount > 0 ? 'worried' : 'sad';
+    this.bear.mood = this.touchCount > 0 ? 'worried' : 'sad';
     this.leak(dt, this.touchCount > 0 ? 1.5 : 0.9);
 
     const ax = this.axle;
@@ -510,7 +510,7 @@ export class Game {
     const p = this.pointer;
     const u = this.ui();
     const w = this.wheel;
-    this.rabbit.mood = 'worried';
+    this.bear.mood = 'worried';
     this.leak(dt, 1.2);
     w.hole.reveal = approach(w.hole.reveal, 1, 6, dt);
 
@@ -581,8 +581,8 @@ export class Game {
     const h = this.holePos();
     this.fx.sparkle(h.x, h.y, 16, '#FFF0B0', 'world', 26);
     this.fx.heart(this.w2s(h.x, h.y).x, this.w2s(h.x, h.y).y, 3, 'screen');
-    this.rabbit.mood = 'happy';
-    this.rabbit.cheer = 1.2;
+    this.bear.mood = 'happy';
+    this.bear.cheer = 1.2;
     // パッチで塞がると、空気漏れが止まる
     this.leakTimer = 1e9;
     this.pendingPump = 1.1;
@@ -592,7 +592,7 @@ export class Game {
     const p = this.pointer;
     const u = this.ui();
     const w = this.wheel;
-    this.rabbit.mood = this.pump.strokes >= NEED_STROKES ? 'happy' : 'idle';
+    this.bear.mood = this.pump.strokes >= NEED_STROKES ? 'happy' : 'idle';
 
     const stroke = u.pumpH * 0.42;
 
@@ -646,8 +646,8 @@ export class Game {
       this.audio.full();
       const ax = this.axle;
       this.fx.sparkle(ax.x, ax.y, 26, '#FFF0B0', 'world', w.r);
-      this.rabbit.cheer = 1.4;
-      this.rabbit.mood = 'happy';
+      this.bear.cheer = 1.4;
+      this.bear.mood = 'happy';
     } else if (n < NEED_STROKES) {
       const ax = this.axle;
       this.fx.sparkle(ax.x, ax.y, 8, '#CFEFFF', 'world', w.r * 0.8);
@@ -658,7 +658,7 @@ export class Game {
     const p = this.pointer;
     const w = this.wheel;
     const ax = this.axle;
-    this.rabbit.mood = 'happy';
+    this.bear.mood = 'happy';
 
     if (p.down && !this.uiConsumed) {
       const wp = this.s2w(p.x, p.y);
@@ -715,11 +715,11 @@ export class Game {
     const w = this.wheel;
     w.rot += w.omega * dt;
     w.omega *= Math.exp(-2.2 * dt);
-    this.rabbit.mood = 'happy';
-    // うさぎが乗る
+    this.bear.mood = 'happy';
+    // こぐまが乗る
     const u = clamp((this.st - 0.35) / 0.65, 0, 1);
-    this.rabbit.riding = true;
-    this.rabbit.hopT = easeOutCubic(u);
+    this.bear.riding = true;
+    this.bear.hopT = easeOutCubic(u);
     const p = this.pointer;
     if (this.st > 0.85 && ((p.pressed && !this.uiConsumed) || this.st > 6.5)) {
       this.startDrive();
@@ -776,7 +776,7 @@ export class Game {
     this.trike.x += d;
     w.rot += d / w.r;
     this.rearRot += d / A.TRIKE.rearR;
-    this.rabbit.mood = this.rabbit.cheer > 0 ? 'cheer' : 'happy';
+    this.bear.mood = this.bear.cheer > 0 ? 'cheer' : 'happy';
 
     this.trackRoughness(dt);
 
@@ -789,7 +789,7 @@ export class Game {
       this.fx.heart(p.x, p.y, 3, 'screen');
       this.fx.sparkle(p.x, p.y, 6, '#FFE9A3', 'screen', 14);
       this.audio.bell();
-      this.rabbit.cheer = 0.9;
+      this.bear.cheer = 0.9;
     }
 
     if (this.driveT >= DRIVE_DURATION) {
@@ -800,8 +800,8 @@ export class Game {
   }
 
   upFinale(dt) {
-    this.rabbit.mood = 'cheer';
-    this.rabbit.cheer = 1;
+    this.bear.mood = 'cheer';
+    this.bear.cheer = 1;
     this.medal = Math.min(1, this.medal + dt * 1.1);
     this.confettiTimer -= dt;
     if (this.confettiTimer <= 0 && this.st < 6) {
@@ -885,12 +885,19 @@ export class Game {
       A.drawGoalArch(ctx, this.goalX + 210, this.t);
       A.drawFlag(ctx, this.goalX - 190, this.t);
       A.drawFlag(ctx, this.goalX + 430, this.t + 1);
-      // 出むかえの友だち
+      // 出むかえの友だち（毛色ちがいのこぐま）
       for (let i = 0; i < 2; i++) {
+        const s = 0.62;
         ctx.save();
-        ctx.translate(this.goalX + 196 + i * 130, -66 - Math.abs(Math.sin(this.t * 3 + i)) * 12);
-        ctx.scale(0.62, 0.62);
-        A.drawRabbit(ctx, { mood: 'cheer', t: this.t + i * 1.3, blink: 0 });
+        ctx.translate(
+          this.goalX + 196 + i * 130,
+          -A.BEAR_STAND_Y * s - Math.abs(Math.sin(this.t * 3 + i)) * 14,
+        );
+        ctx.scale(s, s);
+        A.drawBear(ctx, {
+          mood: 'cheer', t: this.t + i * 1.3, blink: 0,
+          palette: A.BEAR_COATS[i + 1],
+        });
         ctx.restore();
       }
     }
@@ -953,47 +960,55 @@ export class Game {
     ctx.translate(-rx, -ry);
     A.drawCranks(ctx, w.rot, A.TRIKE.frontHub[1]);
     A.drawTrikeMid(ctx, this.rearRot);
-    this.drawRabbitOnTrike(ctx);
+    this.drawBearOnTrike(ctx);
     A.drawTrikeFront(ctx, this.t);
     ctx.restore();
 
-    // 立っているうさぎ
-    if (this.rabbit.hopT < 1) this.drawRabbitStanding(ctx, 1 - this.rabbit.hopT);
+    // 降りて立っているとき
+    if (this.bear.hopT < 1) this.drawBearStanding(ctx, 1 - this.bear.hopT);
   }
 
-  drawRabbitOnTrike(ctx) {
-    const r = this.rabbit;
-    if (r.hopT <= 0.02) return;
-    const seat = [A.TRIKE.seat[0] + 2, A.TRIKE.seat[1] - 46];
+  /** サドルに座るこぐま。足はペダルの上に「足の裏で」乗る */
+  drawBearOnTrike(ctx) {
+    const b = this.bear;
+    if (b.hopT <= 0.02) return;
+    const origin = [A.TRIKE.seat[0] - 2, A.TRIKE.seat[1] - 58];
     const pedals = A.pedalPos(this.wheel.rot);
-    ctx.save();
-    ctx.globalAlpha = 1;
-    const hop = (1 - r.hopT) * 60;
-    ctx.translate(seat[0] - (1 - r.hopT) * 150, seat[1] - hop * 1.2);
-    ctx.scale(RABBIT_SCALE, RABBIT_SCALE);
+    // ペダル位置 → 足首の位置（足の裏がペダルの上面に乗るように持ち上げる）
+    const ankle = (p) => [p[0] - 7, p[1] - 20];
     const toLocal = (p) => [
-      (p[0] - seat[0]) / RABBIT_SCALE,
-      (p[1] - seat[1]) / RABBIT_SCALE,
+      (p[0] - origin[0]) / BEAR_SCALE,
+      (p[1] - origin[1]) / BEAR_SCALE,
     ];
-    A.drawRabbit(ctx, {
-      mood: r.mood,
+    const lean = 0.05 + this.roughShown * 0.45 * Math.sin(this.t * 19);
+    ctx.save();
+    const hop = (1 - b.hopT) * 60;
+    ctx.translate(origin[0] - (1 - b.hopT) * 150, origin[1] - hop * 1.2);
+    ctx.scale(BEAR_SCALE, BEAR_SCALE);
+    A.drawBear(ctx, {
+      mood: b.mood,
       t: this.t,
-      blink: r.blink,
-      hands: toLocal([132, -161]),
-      feet: [toLocal(pedals[0]), toLocal(pedals[1])],
+      blink: b.blink,
+      hands: toLocal([130, -148]),
+      feet: [toLocal(ankle(pedals[0])), toLocal(ankle(pedals[1]))],
+      // 足首は水平を保ちつつ、こぐリズムで少しだけ返る
+      footAngle: -lean + Math.sin(this.wheel.rot) * 0.16,
       bounce: -this.roughShown * 70,
-      lean: 0.04 + this.roughShown * 0.5 * Math.sin(this.t * 19),
+      lean,
     });
     ctx.restore();
   }
 
-  drawRabbitStanding(ctx, a) {
-    const r = this.rabbit;
+  drawBearStanding(ctx, a) {
+    const b = this.bear;
     ctx.save();
     ctx.globalAlpha = a;
-    ctx.translate(this.trike.x + 243, -64 * RABBIT_SCALE - Math.abs(Math.sin(this.t * 2)) * 2);
-    ctx.scale(-RABBIT_SCALE, RABBIT_SCALE); // 左を向く
-    A.drawRabbit(ctx, { mood: r.mood, t: this.t, blink: r.blink });
+    ctx.translate(
+      this.trike.x + 244,
+      -A.BEAR_STAND_Y * BEAR_SCALE - Math.abs(Math.sin(this.t * 2)) * 2,
+    );
+    ctx.scale(-BEAR_SCALE, BEAR_SCALE); // 左（三輪車のほう）を向く
+    A.drawBear(ctx, { mood: b.mood, t: this.t, blink: b.blink });
     ctx.restore();
     ctx.globalAlpha = 1;
   }

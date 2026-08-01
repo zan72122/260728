@@ -512,16 +512,18 @@ export function star5(ctx, s) {
 
 /* --------------------------------------------------------------- 三輪車 */
 
+// サドルの高さと前輪の大きさは、乗り手の脚の長さから逆算している。
+// 「腰→ペダル最遠点 ≒ 脚の長さ」になるので、こいでいる間ずっと膝が自然に曲がる。
 export const TRIKE = {
-  frontHub: [95, -56],
-  frontR: 56,
+  frontHub: [92, -48],
+  frontR: 48,
   rearHub: [-64, -26],
   rearR: 26,
-  seat: [46, -112],
-  head: [100, -118],
-  bar: [104, -158],
-  wheelbase: 159,
-  crank: 18,
+  seat: [44, -100],
+  head: [96, -108],
+  bar: [100, -146],
+  wheelbase: 156,
+  crank: 15,
 };
 
 /** 奥側：後輪（奥）・車軸・フレーム・サドル */
@@ -608,9 +610,10 @@ export function drawTrikeFront(ctx, t) {
   }
   ctx.restore();
 
-  // かご + にんじん
+  // かご + にんじん（ハンドルから吊るす）
+  capsule(ctx, bx + 26, by - 2, 140, -124, 5, C.metalDark);
   ctx.save();
-  ctx.translate(121, -139);
+  ctx.translate(144, -108);
   ctx.fillStyle = C.wood;
   ctx.beginPath();
   ctx.moveTo(-21, -14);
@@ -702,15 +705,131 @@ export function drawCranks(ctx, rot, axleY) {
   }
 }
 
-/* --------------------------------------------------------------- うさぎ */
+/* --------------------------------------------------------------- こぐま */
+// くまは蹠行（せきこう）性――かかとを地面につけて歩く動物。
+// だから「大きな太もも → 前へ曲がる膝 → 平たい足の裏」をそのまま描いてよい。
+// ウサギ・ネコ・イヌのように踵が後ろへ折れないので、ペダルをこぐ姿に無理が出ない。
+// 手足は棒2本ではなく、太さの変わる塊（付け根が太く先が細い）で描く。
 
-function earShape(ctx, len, wid) {
+export const BEAR = {
+  fur: '#E0A765',
+  furShade: '#C68A4A',
+  furLight: '#F3C892',
+  cream: '#F9E6C6',
+  inner: '#EFA79C',
+  line: 'rgba(120,74,38,0.5)',
+  nose: '#4A3226',
+};
+
+/** 仲間のくま用の毛色ちがい */
+export const BEAR_COATS = [
+  BEAR,
+  { ...BEAR, fur: '#F1D6AC', furShade: '#DAB98A', furLight: '#FDEED3', cream: '#FFF8EA' },
+  { ...BEAR, fur: '#B98457', furShade: '#9C6B41', furLight: '#D6A379', cream: '#F2DCBC' },
+];
+
+const THIGH = 41;   // 太もも
+const SHIN = 38;    // すね
+const UPPER = 28;   // 上腕
+const FORE = 26;    // 前腕
+export const BEAR_HIP = [4, 20];
+export const BEAR_STAND_Y = 102;  // 体の中心から地面までの距離（立ち姿）
+
+/** 太さの変わる胴（2円の外接接線で作る） */
+function taper(ctx, x1, y1, r1, x2, y2, r2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const d = Math.hypot(dx, dy) || 1e-4;
+  const a = Math.atan2(dy, dx);
+  const t = Math.acos(clamp((r1 - r2) / d, -1, 1));
   ctx.beginPath();
-  ctx.moveTo(-wid / 2, 0);
-  ctx.quadraticCurveTo(-wid * 0.62, -len * 0.7, 0, -len);
-  ctx.quadraticCurveTo(wid * 0.62, -len * 0.7, wid / 2, 0);
-  ctx.quadraticCurveTo(0, wid * 0.42, -wid / 2, 0);
+  ctx.arc(x1, y1, r1, a + t, a - t + TAU);
+  ctx.arc(x2, y2, r2, a - t, a + t);
   ctx.closePath();
+}
+
+function limbPart(ctx, x1, y1, r1, x2, y2, r2, fill, line) {
+  taper(ctx, x1, y1, r1, x2, y2, r2);
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = line;
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  ctx.fill();
+}
+
+/** 足の裏（かかとを後ろに、つま先を前に）。原点は足首 */
+function bearPaw(ctx, x, y, ang, P, fill, sole) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(ang);
+  ctx.beginPath();
+  ctx.moveTo(-12, -7);
+  ctx.quadraticCurveTo(-17, 3, -12, 12);
+  ctx.quadraticCurveTo(-8, 16, 2, 16);
+  ctx.lineTo(16, 16);
+  ctx.quadraticCurveTo(26, 15, 25, 7);
+  ctx.quadraticCurveTo(24, -1, 13, -4);
+  ctx.quadraticCurveTo(2, -8, -12, -7);
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = P.line;
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  ctx.fill();
+  // 足の裏（肉球側）
+  ctx.fillStyle = sole || P.cream;
+  ctx.beginPath();
+  ctx.ellipse(6, 11, 15, 4.6, 0, 0, TAU);
+  ctx.fill();
+  // つま先
+  ctx.strokeStyle = 'rgba(120,74,38,0.35)';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(12 + i * 5, 16 - i * 1.5);
+    ctx.lineTo(13 + i * 5, 9 - i * 2.4);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** 前足（手）。原点は手首 */
+function bearHand(ctx, x, y, P, fill) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = P.line;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 11, 9.5, 0, 0, TAU);
+  ctx.stroke();
+  ctx.fill();
+  ctx.fillStyle = P.cream;
+  ctx.beginPath();
+  ctx.ellipse(2, 3, 6, 3.4, 0, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+}
+
+/**
+ * 後ろあし。膝は「前・上」へ折れる（自転車をこぐ人の膝と同じ向き）。
+ * ik2 の bendSign を -1 にしているのがその指定。
+ */
+function bearLeg(ctx, hx, hy, tx, ty, footAng, P, fill, sole) {
+  const { jx, jy } = ik2(hx, hy, tx, ty, THIGH, SHIN, -1);
+  bearPaw(ctx, tx, ty, footAng, P, fill, sole);
+  limbPart(ctx, hx, hy, 17.5, jx, jy, 10.5, fill, P.line);   // 太もも（塊）
+  limbPart(ctx, jx, jy, 10, tx, ty, 8, fill, P.line);        // すね
+}
+
+/** 前あし。ひじは下へ折れる */
+function bearArm(ctx, sx, sy, tx, ty, P, fill) {
+  const { jx, jy } = ik2(sx, sy, tx, ty, UPPER, FORE, 1);
+  limbPart(ctx, sx, sy, 13.5, jx, jy, 9.5, fill, P.line);
+  limbPart(ctx, jx, jy, 9, tx, ty, 8, fill, P.line);
+  bearHand(ctx, tx, ty, P, fill);
 }
 
 function eyeHappy(ctx, x, y, s) {
@@ -731,218 +850,176 @@ function eyeSad(ctx, x, y, s) {
   ctx.stroke();
 }
 
-function eyeOpen(ctx, x, y, s, blink, look = 0) {
-  ctx.fillStyle = C.dark;
+function eyeOpen(ctx, x, y, s, blink) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(1, Math.max(0.08, 1 - blink));
+  ctx.fillStyle = C.dark;
   ctx.beginPath();
-  ctx.ellipse(0, 0, s * 0.62, s * 0.78, 0, 0, TAU);
+  ctx.ellipse(0, 0, s * 0.6, s * 0.74, 0, 0, TAU);
   ctx.fill();
   ctx.fillStyle = '#FFFFFF';
   ctx.beginPath();
-  ctx.arc(s * 0.22 + look * s * 0.15, -s * 0.28, s * 0.24, 0, TAU);
+  ctx.arc(s * 0.24, -s * 0.28, s * 0.24, 0, TAU);
   ctx.fill();
   ctx.beginPath();
-  ctx.arc(-s * 0.2, s * 0.26, s * 0.12, 0, TAU);
+  ctx.arc(-s * 0.2, s * 0.24, s * 0.11, 0, TAU);
   ctx.fill();
   ctx.restore();
 }
 
 /**
- * うさぎ。origin は胴体の中心。
- * o = { mood, t, blink, hands:[x,y]|null, feet:[[x,y],[x,y]]|null, lean, bounce }
+ * こぐま。origin は胴体の中心。右を向いている。
+ * o = { mood, t, blink, hands:[x,y]|null, feet:[[x,y],[x,y]]|null,
+ *       footAngle, lean, bounce, palette }
  */
-export function drawRabbit(ctx, o) {
+export function drawBear(ctx, o) {
+  const P = o.palette || BEAR;
   const mood = o.mood || 'idle';
   const t = o.t || 0;
-  const lean = o.lean || 0;
-  const breathe = Math.sin(t * 2.2) * 0.014;
+  const breathe = Math.sin(t * 2.2) * 0.013;
+  const fa = o.footAngle || 0;
 
   ctx.save();
-  ctx.rotate(lean);
+  ctx.rotate(o.lean || 0);
+  ctx.lineCap = 'round';
 
-  // しっぽ
-  ctx.fillStyle = C.furShade;
-  ctx.beginPath();
-  ctx.arc(-40, 12, 15, 0, TAU);
-  ctx.fill();
-
-  // 足（うしろ側）
-  const feet = o.feet;
-  const hipY = 22;
-  if (feet) {
-    drawLimb(ctx, -6, hipY, feet[1][0], feet[1][1], 45, 45, 15, C.furShade, 1);
-  } else {
-    drawLimb(ctx, -8, hipY, -22, 58, 23, 23, 15, C.furShade, 1);
-  }
-
-  // 胴体
-  const bg = ctx.createLinearGradient(-30, -46, 34, 48);
-  bg.addColorStop(0, '#FFFFFF');
-  bg.addColorStop(0.6, C.fur);
-  bg.addColorStop(1, C.furShade);
-  ctx.fillStyle = bg;
-  ctx.save();
-  ctx.scale(1 + breathe, 1 - breathe);
-  ctx.beginPath();
-  ctx.ellipse(0, 0, 37, 43, -0.06, 0, TAU);
-  ctx.strokeStyle = FUR_LINE;
+  // しっぽ（くまは小さな丸）
+  ctx.fillStyle = P.furShade;
+  ctx.strokeStyle = P.line;
   ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(-37, 8, 11, 0, TAU);
   ctx.stroke();
   ctx.fill();
-  ctx.restore();
-  // おなかの白
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.beginPath();
-  ctx.ellipse(10, 10, 24, 30, -0.1, 0, TAU);
-  ctx.fill();
 
-  // 足（手前）
-  if (feet) {
-    drawLimb(ctx, 2, hipY, feet[0][0], feet[0][1], 45, 45, 16, C.fur, 1);
-  } else {
-    drawLimb(ctx, 6, hipY, 14, 58, 23, 23, 16, C.fur, 1);
-  }
+  // 奥のあし・うで
+  const feet = o.feet;
+  if (feet) bearLeg(ctx, BEAR_HIP[0] - 9, BEAR_HIP[1], feet[1][0], feet[1][1], fa, P, P.furShade, shade(P.cream, -0.14));
+  else bearLeg(ctx, -9, BEAR_HIP[1], -15, 84, 0, P, P.furShade, shade(P.cream, -0.14));
+  if (o.hands) bearArm(ctx, -12, -14, o.hands[0] - 30, o.hands[1] + 8, P, P.furShade);
+  else if (mood === 'cheer') bearArm(ctx, -14, -14, -40, -56 + Math.cos(t * 8) * 6, P, P.furShade);
+  else bearArm(ctx, -14, -14, -30, 20, P, P.furShade);
 
-  // 腕
-  const hands = o.hands;
-  if (hands) {
-    drawLimb(ctx, 20, -18, hands[0], hands[1], 34, 34, 13, C.fur, -1);
-  } else if (mood === 'cheer') {
-    drawLimb(ctx, 20, -18, 46, -70 + Math.sin(t * 8) * 6, 32, 32, 13, C.fur, -1);
-    drawLimb(ctx, -16, -18, -44, -66 + Math.cos(t * 8) * 6, 32, 32, 13, C.furShade, 1);
-  } else {
-    drawLimb(ctx, 20, -16, 27, 22, 20, 20, 13, C.fur, -1);
-    drawLimb(ctx, -18, -16, -25, 22, 20, 20, 13, C.furShade, 1);
-  }
-
-  // 頭
+  // 胴
   ctx.save();
-  const headBob = Math.sin(t * 2.2 + 0.6) * 1.6 + (o.bounce || 0);
-  ctx.translate(8, -62 + headBob);
-  const droop = mood === 'sad' ? 1 : 0;
-  const wig = Math.sin(t * 3.1) * 0.05;
+  ctx.scale(1 + breathe, 1 - breathe);
+  const bg = ctx.createLinearGradient(-30, -44, 32, 44);
+  bg.addColorStop(0, P.furLight);
+  bg.addColorStop(0.55, P.fur);
+  bg.addColorStop(1, P.furShade);
+  ctx.fillStyle = bg;
+  ctx.strokeStyle = P.line;
+  ctx.lineWidth = 3.2;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 38, 42, -0.05, 0, TAU);
+  ctx.stroke();
+  ctx.fill();
+  // おなかの模様
+  ctx.fillStyle = P.cream;
+  ctx.beginPath();
+  ctx.ellipse(9, 9, 21, 26, -0.08, 0, TAU);
+  ctx.fill();
+  ctx.restore();
 
-  // 耳
-  for (const [sgn, base] of [[-1, -10], [1, 12]]) {
-    ctx.save();
-    ctx.translate(base, -24);
-    const ang = sgn * (0.18 + droop * 0.9) + wig * sgn + (mood === 'cheer' ? -sgn * 0.15 : 0);
-    ctx.rotate(ang);
-    ctx.fillStyle = sgn > 0 ? C.fur : C.furShade;
-    ctx.strokeStyle = FUR_LINE;
+  // 手前のあし・うで
+  if (feet) bearLeg(ctx, BEAR_HIP[0], BEAR_HIP[1], feet[0][0], feet[0][1], fa, P, P.fur);
+  else bearLeg(ctx, BEAR_HIP[0], BEAR_HIP[1], 10, 86, 0, P, P.fur);
+  if (o.hands) bearArm(ctx, 20, -14, o.hands[0], o.hands[1], P, P.fur);
+  else if (mood === 'cheer') bearArm(ctx, 20, -14, 44, -60 + Math.sin(t * 8) * 6, P, P.fur);
+  else bearArm(ctx, 20, -14, 32, 20, P, P.fur);
+
+  /* ---- 頭 ---- */
+  ctx.save();
+  ctx.translate(8, -56 + Math.sin(t * 2.2 + 0.6) * 1.5 + (o.bounce || 0));
+
+  // 耳（頭のうしろ側から）
+  for (const [ex, ey, r] of [[-20, -22, 14], [15, -26, 15]]) {
+    ctx.fillStyle = ex < 0 ? P.furShade : P.fur;
+    ctx.strokeStyle = P.line;
     ctx.lineWidth = 3;
-    earShape(ctx, 66, 24);
+    ctx.beginPath();
+    ctx.arc(ex, ey, r, 0, TAU);
     ctx.stroke();
     ctx.fill();
-    ctx.fillStyle = C.pink;
-    ctx.save();
-    ctx.translate(0, -4);
-    ctx.scale(0.52, 0.8);
-    earShape(ctx, 66, 24);
+    ctx.fillStyle = P.inner;
+    ctx.beginPath();
+    ctx.arc(ex + (ex < 0 ? -1 : 1), ey + 1, r * 0.52, 0, TAU);
     ctx.fill();
-    ctx.restore();
-    ctx.restore();
   }
 
   // 顔
-  const hg = ctx.createRadialGradient(-8, -12, 6, 0, 0, 40);
-  hg.addColorStop(0, '#FFFFFF');
-  hg.addColorStop(1, C.fur);
+  const hg = ctx.createRadialGradient(-8, -12, 5, 2, 2, 38);
+  hg.addColorStop(0, P.furLight);
+  hg.addColorStop(1, P.fur);
   ctx.fillStyle = hg;
+  ctx.strokeStyle = P.line;
+  ctx.lineWidth = 3.2;
   ctx.beginPath();
   ctx.ellipse(0, 0, 33, 30, 0, 0, TAU);
-  ctx.strokeStyle = FUR_LINE;
-  ctx.lineWidth = 3;
   ctx.stroke();
   ctx.fill();
 
-  const eyeS = 9;
+  // マズル
+  ctx.fillStyle = P.cream;
+  ctx.beginPath();
+  ctx.ellipse(15, 10, 19, 14, -0.06, 0, TAU);
+  ctx.fill();
+
+  // 目
+  const es = 8.5;
   if (mood === 'happy' || mood === 'cheer') {
-    eyeHappy(ctx, -10, -4, eyeS);
-    eyeHappy(ctx, 16, -4, eyeS);
+    eyeHappy(ctx, -8, -6, es);
+    eyeHappy(ctx, 17, -8, es);
   } else if (mood === 'sad') {
-    eyeSad(ctx, -10, -2, eyeS);
-    eyeSad(ctx, 16, -2, eyeS);
-    // なみだ
+    eyeSad(ctx, -8, -4, es);
+    eyeSad(ctx, 17, -6, es);
     ctx.fillStyle = 'rgba(140,200,240,0.85)';
     ctx.beginPath();
-    ctx.ellipse(20, 8 + (Math.sin(t * 2) * 0.5 + 0.5) * 6, 3.4, 5, 0, 0, TAU);
+    ctx.ellipse(21, 4 + (Math.sin(t * 2) * 0.5 + 0.5) * 6, 3.2, 4.8, 0, 0, TAU);
     ctx.fill();
   } else {
-    eyeOpen(ctx, -10, -3, eyeS, o.blink || 0, 1);
-    eyeOpen(ctx, 16, -3, eyeS, o.blink || 0, 1);
+    eyeOpen(ctx, -8, -5, es, o.blink || 0);
+    eyeOpen(ctx, 17, -7, es, o.blink || 0);
   }
 
   // ほっぺ
-  ctx.fillStyle = 'rgba(255,150,170,0.4)';
+  ctx.fillStyle = 'rgba(240,140,120,0.32)';
   ctx.beginPath();
-  ctx.ellipse(-19, 8, 8, 5.5, 0, 0, TAU);
-  ctx.ellipse(25, 8, 8, 5.5, 0, 0, TAU);
+  ctx.ellipse(-18, 6, 8, 5.4, 0, 0, TAU);
+  ctx.ellipse(28, 3, 7, 4.8, 0, 0, TAU);
   ctx.fill();
 
-  // 鼻・口
-  ctx.fillStyle = '#F5849C';
+  // 鼻と口
+  ctx.fillStyle = P.nose;
   ctx.beginPath();
-  ctx.moveTo(3, 4);
-  ctx.lineTo(11, 4);
-  ctx.lineTo(7, 9.5);
-  ctx.closePath();
+  ctx.ellipse(19, 3, 7.5, 5.6, 0, 0, TAU);
   ctx.fill();
-  ctx.strokeStyle = C.dark;
-  ctx.lineWidth = 2;
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+  ctx.beginPath();
+  ctx.ellipse(17, 1.4, 2.6, 1.7, -0.3, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = P.nose;
+  ctx.lineWidth = 2.2;
   ctx.lineCap = 'round';
   ctx.beginPath();
+  ctx.moveTo(19, 8.6);
+  ctx.lineTo(19, 12);
   if (mood === 'sad') {
-    ctx.moveTo(1, 18);
-    ctx.quadraticCurveTo(7, 12, 13, 18);
+    ctx.moveTo(12, 19);
+    ctx.quadraticCurveTo(19, 13, 26, 19);
   } else if (mood === 'cheer') {
-    ctx.moveTo(0, 14);
-    ctx.quadraticCurveTo(7, 26, 14, 14);
-    ctx.quadraticCurveTo(7, 17, 0, 14);
+    ctx.moveTo(11, 13);
+    ctx.quadraticCurveTo(19, 25, 27, 13);
+    ctx.quadraticCurveTo(19, 16, 11, 13);
   } else {
-    ctx.moveTo(7, 9.5);
-    ctx.lineTo(7, 13);
-    ctx.moveTo(0, 13);
-    ctx.quadraticCurveTo(7, 20, 14, 13);
+    ctx.moveTo(12, 12);
+    ctx.quadraticCurveTo(19, 19, 26, 12);
   }
   ctx.stroke();
 
-  // ひげ
-  ctx.strokeStyle = 'rgba(150,120,105,0.6)';
-  ctx.lineWidth = 1.6;
-  for (let i = -1; i <= 1; i++) {
-    ctx.beginPath();
-    ctx.moveTo(-14, 6 + i * 3);
-    ctx.quadraticCurveTo(-24, 4 + i * 5, -32, 3 + i * 8);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(22, 6 + i * 3);
-    ctx.quadraticCurveTo(32, 4 + i * 5, 40, 3 + i * 8);
-    ctx.stroke();
-  }
   ctx.restore();
   ctx.restore();
-}
-
-const FUR_LINE = 'rgba(196,162,138,0.55)';
-
-function drawLimb(ctx, ax, ay, tx, ty, l1, l2, w, color, bend) {
-  const { jx, jy, ex, ey } = ik2(ax, ay, tx, ty, l1, l2, bend);
-  // からだと同じ白なので、輪郭がないと手足が消えてしまう
-  capsule(ctx, ax, ay, jx, jy, w + 4, FUR_LINE);
-  capsule(ctx, jx, jy, ex, ey, w * 0.86 + 4, FUR_LINE);
-  ctx.fillStyle = FUR_LINE;
-  ctx.beginPath();
-  ctx.arc(ex, ey, w * 0.62 + 2, 0, TAU);
-  ctx.fill();
-  capsule(ctx, ax, ay, jx, jy, w, color);
-  capsule(ctx, jx, jy, ex, ey, w * 0.86, color);
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(ex, ey, w * 0.62, 0, TAU);
-  ctx.fill();
 }
 
 /* ------------------------------------------------------------ 空気入れ */
