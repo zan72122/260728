@@ -158,6 +158,11 @@ export function createFlowingWaterMaterial(opts = {}) {
   // SPEC 4.6 は transmission の使用を求めるが、見た目の正しさ (=水が
   // 確実に見えること) を優先し、ここでは使わない方針に切り替える
   // (transparent + opacity + フレネル反射 + 泡で十分に水らしく見える)。
+  // 最終アートディレクション修正: envMapIntensity は 1.2 から 0.55 に。
+  // Sky.js の envMap 自体の明るさを是正した後、実機で走査した結果
+  // 1.2 のままだとフレネル反射 (下の aqSky ミックス) が水面のターコイズ/
+  // ディープカラーをほぼ空色一色に薄めてしまい、「水に見えない」症状が
+  // 残っていた。
   const material = new THREE.MeshPhysicalMaterial({
     color: shallowColor,
     roughness: 0.08,
@@ -167,7 +172,7 @@ export function createFlowingWaterMaterial(opts = {}) {
     clearcoatRoughness: 0.06,
     transparent: true,
     opacity: 0.86,
-    envMapIntensity: 1.2,
+    envMapIntensity: 0.55,
     side: THREE.DoubleSide,
   });
 
@@ -424,6 +429,8 @@ export function createPoolWaterMaterial(opts = {}) {
   // と同じ (実機確認済みの確定原因: 水の色の大半が「背後を写した屈折
   // サンプル」に置き換わり、finish.png で着水プールが消え、下のプール壁
   // タイルが傾いた壁のように透けて見えていた)。
+  // 最終アートディレクション修正: 樋の流水と同じ理由で 1.35 → 0.65
+  // (render/Sky.js の SKY_BRIGHTNESS コメント参照)。
   const material = new THREE.MeshPhysicalMaterial({
     color: deepColor,
     roughness: 0.045,
@@ -433,7 +440,7 @@ export function createPoolWaterMaterial(opts = {}) {
     clearcoatRoughness: 0.035,
     transparent: true,
     opacity: 0.93,
-    envMapIntensity: 1.35,
+    envMapIntensity: 0.65,
     side: THREE.DoubleSide,
   });
 

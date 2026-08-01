@@ -53,8 +53,23 @@ const SLOWMO_DURATION = 0.6; // real seconds
 const SLOWMO_SCALE = 0.25; // physics/animation timeScale during slow-mo
 
 const TITLE_FLYTHROUGH_SPEED = 14; // virtual dolly speed, m/s along track s
-const TITLE_CAM_HEIGHT = 3.4; // meters above the track surface (along normal)
-const TITLE_CAM_SIDE = 5.5; // meters offset sideways (along binormal)
+// 最終アートディレクション修正 (確定原因、実機で再現・切り分け済み):
+// 元々は「溝の中心線 (frame.position) から normal 方向に 3.4m、binormal
+// 方向に 5.5m」という "ワールド固定メートル" のオフセットだった。樋の実効
+// 半径 (frame.radius * widthScale) はセクションごとに 4.9m (トンネル) 〜
+// 6.4m (ボウル) まで変動するため、この固定オフセットは区間によって壁の
+// 「中」に着地し (ローンチ区間だけでも壁の外縁は binormal 方向に約5.0m
+// までしか届かない)、タイトル画面が壁の極端クローズアップ (ピンク/緑の
+// 斜め帯の正体) になっていた。
+// さらに、壁の外側に逃がす形に直しても今度はチューブ外殻 (Shell、無地の
+// グレー) を見せてしまい、SPEC が要求する「区間ごとの色 (青→ターコイズ→
+// 濃紺→白)」がタイトル画面に一切映らなくなる (=チェックリスト未達)。
+// ChaseCamera.js と同じ発想 — track.surfaceAt(s, lateral, lift) で
+// 「チューブ内部の安全な浮遊点」を取る — に統一し、樋の内側から見下ろす
+// アングルにする。これなら (a) 壁に埋まらない (surfaceAt が保証)、
+// (b) 樋・水の色が画面に映る、の両方を満たす。
+const TITLE_CAM_LATERAL = 0.4; // -1..1 across the U-section, off-centre for a dynamic angle
+const TITLE_CAM_LIFT = 3.0; // meters above the chute floor, inside the open tube volume
 const TITLE_LOOKAHEAD = 7; // meters ahead the camera looks at
 const TITLE_FOV = 62;
 const RIDE_BASE_FOV = 75;
@@ -209,9 +224,15 @@ async function boot() {
   await nextFrame();
 
   bootStage = 'track meshes';
+  // 最終アートディレクション修正: envMapIntensity 1.1/0.85 は Sky.js の
+  // envMap が生 HDR のまま焼かれていた頃の値。SKY_BRIGHTNESS で発生源を
+  // 是正した後も、実機で envMapIntensity を 0.2〜1.1 の範囲で走査した結果、
+  // 1.1 のままだとクリアコートの空反射が SECTION_COLOR の区間別カラー
+  // (青/ターコイズ/濃紺/白) を薄めてしまい、依然として色が判別しづらかった。
+  // 0.5/0.4 まで下げるとカラーがはっきり見える一方、白飛びも起きない。
   const chuteMesh = new THREE.Mesh(
     track.buildChuteGeometry(),
-    applyEnvMap(createChuteMaterial(track), skyResult.envMap, 1.1)
+    applyEnvMap(createChuteMaterial(track), skyResult.envMap, 0.5)
   );
   chuteMesh.name = 'chute';
   chuteMesh.castShadow = true;
@@ -220,7 +241,7 @@ async function boot() {
 
   const shellMesh = new THREE.Mesh(
     track.buildShellGeometry(),
-    applyEnvMap(createShellMaterial(), skyResult.envMap, 0.85)
+    applyEnvMap(createShellMaterial(), skyResult.envMap, 0.4)
   );
   shellMesh.name = 'shell';
   shellMesh.receiveShadow = true;
@@ -323,11 +344,9 @@ async function boot() {
   let loop = null;
 
   function titleCameraTarget(s) {
-    const frame = track.frameAt(s);
-    return frame.position
-      .clone()
-      .addScaledVector(frame.normal, TITLE_CAM_HEIGHT)
-      .addScaledVector(frame.binormal, TITLE_CAM_SIDE);
+    // Always a point safely inside the tube's open volume, above the chute
+    // floor at this exact s — see the TITLE_CAM_LATERAL/LIFT comment above.
+    return track.surfaceAt(s, TITLE_CAM_LATERAL, TITLE_CAM_LIFT);
   }
 
   function enterTitlePhase() {

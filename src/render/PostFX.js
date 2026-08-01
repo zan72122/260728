@@ -160,13 +160,22 @@ export function createPostFX(renderer, scene, camera) {
   const initSize = renderer.getSize(new THREE.Vector2());
   const initPixelRatio = renderer.getPixelRatio();
 
-  // Bloom: deliberately restrained (SPEC 4.9 exact numbers) — only the
-  // brightest highlights (sun, water sparkle) should bloom at all.
+  // Bloom: deliberately restrained (SPEC 4.9: "控えめ", no exact numbers
+  // pinned) — only the brightest highlights (sun, water sparkle) should
+  // bloom at all.
+  // 最終アートディレクション修正: threshold 0.85→0.92, strength 0.35→0.26.
+  // Sky.js の露出是正 (SKY_BRIGHTNESS 参照) の前は、シーンの大部分が 0.85 を
+  // 超えて常時ブルームしていたため「ピンク/緑の斜めの筋」の主因の一つに
+  // なっていた (支柱の金属ハイライト等、小さく明るい点が過剰にブルーム→
+  // 後段の色収差で赤/青チャンネルが分離し縁がピンク/緑に色づいて見える)。
+  // 露出是正後の今も、細い支柱の鏡面ハイライトなど局所的に明るい点は残る
+  // ため、しきい値を上げてそれらを抑えつつ、太陽・水面のきらめきなど
+  // 本当に明るい部分の柔らかい輝きは維持する。
   const bloomPass = new UnrealBloomPass(
     new THREE.Vector2(Math.max(1, initSize.x * initPixelRatio), Math.max(1, initSize.y * initPixelRatio)),
-    0.35,
+    0.26,
     0.5,
-    0.85
+    0.92
   );
   composer.addPass(bloomPass);
 
@@ -256,8 +265,13 @@ export function createPostFX(renderer, scene, camera) {
 
     // Tunnel: strong vignette + dropped exposure, both time-smoothed so
     // entering/exiting reads as an eye-adaptation cue rather than a snap.
-    state.vignette = approach(state.vignette, tunnel ? 0.8 : 0.26, dt, tunnel ? 2.4 : 1.4);
-    state.exposure = approach(state.exposure, tunnel ? 0.5 : 1.0, dt, tunnel ? 2.2 : 1.3);
+    // 最終アートディレクション修正: Engine.js の toneMappingExposure を
+    // 0.22→0.95 に上げ直した (render/Sky.js 参照) ぶん、トンネル用の
+    // 相対的な暗さも 0.5 → 0.32 まで強めないと「ダークトンネル」に見えない
+    // (地明かり/envMap はトンネルの天井に遮られない簡易モデルのため、
+    // 何もしないと屋外とほぼ同じ明るさで抜けてしまう)。
+    state.vignette = approach(state.vignette, tunnel ? 0.82 : 0.26, dt, tunnel ? 2.4 : 1.4);
+    state.exposure = approach(state.exposure, tunnel ? 0.32 : 1.0, dt, tunnel ? 2.2 : 1.3);
 
     if (tunnel) {
       state.wasTunnel = true;
@@ -297,13 +311,6 @@ export function createPostFX(renderer, scene, camera) {
   // Sync every pass (resolution uniforms, internal render targets) once
   // up front so the very first frame is already correctly sized.
   setSize(initSize.x, initSize.y);
-
-  // TEMP DIAGNOSTIC HOOK (V3 camera/postfx pass) — read-only introspection
-  // for the Playwright screenshot harness in scratchpad/. No gameplay
-  // effect. Remove before final handoff.
-  if (typeof window !== 'undefined') {
-    window.__av3PostFX = { speedUniforms, state, lensDroplets };
-  }
 
   return { composer, setSize, update, render, dispose };
 }

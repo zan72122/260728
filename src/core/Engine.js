@@ -32,15 +32,16 @@ export function createEngine(container) {
 
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  // V1 修正: render/Sky.js の SKY_BRIGHTNESS=0.13 シェーダハックを撤去した
-  // ため (空自体と、そこから PMREM で焼く IBL envMap の両方を一律 87% カット
-  // していた乱暴な対処 — 空が暗い青灰色に沈み、全 PBR マテリアルの陰影が
-  // 死んで見えていた主因)、露出はここ一箇所だけで正しく作る。
-  // addons/objects/Sky.js は太陽強度に固定定数 EE=1000 を使い、ACES で
-  // 圧縮される前提の生 linear HDR を返す設計。実機スクリーンショットで
-  // 0.4 は依然として白飛び気味 (finish 想定シーンで高輝度パネルが飽和) と
-  // 確認したため 0.22 まで下げ、白飛び/沈みの両方が出ない値まで追い込んだ。
-  renderer.toneMappingExposure = 0.22;
+  // 最終アートディレクション修正 (確定原因、実機の隔離テストで切り分け済み
+  // — 詳細は render/Sky.js 冒頭のコメント):
+  // 白飛びの主因は toneMappingExposure ではなく、Sky.js の envMap (IBL) が
+  // 生 HDR のまま焼かれていたことだった (material.envMapIntensity を
+  // 0〜1 でスキャンして初めて特定できた — scene.environment だけを null に
+  // しても material.envMap が生きていれば無意味なので要注意)。
+  // SKY_BRIGHTNESS でその発生源を直接落ち着かせたので、露出はここで
+  // 常識的な範囲に戻す。0.22 のままだと今度は陰影が沈みすぎる
+  // (実機確認済み: sun=0 相当まで暗くなる)。
+  renderer.toneMappingExposure = 0.95;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 

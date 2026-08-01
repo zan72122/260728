@@ -536,7 +536,20 @@ function buildStartTower(track, sampler, envMap) {
 	const right = new THREE.Vector3().crossVectors(fwd, worldUp);
 	if (right.lengthSq() < 1e-6) right.set(1, 0, 0); else right.normalize();
 	const basis = new THREE.Matrix4().makeBasis(right, worldUp, fwd);
-	const origin = new THREE.Vector3(top.x, groundY, top.z);
+	// 最終アートディレクション修正 (確定原因、実機で raycaster により特定):
+	// このタワーは「原点 = チューブの s=0 の X/Z」を中心に、床(platform)を
+	// 前後 half*2+0.4 = 6.8m の正方形で組んでいた。s=0 のチューブ断面
+	// (半径 ~5.2m の開いた内部空間) も同じ X/Z を中心に存在するため、
+	// プラットフォームの前半分とキャノピー屋根がチューブ自身の内部体積に
+	// 幾何学的に食い込んでいた。カメラをどう直しても (ChaseCamera / タイトル
+	// フライスルー両方) ライド開始直後は必ずこの重なりの中/直近に入ってしまい
+	// 「樋が茶色い」と繰り返し誤診断されていた実体はこれ (raycaster で
+	// TowerCanopy — fiberglassTextures('#e8863a') という文字通りの
+	// 橙褐色 — が距離1.2m で最初にヒットすると確認済み)。プラットフォーム
+	// 全体を s=0 から手前 (-tangent) に SETBACK だけ下げ、チューブの
+	// 最初の数メートルとの重なりを減らす。
+	const SETBACK = 2.6; // m, behind s=0
+	const origin = new THREE.Vector3(top.x, groundY, top.z).addScaledVector(fwd, -SETBACK);
 
 	function place(geo) {
 		geo.applyMatrix4(basis);
@@ -602,9 +615,18 @@ function buildStartTower(track, sampler, envMap) {
 	group.add(metalMesh);
 
 	// 屋根（キャノピー）
+	// 最終アートディレクション修正: 元は height+1.7 (プラットフォーム床から
+	// 約1.7m) の高さで、チューブの s=0 断面の内部空間 (半径~5.2mの開口部、
+	// 床から壁の縁まで約3.8m) のちょうど真ん中の高さに来ていた —
+	// 上のコメント参照。プラットフォームの SETBACK だけでは水平方向にしか
+	// 逃げられない (この円錐の底面半径 half*1.7=5.44m は SETBACK=2.6m より
+	// 大きく、水平移動だけではチューブの開口部に届いてしまう) ので、
+	// 垂直方向にも十分な余裕を持たせる: 底面がチューブの内部空間
+	// (床から最大 ~3.8m + カメラの lift 分の余裕) より確実に高い位置に
+	// 来るよう、床から 8m 上げる。
 	const canopy = cloneTextureSet(fiberglassTextures('#e8863a'), 4, 2);
 	const canopyGeo = new THREE.ConeGeometry(half * 1.7, 1.7, 24, 1, true);
-	canopyGeo.translate(0, height + 1.7 / 2 + 0.85, 0);
+	canopyGeo.translate(0, height + 8.0, 0);
 	place(canopyGeo);
 	const canopyMat = new THREE.MeshStandardMaterial({
 		map: canopy.map, normalMap: canopy.normalMap, roughnessMap: canopy.roughnessMap,

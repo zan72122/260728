@@ -38,6 +38,20 @@ const DEFAULTS = {
   chaseLiftMax: 3.1,
   chaseAirExtraDist: 1.7, // pull back further when airborne so the arc reads
   chaseAirExtraLift: 0.55,
+  // 最終アートディレクション修正 (確定原因、実機で再現・切り分け済み):
+  // s=0 直後、rawTargetS<0 のとき下の _updateChase は「track.surfaceAt(0,...)
+  // から tangent(0) 方向に -rawTargetS ぶん外挿する」formulaだったが、
+  // -rawTargetS は chaseDistMin〜chaseDistMax+chaseAirExtraDist
+  // (最大で ~5.5m) まで届き得る。s=0 の「手前」はトラックジオメトリが
+  // 存在せず、実際には StartTower (発射台の木製プラットフォーム/屋根、
+  // Environment.js の buildStartTower) が物理的にその空間を占めている —
+  // 外挿がその建物の中/直下に着地し、開始直後の1秒弱ほぼ確実に木製の
+  // 巨大な面 (a.k.a. 誤って「樋が茶色い」と報告された症状) がカメラの
+  // 目の前を覆っていた。外挿量をライダーモデルの全長を確実に超える程度の
+  // 小さな固定値に留めることで、ライダーに埋まらず、かつ StartTower にも
+  // 到達しない安全域に収める。
+  startBackClearance: 1.4, // m — max backward extrapolation past s=0
+
   lateralPullFactor: 0.45, // was 0.7 — too much lateral pull rode the camera
   // up onto the (steeply banked, up to ~0.85rad) helix wall right along
   // with the rider, tipping the "up" reference and losing the opposite
@@ -142,11 +156,6 @@ export class ChaseCamera {
 
     this.camera.fov = this._fov;
     this.camera.updateProjectionMatrix();
-
-    // TEMP DIAGNOSTIC HOOK (V3 camera/postfx pass) — read-only introspection
-    // for the Playwright screenshot harness in scratchpad/. No gameplay
-    // effect. Remove before final handoff.
-    if (typeof window !== 'undefined') window.__av3ChaseCamera = this;
   }
 
   setMode(mode) {
@@ -199,18 +208,26 @@ export class ChaseCamera {
 
     const rawTargetS = st.s - dist;
     const targetLateral = THREE.MathUtils.clamp(st.lateral * tune.lateralPullFactor, -1, 1);
-    // Integration fix: right at ride start (s ~ 0), clamping targetS to 0
-    // put the "ideal" camera point at the same spot as the rider (who is
-    // also near s=0) — the camera ended up buried inside the rider model
-    // for the first couple of seconds. When there isn't `dist` metres of
-    // track behind the rider yet, extrapolate backward from s=0 along its
-    // tangent instead of clamping, so the camera still has clearance.
+    // Integration fix (final AD pass): right at ride start (s ~ 0), clamping
+    // targetS to 0 put the "ideal" camera point at the same spot as the
+    // rider (who is also near s=0) — the camera ended up buried inside the
+    // rider model for the first couple of seconds. A prior fix extrapolated
+    // backward from s=0 along the tangent by the *full* shortfall
+    // (up to ~5.5m), but there is no track geometry behind s=0 — that space
+    // is physically occupied by the StartTower launch platform
+    // (Environment.js), so the extrapolated point regularly landed inside
+    // its wooden deck/canopy (confirmed live: this is what earlier passes
+    // misread as "the chute renders brown" — it was the tower's wood
+    // texture filling the frame, not the chute at all). Cap the backward
+    // extrapolation to `startBackClearance`, just enough to clear the rider
+    // model, so the camera can never reach the tower.
     let idealPos;
     if (rawTargetS < 0) {
       const f0 = this.track.frameAt(0);
+      const backAmount = Math.min(-rawTargetS, tune.startBackClearance);
       idealPos = this.track
         .surfaceAt(0, targetLateral, lift)
-        .addScaledVector(f0.tangent, rawTargetS);
+        .addScaledVector(f0.tangent, -backAmount);
     } else {
       idealPos = this.track.surfaceAt(rawTargetS, targetLateral, lift);
     }
