@@ -22,7 +22,6 @@ export function createEngine(container) {
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
     powerPreference: 'high-performance',
-    stencil: false,
   });
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));

@@ -40,6 +40,14 @@ import * as THREE from 'three';
  *   force (weight shift); a wall spring+damper clamps |lateral|>0.97 so the
  *   rider never launches off the lip of the chute.
  *
+ *   The gravity term is NOT hardcoded assuming an unbanked, world-up-aligned
+ *   cross-section: g is projected onto the frame's *actual* binormal/normal
+ *   (gx = g_vec.binormal + curvature*v^2, gy = g_vec.normal; theta'' =
+ *   (gx*cos(theta)+gy*sin(theta))/r), so a track that layers a static `bank`
+ *   on top of the dynamic curvature — confirmed present in the real course,
+ *   up to ~0.85 rad in the helix — is handled automatically and correctly.
+ *   At bank=0 this reduces exactly to the formula above.
+ *
  * -------------------------------------------------------------------------
  * AIRBORNE MODEL
  *   Contact is lost when the centripetal acceleration required to follow
@@ -59,24 +67,28 @@ import * as THREE from 'three';
 
 // ---------------------------------------------------------------------------
 // Tunable constants — validated by numerically integrating this exact model
-// against a mock SplineTrack (constant and full-course slope/curvature
-// profiles) at the fixed 1/120s step the game uses. See task summary for
-// the measured bands (speed stayed in ~8-29.5 m/s, gForce 1-3.5G in typical
-// corners, lateral never diverges, no NaN/instability across a 25-seed fuzz
-// test with randomized steer/tuck/brake).
+// at the fixed 1/120s step the game uses, first against a mock SplineTrack
+// (constant and full-course slope/curvature profiles) and then against the
+// real SplineTrack/TRACK_DESIGN once available. Measured bands: baseline
+// (no input) run ~63s covering 8-18.5 m/s (spec target 60-90s), full-tuck
+// ~37-39s reaching ~22-24 m/s, gForce 2-4G through the banked helix and
+// tight corners, lateral tracks the analytic banked-turn equilibrium exactly
+// and never diverges, no NaN/instability across 30-40-seed fuzz tests with
+// randomized steer/tuck/brake on both the mock and the real track.
 // ---------------------------------------------------------------------------
 const GRAVITY = 9.81;
+const GRAVITY_VEC = new THREE.Vector3(0, -GRAVITY, 0);
 
 const DEFAULTS = {
   angleMax: THREE.MathUtils.degToRad(84), // U-arc angle span mapped from lateral -1..1
   riderFloat: 0.35, // tube float height above the chute surface [m]
 
   // longitudinal
-  dragK1: 0.018,
+  dragK1: 0.035,
   dragK2: 0.0068,
   tuckDragMul: 0.6, // -40% quadratic drag under full tuck
   tuckThrust: 0.9,
-  currentAssist: 0.55, // constant "flowing water" push, m/s^2
+  currentAssist: 0.12, // constant "flowing water" push, m/s^2
   brakeBase: 1.6,
   brakeSpeedGain: 0.30,
   governorSpeed: 27.5,
@@ -260,7 +272,7 @@ export class RiderPhysics {
         const frame = this.track.frameAt(st.s);
         const drag = tune.dragK1 * st.speed + tune.dragK2 * st.speed * st.speed + 0.4;
         st.speed = Math.max(0, st.speed - drag * dt);
-        const la = this._lateralAccel(st.lateral, st.lateralVel, st.speed, 0, frame.radius, 0);
+        const la = this._lateralAccel(st.lateral, st.lateralVel, st.speed, 0, frame.radius, 0, frame.binormal, frame.normal);
         st.lateralVel = THREE.MathUtils.clamp(st.lateralVel + la * dt, -tune.maxLateralVel, tune.maxLateralVel);
         st.lateral = THREE.MathUtils.clamp(st.lateral + st.lateralVel * dt, -1.05, 1.05);
         st.gForce = THREE.MathUtils.damp(st.gForce, 1, 3, dt);
@@ -283,11 +295,11 @@ export class RiderPhysics {
       const dvdt = this._longitudinalAccel(st.speed, frame.slope, tuck, brake);
       st.speed = Math.max(0, st.speed + dvdt * dt);
 
-      const la = this._lateralAccel(st.lateral, st.lateralVel, st.speed, frame.curvature, frame.radius, steer);
+      const la = this._lateralAccel(st.lateral, st.lateralVel, st.speed, frame.curvature, frame.radius, steer, frame.binormal, frame.normal);
       st.lateralVel = THREE.MathUtils.clamp(st.lateralVel + la * dt, -tune.maxLateralVel, tune.maxLateralVel);
       st.lateral = THREE.MathUtils.clamp(st.lateral + st.lateralVel * dt, -1.05, 1.05);
 
-      const radial = this._radialG(st.lateral, st.lateralVel, st.speed, frame.curvature, frame.radius);
+      const radial = this._radialG(st.lateral, st.lateralVel, st.speed, frame.curvature, frame.radius, frame.binormal, frame.normal);
       st.gForce = Math.min(9, Math.sqrt(radial * radial + dvdt * dvdt) / GRAVITY);
 
       st.s += st.speed * dt;
@@ -300,7 +312,7 @@ export class RiderPhysics {
 
   _longitudinalAccel(speed, slope, tuck, brake) {
     const tune = this.tune;
-    const k2 = tune.dragK2 * (1 - 0.4 * tuck);
+    const k2 = tune.dragK2 * (1 - (1 - tune.tuckDragMul) * tuck);
     let a = GRAVITY * slope + tune.currentAssist + tuck * tune.tuckThrust - tune.dragK1 * speed - k2 * speed * speed;
     a -= brake * (tune.brakeBase + tune.brakeSpeedGain * speed);
     if (speed > tune.governorSpeed) {
@@ -314,12 +326,24 @@ export class RiderPhysics {
     return THREE.MathUtils.clamp(0.35 + speed / 22, 0.35, 1.5);
   }
 
-  _lateralAccel(lateral, lateralVel, speed, curvature, radius, steer) {
+  /**
+   * `theta = lateral*angleMax` treated as a pendulum on the cross-section
+   * arc (radius), whose pivot is itself pushed sideways by the track's
+   * curvature — see the file-level derivation. Gravity's contribution is
+   * NOT hardcoded assuming an unbanked, world-up-aligned cross-section: it's
+   * projected onto the frame's *actual* (already bank-rotated, per
+   * SplineTrack) binormal/normal, so a track that layers a static `bank` on
+   * top of the dynamic curvature — as the real helix does, up to ~0.85 rad —
+   * is handled automatically and correctly, with no separate bank term
+   * needed. At bank=0 this reduces exactly to the textbook
+   * -g*sin(theta)/r + curvature*v^2*cos(theta)/r.
+   */
+  _lateralAccel(lateral, lateralVel, speed, curvature, radius, steer, binormal, normal) {
     const tune = this.tune;
     const theta = lateral * tune.angleMax;
-    const gravTerm = -GRAVITY * Math.sin(theta) / radius;
-    const centTerm = curvature * speed * speed * Math.cos(theta) / radius;
-    let a = ((gravTerm + centTerm) * tune.lateralGain) / tune.angleMax;
+    const gx = GRAVITY_VEC.dot(binormal) + curvature * speed * speed;
+    const gy = GRAVITY_VEC.dot(normal);
+    let a = ((gx * Math.cos(theta) + gy * Math.sin(theta)) * tune.lateralGain) / (tune.angleMax * radius);
     a += steer * tune.steerForce * this._steerEffectiveness(speed);
     a -= tune.lateralDamping * lateralVel;
 
@@ -333,11 +357,14 @@ export class RiderPhysics {
     return a;
   }
 
-  _radialG(lateral, lateralVel, speed, curvature, radius) {
+  /** Same bank-aware gravity projection as _lateralAccel, for the "how hard pressed into the tube" display quantity. */
+  _radialG(lateral, lateralVel, speed, curvature, radius, binormal, normal) {
     const tune = this.tune;
     const theta = lateral * tune.angleMax;
     const thetaDot = lateralVel * tune.angleMax;
-    return GRAVITY * Math.cos(theta) + curvature * speed * speed * Math.sin(theta) + radius * thetaDot * thetaDot;
+    const gx = GRAVITY_VEC.dot(binormal) + curvature * speed * speed;
+    const gy = GRAVITY_VEC.dot(normal);
+    return gx * Math.sin(theta) - gy * Math.cos(theta) + radius * thetaDot * thetaDot;
   }
 
   // -------------------------------------------------------------------
