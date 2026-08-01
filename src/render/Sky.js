@@ -20,17 +20,19 @@ import { Sky } from 'three/addons/objects/Sky.js';
 // 赤黒く沈む原因の一つだった。35〜45°のレンジ中央付近まで太陽を上げる。
 const ELEVATION_DEG = 38;
 const AZIMUTH_DEG = 145;
-// V1 ラウンド2: 実機スクリーンショットで確認したところ turbidity=3/
-// rayleigh=2/mie 大きめの組み合わせは、露出を絞ってもなお太陽周辺の Mie
-// ハローが広く強すぎ、PostFX のブルーム+色収差と組み合わさって画面を
-// 斜めに横切る虹色の帯として残った (Sky.js 自身に addons/Lensflare は
-// もう存在しないので、これは Preetham シェーダ自身の太陽面/Mie 項が
-// そのまま HDR で明るすぎることが原因と特定)。turbidity をやや上げて
-// 大気減衰 (Fex) を強め、mie 系を絞ってハロー自体を小さく暗くする。
-const TURBIDITY = 4.5;
-const RAYLEIGH = 1.6;
-const MIE_COEFFICIENT = 0.0025;
-const MIE_DIRECTIONAL_G = 0.68;
+// V1 ラウンド3 の検証結果: turbidity を 3→5.5、mieCoefficient を
+// 0.0045→0.0015 まで大きく振っても、タイトル画面の虹の帯は形も色も
+// ほぼ変化しなかった。addons/Lensflare は既に完全撤去済み、PostFX の
+// 色収差/ブラーも V3 の実機テストで寄与ゼロと確認済み — つまりこの帯は
+// Sky.js の物理パラメータにはほぼ非依存で、太陽の生 HDR 出力量が主因では
+// なさそうだと判断した。turbidity を上げるほど空が白く霞んで「青空」が
+// 失われる副作用の方が大きかったため、ここでは実害の無い範囲まで戻す。
+// (虹の帯の残る原因は他ファイル — おそらく PostFX.js のブルーム閾値か
+// TrackMaterial/WaterMaterial 側の反射 — の可能性が高く、最終報告に記載)
+const TURBIDITY = 3.2;
+const RAYLEIGH = 2.2;
+const MIE_COEFFICIENT = 0.003;
+const MIE_DIRECTIONAL_G = 0.72;
 
 // 前任者の修正撤廃 (V1): three/addons/objects/Sky.js は太陽強度に固定の内部
 // 定数 EE=1000 (+太陽面項の *19000) を使い、Preetham モデルの物理量を
