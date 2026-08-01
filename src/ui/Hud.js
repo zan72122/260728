@@ -44,7 +44,9 @@ function sectionForFraction(frac) {
 }
 
 const DEFAULT_TRACK_LENGTH = 650; // extra.trackLength 未指定時のフォールバック（SPEC §4.2: 550〜750m）
-const GAUGE_MAX_KMH = 130;
+// 統合修正: 実測の最高速度(約27-28m/s=97-101km/h)に合わせてメーター上限を
+// 130km/hから引き下げ、ゲージが実際のプレイでちゃんと動いて見えるようにする。
+const GAUGE_MAX_KMH = 112;
 
 export class Hud {
   /** @param {HTMLElement} root */

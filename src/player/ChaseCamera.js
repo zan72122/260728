@@ -48,8 +48,11 @@ const DEFAULTS = {
   // fov
   fovMin: 68,
   fovMax: 92,
-  fovSpeedMin: 8,
-  fovSpeedMax: 30,
+  // Re-matched by the integration pass to RiderPhysics.js's real measured
+  // speed band (was 8->30 m/s, which sat mostly above what the rider ever
+  // reaches, so FOV stretch barely engaged during normal play).
+  fovSpeedMin: 6,
+  fovSpeedMax: 27,
   fovTuckBonus: 5,
   fovSmoothRate: 5,
 

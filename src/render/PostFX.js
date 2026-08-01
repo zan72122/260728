@@ -238,9 +238,12 @@ export function createPostFX(renderer, scene, camera) {
     const tunnel = !!params.tunnel;
     const splashRate = THREE.MathUtils.clamp(params.splashRate ?? 0, 0, 1);
 
-    // Radial blur: 0 at 8 m/s, 0.6 at 30 m/s, with a small extra kick
-    // under high G / airborne (SPEC 4.9 exact numbers).
-    const speedT = THREE.MathUtils.clamp((speed - 8) / (30 - 8), 0, 1);
+    // Radial blur: 0 at low speed, 0.6 at top speed, with a small extra kick
+    // under high G / airborne (SPEC 4.9). Range re-matched by the
+    // integration pass to RiderPhysics.js's real measured speed band
+    // (no-input ~12-20 m/s, full-tuck ~22-27 m/s) instead of the original
+    // 8->30 m/s, which sat mostly above what the rider ever reaches.
+    const speedT = THREE.MathUtils.clamp((speed - 6) / (27 - 6), 0, 1);
     let blur = speedT * 0.6;
     blur += THREE.MathUtils.clamp((gForce - 1.3) / 1.7, 0, 1) * 0.14;
     if (airborne) blur += 0.1;
