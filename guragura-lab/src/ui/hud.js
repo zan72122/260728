@@ -10,8 +10,11 @@ import {
   badgeSafe,
   badgeDanger,
   badgeShield,
+  badgeFuton,
   bearFace,
   handIcon,
+  waveIcon,
+  chevronIcon,
 } from './icons.js';
 
 /**
@@ -19,7 +22,7 @@ import {
  * 常時表示は「メインボタン」「音」「メニュー」だけに絞る。
  */
 export class Hud {
-  constructor(root, { onMain, onMute, onDice, onHome }) {
+  constructor(root, { onMain, onMute, onDice, onHome, onStrength, onRoomPrev, onRoomNext }) {
     this.root = root;
     this.onMain = onMain;
 
@@ -31,6 +34,40 @@ export class Hud {
     this.mainBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
     this.mainBtn.addEventListener('click', () => onMain());
     root.appendChild(this.mainBtn);
+
+    // 揺れの強さチップ（〜 / ≈ / ≋）
+    this.strengthWrap = document.createElement('div');
+    this.strengthWrap.className = 'strength-chips';
+    this.strengthWrap.dataset.testid = 'strength-chips';
+    root.appendChild(this.strengthWrap);
+    this.strengthChips = [];
+    for (let i = 0; i < 3; i++) {
+      const chip = document.createElement('button');
+      chip.className = 'strength-chip';
+      chip.dataset.testid = `strength-${i}`;
+      chip.innerHTML = waveIcon(i + 1);
+      chip.addEventListener('pointerdown', (e) => e.stopPropagation());
+      chip.addEventListener('click', () => onStrength(i));
+      this.strengthWrap.appendChild(chip);
+      this.strengthChips.push(chip);
+    }
+
+    // 部屋切り替え矢印
+    this.prevBtn = document.createElement('button');
+    this.prevBtn.className = 'room-arrow left';
+    this.prevBtn.dataset.testid = 'room-prev';
+    this.prevBtn.innerHTML = chevronIcon('left');
+    this.prevBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.prevBtn.addEventListener('click', () => onRoomPrev());
+    root.appendChild(this.prevBtn);
+
+    this.nextBtn = document.createElement('button');
+    this.nextBtn.className = 'room-arrow right';
+    this.nextBtn.dataset.testid = 'room-next';
+    this.nextBtn.innerHTML = chevronIcon('right');
+    this.nextBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.nextBtn.addEventListener('click', () => onRoomNext());
+    root.appendChild(this.nextBtn);
 
     // 右上のアイコン列
     const corner = document.createElement('div');
@@ -130,7 +167,28 @@ export class Hud {
   badgeIcon(kind) {
     if (kind === 'safe') return badgeSafe;
     if (kind === 'shield') return badgeShield;
+    if (kind === 'futon') return badgeFuton;
     return badgeDanger;
+  }
+
+  /** 強さチップの選択表示 */
+  setStrength(index) {
+    this.strengthChips.forEach((c, i) => c.classList.toggle('selected', i === index));
+  }
+
+  /** 強さチップのロック（B配置中は同じ揺れで比較するため変更不可） */
+  setStrengthLocked(locked) {
+    this.strengthWrap.classList.toggle('locked', locked);
+  }
+
+  setStrengthVisible(visible) {
+    this.strengthWrap.classList.toggle('hidden', !visible);
+  }
+
+  /** 部屋矢印の表示（配置Aのみ） */
+  setArrowsVisible(visible) {
+    this.prevBtn.classList.toggle('hidden', !visible);
+    this.nextBtn.classList.toggle('hidden', !visible);
   }
 
   /** kind: 'safe' | 'shield' | 'danger' */

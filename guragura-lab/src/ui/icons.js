@@ -127,6 +127,40 @@ export function bearFace(ghost = false) {
 </svg>`;
 }
 
+/** 布団で守られたバッジ：布団＋ハート */
+export const badgeFuton = `
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <rect x="8" y="38" width="48" height="12" rx="6" fill="#cdb4f6"/>
+  <path d="M10 42 Q10 26 24 26 L46 26 Q54 26 54 36 L54 42 Q42 34 32 40 Q20 46 10 42 Z" fill="#ff9db6"/>
+  <path d="M10 42 Q22 47 32 41 Q42 35 54 42" stroke="#fffdf5" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <circle cx="18" cy="20" r="7" fill="#cf9057"/>
+  <circle cx="13.5" cy="14.5" r="3" fill="#cf9057"/>
+  <circle cx="22.5" cy="14.5" r="3" fill="#cf9057"/>
+  <path d="M45 22 C42 19 40 17.5 40 15.2 C40 13.4 41.5 12.4 42.9 12.4 C43.9 12.4 44.6 13 45 13.8 C45.4 13 46.1 12.4 47.1 12.4 C48.5 12.4 50 13.4 50 15.2 C50 17.5 48 19 45 22 Z" fill="#f6538e"/>
+</svg>`;
+
+/** 揺れの強さ（波の本数 1〜3） */
+export function waveIcon(n) {
+  const rows = [];
+  const ys = n === 1 ? [32] : n === 2 ? [24, 40] : [18, 32, 46];
+  const color = ['#7ed957', '#ffb020', '#f6538e'][n - 1];
+  for (const y of ys) {
+    rows.push(
+      `<path d="M10 ${y} q5 -7 10 0 t10 0 t10 0 t10 0 t4 0" stroke="${color}" stroke-width="${4 + n}" fill="none" stroke-linecap="round"/>`,
+    );
+  }
+  return `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">${rows.join('')}</svg>`;
+}
+
+/** 部屋切り替えの矢印 */
+export function chevronIcon(dir) {
+  const d = dir === 'left' ? 'M38 14 L22 32 L38 50' : 'M26 14 L42 32 L26 50';
+  return `
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <path d="${d}" stroke="#e58bb0" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>`;
+}
+
 /** ドラッグを教える手 */
 export const handIcon = `
 <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">

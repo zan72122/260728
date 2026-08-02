@@ -30,8 +30,11 @@ export class Effects {
     this.safeGlow = null;
   }
 
-  /** 危険の影（オレンジのやわらかい円）を床に置く */
-  addDangerMarker(x, z, radius = 0.34) {
+  /**
+   * 危険の影（オレンジのやわらかい円）を床に置く。
+   * opts.sx / sz で楕円（家具の転倒帯など）にできる。
+   */
+  addDangerMarker(x, z, radius = 0.34, opts = {}) {
     const m = new THREE.Mesh(
       new THREE.PlaneGeometry(radius * 2, radius * 2),
       new THREE.MeshBasicMaterial({
@@ -42,9 +45,15 @@ export class Effects {
       }),
     );
     m.rotation.x = -Math.PI / 2;
+    if (opts.rotZ) m.rotation.z = opts.rotZ;
     m.position.set(x, 0.02 + this.dangerMarkers.length * 0.0015, z);
     this.parent.add(m);
-    this.dangerMarkers.push({ mesh: m, born: this.time });
+    this.dangerMarkers.push({
+      mesh: m,
+      born: this.time,
+      baseSx: opts.sx ?? 1,
+      baseSz: opts.sz ?? 1,
+    });
     return m;
   }
 
@@ -172,7 +181,7 @@ export class Effects {
       const pulse = 0.72 + Math.sin(this.time * 5) * 0.18;
       d.mesh.material.opacity = Math.min(1, age * 3) * pulse;
       const s = 1 + Math.sin(this.time * 5) * 0.06;
-      d.mesh.scale.set(s, s, 1);
+      d.mesh.scale.set(s * (d.baseSx ?? 1), s * (d.baseSz ?? 1), 1);
     }
     for (const d of this.ghostMarkers) {
       d.mesh.rotation.z += dt * 0.5;

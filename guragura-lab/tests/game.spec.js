@@ -152,9 +152,145 @@ test('縦画面（iPhone）でもUIが収まり操作できる', async ({ page }
   await boot(page, { width: 390, height: 844 });
   await expect(page.getByTestId('main-button')).toBeVisible();
   await expect(page.getByTestId('mute-button')).toBeVisible();
+  await expect(page.getByTestId('strength-chips')).toBeVisible();
   const box = await page.getByTestId('main-button').boundingBox();
   expect(box.y + box.height).toBeLessThanOrEqual(844);
   expect(box.width).toBeGreaterThanOrEqual(80);
+  const chips = await page.getByTestId('strength-chips').boundingBox();
+  expect(chips.x).toBeGreaterThanOrEqual(0);
   await page.getByTestId('main-button').click();
   await waitPhase(page, 'playA');
+});
+
+test('部屋切り替え：矢印で4部屋を一周できる', async ({ page }) => {
+  await boot(page);
+  const rooms = [];
+  for (let i = 0; i < 4; i++) {
+    rooms.push(await page.evaluate(() => window.__lab.getRoom()));
+    await page.getByTestId('room-next').click();
+    await page.waitForTimeout(700);
+  }
+  expect(rooms).toEqual(['kids', 'bedroom', 'living', 'kitchen']);
+  expect(await page.evaluate(() => window.__lab.getRoom())).toBe('kids');
+  // 各部屋でくまは開始位置に置かれ、配置フェーズに戻る
+  expect(await page.evaluate(() => window.__lab.getPhase())).toBe('placeA');
+});
+
+test('強さ選択：チップで切り替わり・別の記録になる・B配置中はロック', async ({ page }) => {
+  await boot(page);
+  await page.getByTestId('strength-0').click();
+  expect(await page.evaluate(() => window.__lab.getStrength())).toBe(0);
+  const recWeak = await page.evaluate(() => window.__lab.getRecording());
+  await page.getByTestId('strength-2').click();
+  expect(await page.evaluate(() => window.__lab.getStrength())).toBe(2);
+  const recStrong = await page.evaluate(() => window.__lab.getRecording());
+  expect(recWeak.strength).toBe(0);
+  expect(recStrong.strength).toBe(2);
+  // 強い揺れの方が多くの物が床に落ちる
+  expect(Object.keys(recStrong.landings).length).toBeGreaterThanOrEqual(
+    Object.keys(recWeak.landings).length,
+  );
+
+  // A実行→巻き戻し→B配置では強さがロックされる
+  await page.getByTestId('main-button').click();
+  await waitPhase(page, 'playA');
+  await fastForwardPlay(page, 'resultA');
+  await page.getByTestId('main-button').click();
+  await page.evaluate(() => window.__lab.skipToEnd());
+  await waitPhase(page, 'placeB');
+  await page.evaluate(() => window.__lab.setStrength(1));
+  expect(await page.evaluate(() => window.__lab.getStrength())).toBe(2); // 変わらない
+});
+
+test('寝室：タンスの前は危険・ベッドの上は布団で安全', async ({ page }) => {
+  await boot(page);
+  await page.getByTestId('room-next').click();
+  await page.waitForTimeout(700);
+  expect(await page.evaluate(() => window.__lab.getRoom())).toBe('bedroom');
+  await page.getByTestId('strength-2').click();
+
+  // A: タンスの前（転倒の直撃コース）
+  await page.evaluate(() => window.__lab.setBear(0.62, -1.35));
+  await page.getByTestId('main-button').click();
+  await waitPhase(page, 'playA');
+  expect(await page.evaluate(() => window.__lab.getDangerCount())).toBeGreaterThan(0);
+  await fastForwardPlay(page, 'resultA');
+  await page.getByTestId('main-button').click();
+  await page.evaluate(() => window.__lab.skipToEnd());
+  await waitPhase(page, 'placeB');
+
+  // B: ベッドの上（布団がかかる）
+  await page.evaluate(() => window.__lab.setBear(-1.5, 0.4));
+  await page.getByTestId('main-button').click();
+  await waitPhase(page, 'playB');
+  expect(await page.evaluate(() => window.__lab.getDangerCount())).toBe(0);
+  await fastForwardPlay(page, 'compare');
+  expect(await page.evaluate(() => window.__lab.getResults())).toEqual({
+    a: 'danger',
+    b: 'futon',
+  });
+});
+
+test('リビング：金具なしで棚が倒れて危険・同じ場所でも金具ありなら安全', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__lab.switchRoom(1));
+  await page.waitForTimeout(700);
+  await page.evaluate(() => window.__lab.switchRoom(1));
+  await page.waitForTimeout(700);
+  expect(await page.evaluate(() => window.__lab.getRoom())).toBe('living');
+  await page.getByTestId('strength-2').click();
+
+  // A: 飾り棚の倒れ先（金具なし）
+  await page.evaluate(() => window.__lab.setBear(-1.0, -0.9));
+  await page.getByTestId('main-button').click();
+  await waitPhase(page, 'playA');
+  const recA = await page.evaluate(() => window.__lab.getRecording());
+  expect(recA.tipEvents.length).toBeGreaterThan(0); // 棚が倒れる
+  expect(await page.evaluate(() => window.__lab.getDangerCount())).toBeGreaterThan(0);
+  await fastForwardPlay(page, 'resultA');
+  await page.getByTestId('main-button').click();
+  await page.evaluate(() => window.__lab.skipToEnd());
+  await waitPhase(page, 'placeB');
+
+  // B: くまは同じ場所のまま、金具だけON
+  await page.evaluate(() => window.__lab.toggleAnchor('cabinet'));
+  expect(await page.evaluate(() => window.__lab.getAnchors())).toEqual(['cabinet']);
+  await page.getByTestId('main-button').click();
+  await waitPhase(page, 'playB');
+  const recB = await page.evaluate(() => window.__lab.getRecording());
+  expect(recB.tipEvents.length).toBe(0); // 金具で倒れない
+  expect(await page.evaluate(() => window.__lab.getDangerCount())).toBe(0);
+  await fastForwardPlay(page, 'compare');
+  expect(await page.evaluate(() => window.__lab.getResults())).toEqual({
+    a: 'danger',
+    b: 'safe',
+  });
+});
+
+test('キッチン：食器棚の前は危険・テーブルの下は安全', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__lab.switchRoom(-1));
+  await page.waitForTimeout(700);
+  expect(await page.evaluate(() => window.__lab.getRoom())).toBe('kitchen');
+
+  // A: 食器棚の前（お皿の雨）
+  await page.evaluate(() => window.__lab.setBear(-1.05, -1.45));
+  await page.getByTestId('main-button').click();
+  await waitPhase(page, 'playA');
+  expect(await page.evaluate(() => window.__lab.getDangerCount())).toBeGreaterThan(0);
+  await fastForwardPlay(page, 'resultA');
+  await page.getByTestId('main-button').click();
+  await page.evaluate(() => window.__lab.skipToEnd());
+  await waitPhase(page, 'placeB');
+
+  // B: テーブルの下
+  await page.evaluate(() => window.__lab.setBear(0.72, -0.18));
+  await page.getByTestId('main-button').click();
+  await waitPhase(page, 'playB');
+  expect(await page.evaluate(() => window.__lab.getDangerCount())).toBe(0);
+  await fastForwardPlay(page, 'compare');
+  expect(await page.evaluate(() => window.__lab.getResults())).toEqual({
+    a: 'danger',
+    b: 'shield',
+  });
 });

@@ -47,23 +47,36 @@ function envelopeAt(time) {
   return 0;
 }
 
-export function createQuakeScript(seed) {
+/**
+ * 揺れの強さ（3段階）。ピーク加速度と見た目の揺れ幅だけが変わり、
+ * 波形の形・タイミングはシードで完全に決まる。
+ */
+export const STRENGTHS = [
+  // freqScale: つよい揺れほど「ゆっくり大きい」長周期の揺れになる。
+  // 長周期ほど背の高い家具が倒れやすい（実際の地震と同じ性質）。
+  { peakAccel: 2.1, dispScale: 0.45, freqScale: 1.25 }, // よわい：高い所の物だけ落ちる
+  { peakAccel: 9.0, dispScale: 1.0, freqScale: 1.0 }, // ふつう：本やライトが落ちる
+  { peakAccel: 13.5, dispScale: 1.35, freqScale: 0.6 }, // つよい：家具も倒れる
+];
+
+export function createQuakeScript(seed, strength = 1) {
   const rand = mulberry32(seed);
   const steps = totalSteps();
+  const s = STRENGTHS[strength] ?? STRENGTHS[1];
 
   // 数本の正弦波を重ねる。周波数・位相・振幅はシードから決まる。
   const waves = [];
   const waveCount = 4;
   for (let i = 0; i < waveCount; i++) {
     waves.push({
-      freqX: 1.3 + rand() * 2.4, // Hz
-      freqZ: 1.1 + rand() * 2.0,
+      freqX: (1.3 + rand() * 2.4) * s.freqScale, // Hz
+      freqZ: (1.1 + rand() * 2.0) * s.freqScale,
       phaseX: rand() * Math.PI * 2,
       phaseZ: rand() * Math.PI * 2,
       amp: 0.55 + rand() * 0.45,
     });
   }
-  const peakAccel = 9.0; // 本震のピーク加速度 [m/s^2]
+  const peakAccel = s.peakAccel; // 本震のピーク加速度 [m/s^2]
 
   const accelX = new Float32Array(steps);
   const accelZ = new Float32Array(steps);
@@ -91,12 +104,13 @@ export function createQuakeScript(seed) {
     }
     accelX[i] = (ax / ampSum) * peakAccel * env;
     accelZ[i] = (az / ampSum) * peakAccel * 0.8 * env;
-    dispX[i] = (dx / ampSum) * 0.055 * env;
-    dispZ[i] = (dz / ampSum) * 0.04 * env;
+    dispX[i] = (dx / ampSum) * 0.055 * s.dispScale * env;
+    dispZ[i] = (dz / ampSum) * 0.04 * s.dispScale * env;
   }
 
   return {
     seed,
+    strength,
     dt: PHYSICS_DT,
     steps,
     duration: totalDuration(),

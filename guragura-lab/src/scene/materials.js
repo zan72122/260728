@@ -50,18 +50,63 @@ export function makeBackgroundTexture() {
   return tex;
 }
 
-/** 虹色の丸いラグ */
-export function makeRugTexture() {
+/** 丸いラグ（style: 'rainbow' | 'dots' | 'sun'） */
+export function makeRugTexture(style = 'rainbow') {
   const s = 512;
   const c = document.createElement('canvas');
   c.width = c.height = s;
   const g = c.getContext('2d');
-  const rings = ['#ff9db6', '#ffc98f', '#fff3a0', '#b8e8a8', '#a8d8f0', '#cdb4f6', '#ffffff'];
-  for (let i = 0; i < rings.length; i++) {
-    g.fillStyle = rings[i];
+  if (style === 'dots') {
+    g.fillStyle = '#fdf3e3';
     g.beginPath();
-    g.arc(s / 2, s / 2, (s / 2) * (1 - i / rings.length), 0, Math.PI * 2);
+    g.arc(s / 2, s / 2, s / 2, 0, Math.PI * 2);
     g.fill();
+    g.fillStyle = '#f3e3f8';
+    g.beginPath();
+    g.arc(s / 2, s / 2, s * 0.42, 0, Math.PI * 2);
+    g.fill();
+    const dotColors = ['#ff9db6', '#a8d8f0', '#ffe08a', '#b8e8a8', '#cdb4f6'];
+    for (let ring = 0; ring < 3; ring++) {
+      const r = s * (0.12 + ring * 0.13);
+      const n = 6 + ring * 5;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + ring;
+        g.fillStyle = dotColors[(i + ring) % dotColors.length];
+        g.beginPath();
+        g.arc(s / 2 + Math.cos(a) * r, s / 2 + Math.sin(a) * r, s * 0.032, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+  } else if (style === 'sun') {
+    g.fillStyle = '#fff3d6';
+    g.beginPath();
+    g.arc(s / 2, s / 2, s / 2, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#ffe4a8';
+    for (let i = 0; i < 12; i++) {
+      const a0 = (i / 12) * Math.PI * 2;
+      g.beginPath();
+      g.moveTo(s / 2, s / 2);
+      g.arc(s / 2, s / 2, s / 2, a0, a0 + Math.PI / 12);
+      g.closePath();
+      g.fill();
+    }
+    g.fillStyle = '#ffd34d';
+    g.beginPath();
+    g.arc(s / 2, s / 2, s * 0.2, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#ffe9f2';
+    g.beginPath();
+    g.arc(s / 2, s / 2, s * 0.13, 0, Math.PI * 2);
+    g.fill();
+  } else {
+    const rings = ['#ff9db6', '#ffc98f', '#fff3a0', '#b8e8a8', '#a8d8f0', '#cdb4f6', '#ffffff'];
+    for (let i = 0; i < rings.length; i++) {
+      g.fillStyle = rings[i];
+      g.beginPath();
+      g.arc(s / 2, s / 2, (s / 2) * (1 - i / rings.length), 0, Math.PI * 2);
+      g.fill();
+    }
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -113,22 +158,76 @@ export function makeSkyTexture() {
   return tex;
 }
 
-/** 壁の絵（にじとおうち） */
-export function makePictureTexture() {
+/** 壁の絵（style: 'rainbow' | 'moon' | 'house' | 'fruit'） */
+export function makePictureTexture(style = 'rainbow') {
   const s = 256;
   const c = document.createElement('canvas');
   c.width = c.height = s;
   const g = c.getContext('2d');
-  g.fillStyle = '#fffdf5';
+  g.fillStyle = style === 'moon' ? '#2e3a67' : '#fffdf5';
   g.fillRect(0, 0, s, s);
-  const colors = ['#ff9db6', '#ffc98f', '#fff3a0', '#b8e8a8', '#a8d8f0', '#cdb4f6'];
-  g.lineCap = 'round';
-  for (let i = 0; i < colors.length; i++) {
-    g.strokeStyle = colors[i];
-    g.lineWidth = 12;
+  if (style === 'moon') {
+    g.fillStyle = '#ffe9a8';
     g.beginPath();
-    g.arc(s / 2, s * 0.85, s * 0.62 - i * 13, Math.PI, 0);
+    g.arc(s * 0.55, s * 0.45, s * 0.26, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#2e3a67';
+    g.beginPath();
+    g.arc(s * 0.44, s * 0.4, s * 0.22, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#fff3d6';
+    for (const [x, y, r] of [[0.2, 0.22, 0.03], [0.78, 0.2, 0.024], [0.25, 0.72, 0.024], [0.72, 0.78, 0.03], [0.5, 0.85, 0.02]]) {
+      g.beginPath();
+      g.arc(s * x, s * y, s * r, 0, Math.PI * 2);
+      g.fill();
+    }
+  } else if (style === 'house') {
+    g.fillStyle = '#a8d8f0';
+    g.fillRect(0, 0, s, s * 0.62);
+    g.fillStyle = '#b8e8a8';
+    g.fillRect(0, s * 0.62, s, s * 0.38);
+    g.fillStyle = '#ff9db6';
+    g.beginPath();
+    g.moveTo(s * 0.28, s * 0.42);
+    g.lineTo(s * 0.5, s * 0.22);
+    g.lineTo(s * 0.72, s * 0.42);
+    g.closePath();
+    g.fill();
+    g.fillStyle = '#fffdf5';
+    g.fillRect(s * 0.32, s * 0.42, s * 0.36, s * 0.3);
+    g.fillStyle = '#ffd34d';
+    g.beginPath();
+    g.arc(s * 0.8, s * 0.16, s * 0.09, 0, Math.PI * 2);
+    g.fill();
+  } else if (style === 'fruit') {
+    g.fillStyle = '#ff6b6b';
+    g.beginPath();
+    g.arc(s * 0.38, s * 0.55, s * 0.2, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#ffb020';
+    g.beginPath();
+    g.arc(s * 0.68, s * 0.62, s * 0.16, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = '#7a5a20';
+    g.lineWidth = 6;
+    g.beginPath();
+    g.moveTo(s * 0.38, s * 0.35);
+    g.quadraticCurveTo(s * 0.42, s * 0.25, s * 0.48, s * 0.24);
     g.stroke();
+    g.fillStyle = '#7ed957';
+    g.beginPath();
+    g.ellipse(s * 0.5, s * 0.28, s * 0.08, s * 0.04, -0.5, 0, Math.PI * 2);
+    g.fill();
+  } else {
+    const colors = ['#ff9db6', '#ffc98f', '#fff3a0', '#b8e8a8', '#a8d8f0', '#cdb4f6'];
+    g.lineCap = 'round';
+    for (let i = 0; i < colors.length; i++) {
+      g.strokeStyle = colors[i];
+      g.lineWidth = 12;
+      g.beginPath();
+      g.arc(s / 2, s * 0.85, s * 0.62 - i * 13, Math.PI, 0);
+      g.stroke();
+    }
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;

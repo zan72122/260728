@@ -161,6 +161,27 @@ export class SoundBox {
     o.stop(t + 0.28);
   }
 
+  /** 家具がゆっくり倒れた「ぽふん」（低くやわらかい・こわくない） */
+  pofun() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(110, t);
+    o.frequency.exponentialRampToValueAtTime(55, t + 0.28);
+    this._env(o, t, 0.01, 0.42, 0.5);
+    o.start(t);
+    o.stop(t + 0.5);
+    // ふわっとした空気感
+    const o2 = this.ctx.createOscillator();
+    o2.type = 'triangle';
+    o2.frequency.setValueAtTime(220, t + 0.03);
+    o2.frequency.exponentialRampToValueAtTime(90, t + 0.3);
+    this._env(o2, t + 0.03, 0.02, 0.3, 0.15);
+    o2.start(t + 0.03);
+    o2.stop(t + 0.4);
+  }
+
   /** あぶなかった…（やさしい下降音・こわくない） */
   uhoh() {
     if (!this.ctx) return;

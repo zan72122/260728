@@ -149,6 +149,117 @@ body {
   }
 }
 
+/* ---- 揺れの強さチップ（ぐらぐらボタンの左に常設） ---- */
+
+.strength-chips {
+  position: absolute;
+  bottom: max(26px, calc(env(safe-area-inset-bottom) + 18px));
+  left: calc(50% - clamp(42px, 7.5vmin, 60px));
+  transform: translateX(-100%);
+  display: flex;
+  gap: 8px;
+  padding-right: 14px;
+  transition: opacity 0.3s ease;
+}
+
+.strength-chip {
+  width: clamp(46px, 8vmin, 62px);
+  height: clamp(46px, 8vmin, 62px);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 3px 10px rgba(120, 80, 100, 0.22);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.2s ease;
+  opacity: 0.62;
+}
+
+.strength-chip svg {
+  width: 68%;
+  height: 68%;
+  pointer-events: none;
+}
+
+.strength-chip.selected {
+  opacity: 1;
+  transform: scale(1.18);
+  box-shadow:
+    0 0 0 3.5px #ff8fab,
+    0 5px 14px rgba(199, 59, 115, 0.35);
+}
+
+.strength-chips.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.strength-chips.locked .strength-chip {
+  pointer-events: none;
+  opacity: 0.35;
+}
+
+.strength-chips.locked .strength-chip.selected {
+  opacity: 0.8;
+}
+
+/* 狭い画面ではチップを少し小さくして収める */
+@media (max-width: 480px) {
+  .strength-chips {
+    gap: 6px;
+    padding-right: 8px;
+  }
+  .strength-chip {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* ---- 部屋切り替え矢印（配置フェーズのみ） ---- */
+
+.room-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: clamp(52px, 9vmin, 70px);
+  height: clamp(64px, 12vmin, 92px);
+  border: none;
+  border-radius: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 4px 12px rgba(120, 80, 100, 0.25);
+  transition: transform 0.15s ease, opacity 0.3s ease;
+  backdrop-filter: blur(4px);
+}
+
+.room-arrow:active {
+  transform: translateY(-50%) scale(0.9);
+}
+
+.room-arrow svg {
+  width: 70%;
+  height: 55%;
+  pointer-events: none;
+}
+
+.room-arrow.left {
+  left: max(10px, calc(env(safe-area-inset-left) + 6px));
+}
+
+.room-arrow.right {
+  right: max(10px, calc(env(safe-area-inset-right) + 6px));
+}
+
+.room-arrow.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* ---- 右上の小さいアイコン列（最小限の常時表示） ---- */
 
 .corner-buttons {
