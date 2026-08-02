@@ -168,7 +168,7 @@ test('部屋切り替え：矢印で4部屋を一周できる', async ({ page })
   for (let i = 0; i < 4; i++) {
     rooms.push(await page.evaluate(() => window.__lab.getRoom()));
     await page.getByTestId('room-next').click();
-    await page.waitForTimeout(700);
+    await page.waitForTimeout(1400);
   }
   expect(rooms).toEqual(['kids', 'bedroom', 'living', 'kitchen']);
   expect(await page.evaluate(() => window.__lab.getRoom())).toBe('kids');
@@ -205,7 +205,7 @@ test('強さ選択：チップで切り替わり・別の記録になる・B配�
 test('寝室：タンスの前は危険・ベッドの上は布団で安全', async ({ page }) => {
   await boot(page);
   await page.getByTestId('room-next').click();
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(1400);
   expect(await page.evaluate(() => window.__lab.getRoom())).toBe('bedroom');
   await page.getByTestId('strength-2').click();
 
@@ -234,9 +234,9 @@ test('寝室：タンスの前は危険・ベッドの上は布団で安全', as
 test('リビング：金具なしで棚が倒れて危険・同じ場所でも金具ありなら安全', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__lab.switchRoom(1));
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(1400);
   await page.evaluate(() => window.__lab.switchRoom(1));
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(1400);
   expect(await page.evaluate(() => window.__lab.getRoom())).toBe('living');
   await page.getByTestId('strength-2').click();
 
@@ -270,7 +270,7 @@ test('リビング：金具なしで棚が倒れて危険・同じ場所でも�
 test('キッチン：食器棚の前は危険・テーブルの下は安全', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__lab.switchRoom(-1));
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(1400);
   expect(await page.evaluate(() => window.__lab.getRoom())).toBe('kitchen');
 
   // A: 食器棚の前（お皿の雨）

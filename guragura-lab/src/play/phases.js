@@ -484,6 +484,8 @@ export class Game {
       this.playFrame = Math.max(0, this.playFrame - dt * 60 * 5);
       this.applyFrame(this.playFrame);
       if (this.playFrame <= 0) {
+        // 完全に初期姿勢へ（記録フレーム0は物理1ステップ後なので、スペック姿勢に揃える）
+        this.resetDynamicMeshes();
         this.hud.veil(false);
         this.phase = 'placeB';
         this.hud.setMainMode('quake');

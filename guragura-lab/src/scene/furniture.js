@@ -462,30 +462,45 @@ export function buildTippableMesh(t) {
     g.add(topTrim);
   }
 
-  // 金具（固定ベルト）: 上部を壁へつなぐ2本のピンクのベルト
+  // 金具（固定ベルト）：前面上部を横切るピンクのバンド＋上面の斜めストラップ。
+  // どのカメラ角度からも「留めてある」ことが見えるようにする。
   const belt = new THREE.Group();
   belt.name = 'belt';
   const beltMat = makeStandard(0xf6538e, { roughness: 0.6 });
+  const padMat = makeStandard(0xffd66b, { roughness: 0.6 });
   const isDresser = t.kind === 'dresser';
+  // 前面の向き：タンスは +z、飾り棚は +x
+  const frontAxis = isDresser ? 'z' : 'x';
+  const frontHalf = (isDresser ? t.size.z : t.size.x) / 2;
+  const widthHalf = (isDresser ? t.size.x : t.size.z) / 2;
+
+  // 前面のバンド（角を回り込む）
+  const band = new THREE.Mesh(
+    isDresser
+      ? new THREE.BoxGeometry(widthHalf * 2 + 0.05, 0.055, 0.03)
+      : new THREE.BoxGeometry(0.03, 0.055, widthHalf * 2 + 0.05),
+    beltMat,
+  );
+  if (isDresser) band.position.set(0, h / 2 - 0.08, frontHalf + 0.016);
+  else band.position.set(frontHalf + 0.016, h / 2 - 0.08, 0);
+  belt.add(band);
+
+  // 上面から奥（壁側）へ渡る2本のストラップ＋黄色い留め具
   for (const side of [-1, 1]) {
-    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.035, 0.3), beltMat);
-    if (isDresser) {
-      // 背面（-z）の壁へ
-      strap.position.set(side * t.size.x * 0.3, h / 2 + 0.01, -t.size.z / 2 - 0.06);
-      strap.rotation.x = -0.5;
-    } else {
-      // 左（-x）の壁へ
-      strap.position.set(-t.size.x / 2 - 0.06, h / 2 + 0.01, side * t.size.z * 0.3);
-      strap.rotation.set(0, Math.PI / 2, 0.5);
-    }
-    belt.add(strap);
-    const pad = new THREE.Mesh(
-      new RoundedBoxGeometry(0.11, 0.05, 0.11, 1, 0.02),
-      makeStandard(0xffd66b, { roughness: 0.6 }),
+    const strap = new THREE.Mesh(
+      isDresser
+        ? new THREE.BoxGeometry(0.07, 0.03, t.size.z + 0.02)
+        : new THREE.BoxGeometry(t.size.x + 0.02, 0.03, 0.07),
+      beltMat,
     );
-    if (isDresser) pad.position.set(side * t.size.x * 0.3, h / 2 + 0.09, -t.size.z / 2 - 0.16);
-    else pad.position.set(-t.size.x / 2 - 0.16, h / 2 + 0.09, side * t.size.z * 0.3);
-    belt.add(pad);
+    if (isDresser) strap.position.set(side * widthHalf * 0.6, h / 2 + 0.018, 0);
+    else strap.position.set(0, h / 2 + 0.018, side * widthHalf * 0.6);
+    belt.add(strap);
+
+    const clamp = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.045, 0.1, 1, 0.02), padMat);
+    if (isDresser) clamp.position.set(side * widthHalf * 0.6, h / 2 + 0.03, frontHalf - 0.06);
+    else clamp.position.set(frontHalf - 0.06, h / 2 + 0.03, side * widthHalf * 0.6);
+    belt.add(clamp);
   }
   belt.visible = false;
   g.add(belt);
