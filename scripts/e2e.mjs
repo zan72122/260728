@@ -198,6 +198,7 @@ async function playLoop(page, tag, { rotateDuring } = {}) {
   await shot(page, `${tag}-test`);
   await tap(page, W() * 0.5, H() * 0.5); // horn for fun
   const dEnd = await waitPhase(page, 'choice', 15000);
+  await sleep(1100); // let the fade finish so the shot shows the real screen
   await shot(page, `${tag}-choice`);
   return dEnd;
 }
@@ -291,6 +292,7 @@ async function runInner(browser) {
     await sleep(2500);
     await shot(page, `${tag}-test`);
     await waitPhase(page, 'choice', 15000);
+    await sleep(1100);
     await shot(page, `${tag}-choice`);
   }
 

@@ -366,7 +366,7 @@ function drawGarageDoor(g: Game, ctx: Ctx, l: GarageLayout): void {
 }
 
 function drawLever(g: Game, ctx: Ctx, l: GarageLayout): void {
-  const knobR = Math.max(17, l.carW * 0.062);
+  const knobR = Math.max(20, l.carW * 0.075);
   const travel = l.leverTravel;
   const baseY = l.leverY;
   const knobY = baseY + travel * (0.5 - g.liftT) - g.leverPull * travel * 0.35;
@@ -381,10 +381,18 @@ function drawLever(g: Game, ctx: Ctx, l: GarageLayout): void {
   rr(ctx, l.leverX - knobR * 0.22, baseY - travel * 0.55, knobR * 0.44, travel * 1.1, knobR * 0.22);
   ctx.fillStyle = '#2e333d';
   ctx.fill();
-  // up/down decals
-  ctx.fillStyle = 'rgba(255,255,255,0.5)';
-  chevron(ctx, l.leverX, baseY - travel * 0.62, knobR * 0.55, 0, '#ffffff', 0.55);
-  chevron(ctx, l.leverX, baseY + travel * 0.62, knobR * 0.55, Math.PI, '#ffffff', 0.55);
+  // up/down decals — the currently meaningful direction glows and pulses
+  const canUse = g.phase === 'garage' && !g.liftAnim && !g.fade;
+  const upAct = canUse && g.liftT === 0;
+  const downAct = canUse && g.liftT >= 1 && (g.freePlay || g.allRepaired());
+  const pulse = (Math.sin(g.time * 4.5) + 1) / 2;
+  if (upAct || downAct) {
+    glow(ctx, l.leverX, knobY, knobR * (2.2 + pulse), 'rgba(255,209,102,0.45)', 0.5 + pulse * 0.5);
+  }
+  chevron(ctx, l.leverX, baseY - travel * 0.62, knobR * (upAct ? 0.7 + pulse * 0.15 : 0.55), 0,
+    upAct ? '#ffd166' : '#ffffff', upAct ? 0.75 + pulse * 0.25 : 0.35);
+  chevron(ctx, l.leverX, baseY + travel * 0.62, knobR * (downAct ? 0.7 + pulse * 0.15 : 0.55), Math.PI,
+    downAct ? '#ffd166' : '#ffffff', downAct ? 0.75 + pulse * 0.25 : 0.35);
   // stick + knob
   ctx.strokeStyle = '#aab0bd';
   ctx.lineWidth = knobR * 0.4;
@@ -487,11 +495,22 @@ function drawMaskItem(g: Game, ctx: Ctx, l: GarageLayout): void {
   if (!mp || g.phase !== 'garage') return;
   const s = l.mechS * 1.7;
   const bob = Math.sin(g.time * 2.2) * s * 0.18;
-  glow(ctx, mp.x, mp.y + bob, s * 3.2, 'rgba(120,220,210,0.35)', 0.7 + Math.sin(g.time * 3) * 0.3);
+  const pu = (Math.sin(g.time * 3) + 1) / 2;
+  glow(ctx, mp.x, mp.y + bob, s * 3.6, 'rgba(120,220,210,0.4)', 0.6 + pu * 0.4);
   ctx.save();
   ctx.translate(mp.x, mp.y + bob);
   ctx.rotate(Math.sin(g.time * 1.8) * 0.08);
   drawMaskShape(ctx, s);
+  ctx.restore();
+  // expanding tap ring
+  const ringT = (g.time % 1.4) / 1.4;
+  ctx.save();
+  ctx.globalAlpha = (1 - ringT) * 0.7;
+  ctx.strokeStyle = '#8fe0d8';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(mp.x, mp.y + bob, s * (1.6 + ringT * 1.4), 0, TAU);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -516,36 +535,53 @@ function drawFreeExtras(g: Game, ctx: Ctx, l: GarageLayout): void {
   ctx.strokeStyle = 'rgba(30,35,45,0.4)';
   ctx.lineWidth = 3;
   ctx.stroke();
-  // little bead doodle preview
-  ctx.fillStyle = '#e8eaee';
-  for (let i = 0; i < Math.min(40, g.doodle.length); i += 4) {
-    const d = g.doodle[i];
+  // bead doodle preview — or an inviting sample squiggle while it's blank
+  if (g.doodle.length > 0) {
+    ctx.fillStyle = '#e8eaee';
+    for (let i = 0; i < Math.min(60, g.doodle.length); i += 4) {
+      const d = g.doodle[i];
+      ctx.beginPath();
+      ctx.arc((d.x - 0.5) * r * 1.6, (d.y - 0.45) * r * 1.1, r * 0.05, 0, TAU);
+      ctx.fill();
+    }
+  } else {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.lineWidth = r * 0.07;
+    ctx.lineCap = 'round';
+    ctx.setLineDash([2, r * 0.16]);
     ctx.beginPath();
-    ctx.arc((d.x - 0.5) * r * 1.6, (d.y - 0.45) * r * 1.1, r * 0.05, 0, TAU);
-    ctx.fill();
+    for (let i = 0; i <= 16; i++) {
+      const px = -r * 0.6 + (i / 16) * r * 1.2;
+      const py = Math.sin(i * 0.8) * r * 0.22;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.restore();
   }
   glow(ctx, 0, 0, r * 1.4, 'rgba(150,220,255,0.25)', 0.6 + Math.sin(g.time * 2.5) * 0.4);
   ctx.restore();
 
-  // home button
+  // home button (house pictogram)
   drawRoundIcon(ctx, l.homeX, l.homeY, l.homeR, '#576070', (c) => {
+    const hr = l.homeR;
     c.fillStyle = '#ffffff';
     c.beginPath();
-    c.moveTo(0, -l.homeR * 0.45);
-    c.lineTo(l.homeR * 0.5, 0);
-    c.lineTo(l.homeR * 0.32, 0);
-    c.lineTo(l.homeR * 0.32, l.homeR * 0.45);
-    c.lineTo(-l.homeR * 0.32, l.homeR * 0.45);
-    c.lineTo(-l.homeR * 0.32, 0);
-    c.lineTo(-l.homeR * 0.5, 0);
+    c.moveTo(0, -hr * 0.52);
+    c.lineTo(hr * 0.55, -hr * 0.05);
+    c.lineTo(-hr * 0.55, -hr * 0.05);
     c.closePath();
     c.fill();
+    c.fillRect(-hr * 0.38, -hr * 0.05, hr * 0.76, hr * 0.5);
+    c.fillStyle = '#576070';
+    c.fillRect(-hr * 0.1, hr * 0.12, hr * 0.2, hr * 0.33);
   });
 }
 
 function drawGarageHints(g: Game, ctx: Ctx, l: GarageLayout): void {
   if (g.phase !== 'garage' || g.liftAnim || g.fade) return;
-  const active = g.hintT > 4;
+  const active = g.hintT > 1.4;
   const pulse = (Math.sin(g.time * 5) + 1) / 2;
   if (!active) return;
 
@@ -713,18 +749,8 @@ function drawClipStation(g: Game, ctx: Ctx, f: FS | undefined): void {
   ctx.stroke();
   ctx.restore();
 
-  // clip slot (dashed highlight while broken)
-  if (broken) {
-    const pulse = (Math.sin(g.time * 4) + 1) / 2;
-    ctx.save();
-    ctx.strokeStyle = `rgba(197,246,208,${0.4 + pulse * 0.5})`;
-    ctx.lineWidth = 4;
-    ctx.setLineDash([8, 7]);
-    ctx.beginPath();
-    ctx.arc(slot.x, slot.y, 26, 0, TAU);
-    ctx.stroke();
-    ctx.restore();
-  }
+  // clip slot (rotating dashed target while broken)
+  if (broken) drawTargetRing(g, ctx, slot.x, slot.y, 34);
   // slot hole
   ctx.fillStyle = '#2c303a';
   ctx.beginPath();
@@ -733,26 +759,42 @@ function drawClipStation(g: Game, ctx: Ctx, f: FS | undefined): void {
 
   // the clip itself
   const cp = f ? (f.fixed ? slot : (f.drag ?? PART.clipLoose)) : slot;
-  drawClip(ctx, cp.x, cp.y, f?.held ? 1.15 : 1, broken ? Math.sin((f?.wob ?? 0) * 2) * 0.15 : 0);
+  drawClip(ctx, cp.x, cp.y, f?.held ? 1.15 : 1, broken ? Math.sin((f?.wob ?? 0) * 2) * 0.15 : 0, !!broken);
   if (f && f.snapT > 0) glow(ctx, slot.x, slot.y, 60 * f.snapT, 'rgba(197,246,208,0.8)', f.snapT);
 }
 
-function drawClip(ctx: Ctx, x: number, y: number, scale: number, rot: number): void {
+// one consistent "put it here" marker for every drag target
+function drawTargetRing(g: Game, ctx: Ctx, x: number, y: number, r: number): void {
+  const pulse = (Math.sin(g.time * 4) + 1) / 2;
+  glow(ctx, x, y, r * 1.8, 'rgba(255,209,102,0.25)', 0.4 + pulse * 0.5);
+  ctx.save();
+  ctx.strokeStyle = `rgba(255,214,110,${0.55 + pulse * 0.45})`;
+  ctx.lineWidth = 6;
+  ctx.setLineDash([12, 10]);
+  ctx.lineDashOffset = -g.time * 26;
+  ctx.beginPath();
+  ctx.arc(x, y, r + pulse * 4, 0, TAU);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawClip(ctx: Ctx, x: number, y: number, scale: number, rot: number, active = true): void {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(rot);
   ctx.scale(scale, scale);
-  ctx.fillStyle = '#ffd166';
+  // a settled clip turns calm gray-blue so nothing "done" still looks tappable
+  ctx.fillStyle = active ? '#ffd166' : '#9aa4b5';
   ctx.beginPath();
   ctx.arc(0, 0, 17, 0, TAU);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(140,100,20,0.5)';
+  ctx.strokeStyle = active ? 'rgba(140,100,20,0.5)' : 'rgba(40,50,65,0.5)';
   ctx.lineWidth = 3;
   ctx.stroke();
   rr(ctx, -6, -26, 12, 18, 5);
-  ctx.fillStyle = '#ffdf8d';
+  ctx.fillStyle = active ? '#ffdf8d' : '#b6bfcd';
   ctx.fill();
-  ctx.strokeStyle = 'rgba(140,100,20,0.4)';
+  ctx.strokeStyle = active ? 'rgba(140,100,20,0.4)' : 'rgba(40,50,65,0.4)';
   ctx.stroke();
   ctx.fillStyle = 'rgba(255,255,255,0.6)';
   ctx.beginPath();
@@ -776,17 +818,7 @@ function drawHoseStation(g: Game, ctx: Ctx, f: FS | undefined): void {
   ctx.beginPath();
   ctx.arc(fit.x, fit.y, 9, 0, TAU);
   ctx.fill();
-  if (broken) {
-    const pulse = (Math.sin(g.time * 4) + 1) / 2;
-    ctx.save();
-    ctx.strokeStyle = `rgba(150,220,255,${0.4 + pulse * 0.5})`;
-    ctx.lineWidth = 4;
-    ctx.setLineDash([8, 7]);
-    ctx.beginPath();
-    ctx.arc(fit.x, fit.y, 28, 0, TAU);
-    ctx.stroke();
-    ctx.restore();
-  }
+  if (broken) drawTargetRing(g, ctx, fit.x, fit.y, 36);
 
   // the hose: translucent tube from a to end
   const midx = (a.x + end.x) / 2 + (broken ? Math.sin(g.time * 2.2) * 8 : 0);
@@ -921,7 +953,7 @@ function drawUnderMechanic(g: Game, ctx: Ctx, l: UnderLayout): void {
   if (first) {
     const fp = g.faultGrabPos(first);
     const sp = underToScreen(l, fp.x, fp.y);
-    aim = clamp((sp.x - mx) / (W * 0.5), -1, 1);
+    aim = clamp((sp.x - mx) / (W * 0.32), -1, 1);
   }
   const reaching = g.pointer.down && g.phase === 'under' ? 1 : 0.25;
 
@@ -945,7 +977,7 @@ function drawUnderHints(g: Game, ctx: Ctx, l: UnderLayout): void {
   const pulse = (Math.sin(g.time * 5) + 1) / 2;
   const first = g.faults.find((f) => !f.fixed);
   if (first) {
-    if (g.hintT > 4) {
+    if (g.hintT > 1.4) {
       const fp = g.faultGrabPos(first);
       const sp = underToScreen(l, fp.x, fp.y);
       glow(ctx, sp.x, sp.y, l.grabR * (1.1 + pulse * 0.3), 'rgba(255,233,168,0.4)', 0.5 + pulse * 0.5);
@@ -1001,23 +1033,34 @@ function drawWeldScene(g: Game, ctx: Ctx): void {
     x: wl.carX, groundY: wl.carGroundY, w: wl.bigW,
     lift: 0, bounce: 0, wheelDrop: 0, wheelSpin: 0,
   };
-  const crackDraw: CrackDraw = { kind: c.kind, welded: c.welded, beadShine: c.shine };
+  const emberPulse = c.done ? 0 : 0.5 + Math.sin(g.time * 3.2) * 0.5;
+  const crackDraw: CrackDraw = { kind: c.kind, welded: c.welded, beadShine: c.shine, emberPulse };
   drawCarSide(ctx, g.spec, pose, undefined);
 
   // dim the body so the arc pops (the mask view)
-  ctx.fillStyle = 'rgba(12,16,26,0.5)';
+  ctx.fillStyle = 'rgba(12,16,26,0.42)';
   ctx.fillRect(0, 0, W, H);
 
-  // crack drawn bright on top
+  // crack drawn bright on top, glowing like an ember so it can't be missed
   ctx.save();
   ctx.translate(wl.carX, wl.carGroundY);
   drawCrackOnBody(ctx, wl.bigW, crackDraw);
   ctx.restore();
 
-  // ghost finger hint: a soft dot slides along the crack
-  if (g.phase === 'weld' && g.hintT > 4 && !g.arcOn && !c.done) {
+  // a sparkling start dot on the first unwelded spot invites the finger
+  if (g.phase === 'weld' && !c.done && !g.arcOn) {
     const pts = g.crackScreenPts();
-    if (pts.length > 1) {
+    const firstIdx = c.welded.findIndex((w) => !w);
+    if (firstIdx >= 0 && pts[firstIdx]) {
+      const p = pts[firstIdx];
+      const pu = (Math.sin(g.time * 5) + 1) / 2;
+      glow(ctx, p.x, p.y, 40 + pu * 18, 'rgba(255,240,190,0.7)', 0.7);
+      ctx.fillStyle = '#fff6d8';
+      starPath(ctx, p.x, p.y, 12 + pu * 4, 4, 0.4, g.time * 2);
+      ctx.fill();
+    }
+    // ghost finger hint: a soft dot slides along the crack after a short idle
+    if (g.hintT > 2.5 && pts.length > 1) {
       const idx = Math.floor(g.hintGhost * (pts.length - 1));
       const p = pts[idx];
       glow(ctx, p.x, p.y, 44, 'rgba(255,255,255,0.55)', 0.8);
@@ -1103,6 +1146,25 @@ function drawFreeWeld(g: Game, ctx: Ctx): void {
   // rivets
   for (const [rx, ry] of [[0.06, 0.08], [0.94, 0.08], [0.06, 0.92], [0.94, 0.92]] as Array<[number, number]>) {
     hexNut(ctx, px + pw * rx, py + ph * ry, 9, 0.3);
+  }
+
+  // sample squiggle invites drawing while the plate is blank
+  if (g.doodle.length === 0) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = Math.max(6, Math.min(W, H) * 0.012);
+    ctx.lineCap = 'round';
+    ctx.setLineDash([2, Math.min(W, H) * 0.05]);
+    ctx.lineDashOffset = -g.time * 30;
+    ctx.beginPath();
+    for (let i = 0; i <= 24; i++) {
+      const qx = px + pw * (0.2 + (i / 24) * 0.6);
+      const qy = py + ph * 0.45 + Math.sin(i * 0.55) * ph * 0.12;
+      if (i === 0) ctx.moveTo(qx, qy);
+      else ctx.lineTo(qx, qy);
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 
   // bead doodle
@@ -1287,12 +1349,13 @@ function drawTestScene(g: Game, ctx: Ctx): void {
     }
   }
 
-  // the car with soft suspension over bumps
-  const frontG = courseGround(course, carSX + sPos + 60);
-  const rearG = courseGround(course, carSX + sPos - 60);
-  const gy = roadY - (frontG + rearG) / 2;
-  const tilt = Math.atan2(rearG - frontG, 120) * 0.7;
+  // the car with soft suspension over bumps (wheels follow the road)
   const carW = clamp(Math.min(W, H) * 0.42, 200, 330);
+  const wb = carW * 0.30;
+  const frontG = courseGround(course, carSX + sPos + wb);
+  const rearG = courseGround(course, carSX + sPos - wb);
+  const gy = roadY - (frontG + rearG) / 2;
+  const tilt = Math.atan2(rearG - frontG, wb * 2);
   softShadow(ctx, carSX, gy + 8, carW * 0.95, carW * 0.09, 0.28);
   ctx.save();
   ctx.translate(carSX, gy);
@@ -1330,7 +1393,7 @@ function drawTestScene(g: Game, ctx: Ctx): void {
 
 function drawTitle(g: Game, ctx: Ctx): void {
   const { W, H } = g;
-  ctx.fillStyle = 'rgba(35,39,51,0.25)';
+  ctx.fillStyle = 'rgba(90,60,30,0.14)';
   ctx.fillRect(0, 0, W, H);
 
   // hanging wooden sign
@@ -1419,9 +1482,11 @@ function drawChoice(g: Game, ctx: Ctx): void {
   for (let i = 0; i < cl.btns.length; i++) {
     const b = cl.btns[i];
     const wob = Math.sin(g.time * 2.2 + i * 1.8) * 0.03;
+    const grow = 1 + Math.sin(g.time * 2.6 + i * 2.1) * 0.035;
     ctx.save();
     ctx.translate(b.x, b.y);
     ctx.rotate(wob);
+    ctx.scale(grow, grow);
     glow(ctx, 0, 0, b.r * 1.9, 'rgba(255,255,255,0.15)', 1);
     const bg = ctx.createRadialGradient(-b.r * 0.3, -b.r * 0.4, b.r * 0.2, 0, 0, b.r * 1.25);
     bg.addColorStop(0, '#ffffff');

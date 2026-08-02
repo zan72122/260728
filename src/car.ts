@@ -49,10 +49,10 @@ export function crackLocalPts(kind: CrackKind): Array<[number, number]> {
       [0.04, 0.20], [0.095, 0.225], [0.145, 0.205],
     ];
   }
-  // curved crack above the rear wheel arch
+  // curved crack above the rear wheel arch (kept below the window line)
   return [
-    [-0.42, 0.16], [-0.395, 0.215], [-0.355, 0.255], [-0.30, 0.28],
-    [-0.245, 0.285], [-0.19, 0.27], [-0.15, 0.245],
+    [-0.42, 0.135], [-0.395, 0.18], [-0.355, 0.215], [-0.30, 0.235],
+    [-0.245, 0.24], [-0.19, 0.228], [-0.15, 0.205],
   ];
 }
 
@@ -181,6 +181,7 @@ export interface CrackDraw {
   kind: CrackKind;
   welded: boolean[]; // per sampled point
   beadShine: number; // 0..1 flash after completion
+  emberPulse?: number; // 0..1 warm glow on unwelded parts (weld scene)
 }
 
 export function drawCarSide(ctx: Ctx, spec: CarSpec, pose: CarPose, crack?: CrackDraw): void {
@@ -324,26 +325,35 @@ export function drawCrackOnBody(ctx: Ctx, w: number, crack: CrackDraw): void {
   const dense = densify(pts, 26);
   const lw = Math.max(4, w * 0.018);
 
-  // unwelded part: dark jagged crack
+  // unwelded part: warm ember glow (weld scene) + a single crisp dark crack
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+  const ember = crack.emberPulse ?? 0;
+  if (ember > 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.25 + ember * 0.35;
+    ctx.strokeStyle = '#ff9a4d';
+    ctx.lineWidth = lw * (2.6 + ember * 1.2);
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < dense.length; i++) {
+      if (crack.welded[i]) { started = false; continue; }
+      if (!started) { ctx.moveTo(dense[i][0], dense[i][1]); started = true; }
+      else ctx.lineTo(dense[i][0], dense[i][1]);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
   for (let i = 0; i < dense.length - 1; i++) {
     if (crack.welded[i] && crack.welded[i + 1]) continue;
-    ctx.strokeStyle = 'rgba(24,20,20,0.88)';
+    ctx.strokeStyle = 'rgba(24,20,20,0.9)';
     ctx.lineWidth = lw;
     ctx.beginPath();
     ctx.moveTo(dense[i][0], dense[i][1]);
     ctx.lineTo(dense[i + 1][0], dense[i + 1][1]);
     ctx.stroke();
-    ctx.strokeStyle = 'rgba(90,60,50,0.5)';
-    ctx.lineWidth = lw * 1.9;
-    ctx.globalAlpha = 0.25;
-    ctx.beginPath();
-    ctx.moveTo(dense[i][0], dense[i][1]);
-    ctx.lineTo(dense[i + 1][0], dense[i + 1][1]);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
   }
   ctx.restore();
 

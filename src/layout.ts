@@ -25,24 +25,28 @@ export interface GarageLayout {
 
 export function layoutGarage(W: number, H: number): GarageLayout {
   const portrait = H > W;
-  const carW = portrait ? clamp(W * 0.72, 220, 430) : clamp(W * 0.46, 260, 460);
+  // cap the car size so body + lift travel always fit above the floor line
+  const carW = portrait
+    ? clamp(Math.min(W * 0.72, H * 0.42), 220, 430)
+    : clamp(Math.min(W * 0.46, H * 0.72), 230, 460);
   const carX = portrait ? W * 0.45 : W * 0.40;
   const groundY = portrait ? H * 0.64 : H * 0.76;
-  const liftMax = clamp(carW * 0.52, 120, portrait ? H * 0.24 : H * 0.30);
+  const liftMax = clamp(carW * 0.52, 100, Math.max(110, groundY - carW * 0.56 - 12));
   const colX = carX + carW * 0.575;
   const colXL = carX - carW * 0.575;
-  const leverX = clamp(colX + carW * 0.10, 60, W - 46);
-  const leverY = groundY - carW * 0.52;
+  const leverX = clamp(colX + carW * 0.16, 60, W - 46);
+  const leverY = groundY - carW * 0.44;
   const mechS = clamp(carW * 0.062, 13, 24);
   const mechHomeX = portrait ? clamp(carX + carW * 0.62, 0, W - mechS * 3.4) : clamp(carX + carW * 0.82, 0, W - mechS * 4);
   const mechY = portrait ? Math.min(groundY + carW * 0.30, H - mechS * 4.2) : groundY + carW * 0.13;
+  const plateR = clamp(carW * 0.17, 46, 86);
   return {
     portrait, W, H, carW, carX, groundY, liftMax, colX, colXL,
     leverX, leverY, leverTravel: clamp(carW * 0.22, 60, 110),
     mechHomeX, mechY, mechS,
-    plateX: portrait ? W * 0.13 : W * 0.09,
+    plateX: Math.max(plateR * 1.25, W * 0.11),
     plateY: groundY - carW * 0.30,
-    plateR: clamp(carW * 0.17, 46, 86),
+    plateR,
     homeX: 44, homeY: 44, homeR: 26,
     doorX: W * 0.985,
     signY: portrait ? H * 0.16 : H * 0.16,
@@ -112,16 +116,16 @@ export function layoutWeld(
   crackCenter: { u: number; v: number },
 ): WeldLayout {
   const portrait = H > W;
-  const bigW = portrait ? W * 2.1 : Math.min(W * 1.35, H * 2.2);
+  const bigW = portrait ? Math.min(W * 2.6, H * 1.4) : Math.min(W * 1.35, H * 2.2);
   const cx = W * 0.5;
-  const cy = portrait ? H * 0.36 : H * 0.40;
+  const cy = portrait ? H * 0.42 : H * 0.40;
   const carX = cx - crackCenter.u * bigW;
   const carGroundY = cy + crackCenter.v * bigW;
   return {
     W, H, bigW, carX, carGroundY,
     mechX: portrait ? W * 0.5 : W * 0.30,
-    mechY: H * 0.97,
-    mechS: clamp(Math.min(W, H) * 0.055, 16, 30),
+    mechY: H * 0.985,
+    mechS: clamp(Math.min(W, H) * 0.06, 18, 34),
   };
 }
 
@@ -131,7 +135,8 @@ export interface ChoiceLayout {
 
 export function layoutChoice(W: number, H: number): ChoiceLayout {
   const portrait = H > W;
-  const r = clamp(Math.min(W, H) * 0.135, 52, 96);
+  // the H cap keeps the stacked buttons + labels from overlapping on tall screens
+  const r = Math.min(clamp(Math.min(W, H) * 0.135, 46, 96), H * 0.068);
   if (portrait) {
     const cx = W / 2;
     const y0 = H * 0.40;
