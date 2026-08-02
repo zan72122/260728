@@ -485,7 +485,7 @@ function drawMechanicInGarage(g: Game, ctx: Ctx, l: GarageLayout): void {
 function drawMaskItem(g: Game, ctx: Ctx, l: GarageLayout): void {
   const mp = g.maskScreenPos(l);
   if (!mp || g.phase !== 'garage') return;
-  const s = l.mechS * 1.15;
+  const s = l.mechS * 1.7;
   const bob = Math.sin(g.time * 2.2) * s * 0.18;
   glow(ctx, mp.x, mp.y + bob, s * 3.2, 'rgba(120,220,210,0.35)', 0.7 + Math.sin(g.time * 3) * 0.3);
   ctx.save();

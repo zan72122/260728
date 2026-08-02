@@ -179,6 +179,11 @@ export class Game {
     }
     this.tPhase += dt;
     this.hintT += dt;
+    // soft audio nudge when the child has been idle for a while
+    if ((this.phase === 'garage' || this.phase === 'under' || this.phase === 'weld')
+      && this.hintT > 4.5 && this.hintT % 5 < dt && !this.fade && !this.liftAnim) {
+      this.sfx.squeakHint();
+    }
     this.hintGhost = (this.hintGhost + dt / 2.4) % 1;
     this.parts.update(dt);
     this.shake = Math.max(0, this.shake - dt * 3);
@@ -251,7 +256,10 @@ export class Game {
 
   private updateArrive(dt: number): void {
     const dur = 2.3;
+    if (this.tPhase - dt <= 0) this.sfx.engineStart(this.freePlay ? 0 : 1);
     this.arriveT = clamp(this.tPhase / dur, 0, 1);
+    this.sfx.engineSet(this.freePlay ? 0 : 1, Math.max(0, 1 - this.arriveT) * 0.7);
+    if (this.arriveT >= 1 && this.tPhase - dt < dur) this.sfx.engineStop();
     this.wheelSpin += dt * (1 - this.arriveT) * 14;
     if (!this.freePlay) {
       this.carRattleTimer -= dt;
