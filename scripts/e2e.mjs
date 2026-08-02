@@ -26,7 +26,17 @@ async function dbg(page) {
   return page.evaluate(() => window.__game.debug());
 }
 
-async function waitPhase(page, phases, timeout = 15000) {
+async function waitFor(page, pred, timeout = 20000, what = 'condition') {
+  const t0 = Date.now();
+  for (;;) {
+    const d = await dbg(page);
+    if (pred(d)) return d;
+    if (Date.now() - t0 > timeout) throw new Error(`timeout waiting for ${what}`);
+    await sleep(160);
+  }
+}
+
+async function waitPhase(page, phases, timeout = 25000) {
   const want = Array.isArray(phases) ? phases : [phases];
   const t0 = Date.now();
   for (;;) {
@@ -121,22 +131,20 @@ async function playLoop(page, tag, { rotateDuring } = {}) {
 
   await shot(page, `${tag}-title`);
   await tap(page, W() / 2, H() * 0.78);
-  await waitPhase(page, 'garage', 8000);
+  await waitPhase(page, 'garage', 25000);
   await shot(page, `${tag}-garage-arrived`);
 
   // lift up: swipe up on the lever
   let d = await dbg(page);
   let lever = d.targets.lever;
   await swipe(page, lever.x, lever.y, lever.x, lever.y - 130);
-  await sleep(2200);
-  d = await dbg(page);
-  if (d.liftT < 1 || !d.locked) throw new Error(`${tag}: lift did not raise/lock (liftT=${d.liftT})`);
+  d = await waitFor(page, (s) => s.liftT >= 1 && s.locked, 20000, `${tag} lift`);
   await shot(page, `${tag}-lifted`);
 
   // creeper slide-in: swipe toward the car
   const mech = d.targets.mech;
   await swipe(page, mech.x, mech.y, mech.x - Math.min(240, W() * 0.5), mech.y, 130);
-  await waitPhase(page, 'under', 6000);
+  await waitPhase(page, 'under', 30000);
   await sleep(700);
   await shot(page, `${tag}-under`);
 
@@ -165,14 +173,14 @@ async function playLoop(page, tag, { rotateDuring } = {}) {
 
   // slide out
   await swipe(page, W() * 0.5, H() * 0.55, W() * 0.5 + Math.min(240, W() * 0.5), H() * 0.55, 130);
-  await waitPhase(page, 'garage', 6000);
+  await waitPhase(page, 'garage', 30000);
   await shot(page, `${tag}-out`);
 
   // shield: tap the mask
   d = await dbg(page);
   if (!d.targets.mask) throw new Error(`${tag}: mask target missing`);
   await tap(page, d.targets.mask.x, d.targets.mask.y);
-  await waitPhase(page, 'weld', 6000);
+  await waitPhase(page, 'weld', 30000);
   await sleep(300);
   await shot(page, `${tag}-weld-start`);
 
@@ -187,17 +195,17 @@ async function playLoop(page, tag, { rotateDuring } = {}) {
   d = await dbg(page);
   if (d.cracksRemaining !== 0) throw new Error(`${tag}: crack not welded`);
   await shot(page, `${tag}-weld-done`);
-  await waitPhase(page, 'garage', 8000);
+  await waitPhase(page, 'garage', 30000);
 
   // lower the lift: swipe down on the lever
   d = await dbg(page);
   lever = d.targets.lever;
   await swipe(page, lever.x, lever.y, lever.x, lever.y + 130);
-  await waitPhase(page, 'test', 12000);
+  await waitPhase(page, 'test', 50000);
   await sleep(2500);
   await shot(page, `${tag}-test`);
   await tap(page, W() * 0.5, H() * 0.5); // horn for fun
-  const dEnd = await waitPhase(page, 'choice', 15000);
+  const dEnd = await waitPhase(page, 'choice', 50000);
   await sleep(1100); // let the fade finish so the shot shows the real screen
   await shot(page, `${tag}-choice`);
   return dEnd;
@@ -229,7 +237,7 @@ async function run() {
 async function runInner(browser) {
   const ctx = await browser.newContext({
     viewport: { width: 390, height: 844 },
-    deviceScaleFactor: 2,
+    deviceScaleFactor: 1, // SwiftShader is slow at dpr2; visuals are checked separately
   });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
@@ -246,7 +254,7 @@ async function runInner(browser) {
   // ---- choice: next car -> quick second loop on iPhone landscape
   let d;
   await tapChoice(page, 'next');
-  await waitPhase(page, 'garage', 10000);
+  await waitPhase(page, 'garage', 30000);
   await page.setViewportSize({ width: 844, height: 390 });
   await sleep(400);
   console.log('iPhone landscape: full loop (car 2)...');
@@ -259,21 +267,19 @@ async function runInner(browser) {
     let dd = await dbg(page);
     const lever = dd.targets.lever;
     await swipe(page, lever.x, lever.y, lever.x, lever.y - 130);
-    await sleep(2200);
-    dd = await dbg(page);
-    if (dd.liftT < 1) throw new Error(`${tag}: lift failed`);
+    dd = await waitFor(page, (s) => s.liftT >= 1 && s.locked, 20000, `${tag} lift`);
     const mech = dd.targets.mech;
     await swipe(page, mech.x, mech.y, mech.x - 240, mech.y, 130);
-    await waitPhase(page, 'under', 6000);
+    await waitPhase(page, 'under', 30000);
     await sleep(700);
     await shot(page, `${tag}-under`);
     dd = await dbg(page);
     for (let i = 0; i < dd.faults.length; i++) await fixFault(page, i, tag);
     await swipe(page, 420, 195, 700, 195, 130);
-    await waitPhase(page, 'garage', 6000);
+    await waitPhase(page, 'garage', 30000);
     dd = await dbg(page);
     await tap(page, dd.targets.mask.x, dd.targets.mask.y);
-    await waitPhase(page, 'weld', 6000);
+    await waitPhase(page, 'weld', 30000);
     await sleep(300);
     await shot(page, `${tag}-weld`);
     dd = await dbg(page);
@@ -285,13 +291,13 @@ async function runInner(browser) {
     }
     dd = await dbg(page);
     if (dd.cracksRemaining !== 0) throw new Error(`${tag}: crack not welded`);
-    await waitPhase(page, 'garage', 8000);
+    await waitPhase(page, 'garage', 30000);
     dd = await dbg(page);
     await swipe(page, dd.targets.lever.x, dd.targets.lever.y, dd.targets.lever.x, dd.targets.lever.y + 130);
-    await waitPhase(page, 'test', 12000);
+    await waitPhase(page, 'test', 50000);
     await sleep(2500);
     await shot(page, `${tag}-test`);
-    await waitPhase(page, 'choice', 15000);
+    await waitPhase(page, 'choice', 50000);
     await sleep(1100);
     await shot(page, `${tag}-choice`);
   }
@@ -299,13 +305,13 @@ async function runInner(browser) {
   // ---- free play check (iPhone landscape)
   console.log('free play...');
   await tapChoice(page, 'free');
-  await waitPhase(page, 'garage', 10000);
+  await waitPhase(page, 'garage', 30000);
   d = await dbg(page);
   if (!d.freePlay) throw new Error('free play flag not set');
   await shot(page, 'free-garage');
   // weld doodle on the plate
   await tap(page, d.targets.plate.x, d.targets.plate.y);
-  await waitPhase(page, 'freeweld', 5000);
+  await waitPhase(page, 'freeweld', 30000);
   const W = page.viewportSize().width;
   const H = page.viewportSize().height;
   await trace(page, [
@@ -314,7 +320,7 @@ async function runInner(browser) {
   ], 1);
   await shot(page, 'free-weld-doodle');
   await tap(page, 46, 46);
-  await waitPhase(page, 'garage', 5000);
+  await waitPhase(page, 'garage', 30000);
   // creeper joy: lift and slide in/out twice
   d = await dbg(page);
   console.log('free: lift, phase=', d.phase);
@@ -325,16 +331,16 @@ async function runInner(browser) {
   for (let i = 0; i < 2; i++) {
     const mech = d.targets.mech;
     await swipe(page, mech.x, mech.y, mech.x - 240, mech.y, 120);
-    await waitPhase(page, 'under', 6000);
+    await waitPhase(page, 'under', 30000);
     await sleep(300);
     await swipe(page, W * 0.5, H * 0.55, W * 0.5 + 240, H * 0.55, 120);
-    d = await waitPhase(page, 'garage', 6000);
+    d = await waitPhase(page, 'garage', 30000);
   }
   await shot(page, 'free-after-slides');
   // home
   d = await dbg(page);
   await tap(page, d.targets.home.x, d.targets.home.y);
-  await waitPhase(page, 'title', 5000);
+  await waitPhase(page, 'title', 30000);
 
   // ---- iPad portrait & landscape: full loop each
   await page.setViewportSize({ width: 810, height: 1080 });
@@ -344,7 +350,7 @@ async function runInner(browser) {
   await playLoop(page, 'ipad-portrait', {});
 
   await tapChoice(page, 'next');
-  await waitPhase(page, 'garage', 10000);
+  await waitPhase(page, 'garage', 30000);
   await page.setViewportSize({ width: 1080, height: 810 });
   await sleep(400);
   await shot(page, 'ipad-landscape-garage');

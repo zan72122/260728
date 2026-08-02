@@ -516,7 +516,12 @@ export class Game {
     // the mask (when present) wins over the generous lever grab zone
     const mask = this.maskScreenPos(l);
     if (mask && dist(x, y, mask.x, mask.y) < Math.max(80, l.carW * 0.26)) return;
-    const grabR = Math.max(90, l.carW * 0.30);
+    // so does the creeper robot when a slide-in is the expected action
+    if (this.liftT >= 1 && this.locked && (this.freePlay || this.faultsRemaining() > 0)) {
+      const dMech = dist(x, y, l.mechHomeX, l.mechY);
+      if (dMech < dist(x, y, l.leverX, l.leverY)) return;
+    }
+    const grabR = Math.max(70, l.carW * 0.30);
     if (dist(x, y, l.leverX, l.leverY) < grabR && !this.liftAnim) {
       this.pointer.dragKind = 'lever';
       this.sfx.click(0.9);

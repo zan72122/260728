@@ -32,6 +32,14 @@ npm run e2e        # Playwright による自動一周プレイ検証（要 previ
                    # iPhone/iPad 縦横で全フェーズを操作し shots/ に記録
 ```
 
-技術: Vite + TypeScript + Canvas 2D。音はすべて WebAudio で合成
-（音源ファイルなし）。画面回転してもレイアウトのみ再計算され、
-修理の進行状態は失われません。
+技術: Vite + TypeScript + Three.js (WebGL) のフル3D +
+画面スペース演出用の2Dオーバーレイキャンバス。音はすべて WebAudio で
+合成（音源ファイルなし）。画面回転してもカメラとレイアウトが
+再計算されるだけで、修理の進行状態は失われません。
+
+3Dモデル: 車両・車輪・車体下部品・小物は Kenney「Car Kit」
+(https://kenney.nl/assets/car-kit, CC0 1.0 Universal) を使用し、
+`scripts/fetch-assets.mjs` で取得したものを `public/assets/kenney/`
+に同梱しています（ライセンス文は同ディレクトリの License.txt）。
+車体の塗装色は実行時にアトラスの塗装色相域を検出して車ごとに再着色。
+整備ロボット・ガレージ・テストコースは手続き生成ジオメトリです。

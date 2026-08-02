@@ -1,71 +1,83 @@
 import { Game } from './game';
-import { render } from './render';
+import { initView, view } from './three/scene3d';
+import { drawOverlay } from './overlay';
 
-const canvas = document.getElementById('stage') as HTMLCanvasElement;
-const ctx = canvas.getContext('2d')!;
-const game = new Game();
-game.resetCar(0, false);
-game.phase = 'title';
+const glCanvas = document.getElementById('stage') as HTMLCanvasElement;
+const fxCanvas = document.getElementById('fx') as HTMLCanvasElement;
+const fctx = fxCanvas.getContext('2d')!;
 
-function resize(): void {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  canvas.width = Math.round(w * dpr);
-  canvas.height = Math.round(h * dpr);
-  canvas.style.width = `${w}px`;
-  canvas.style.height = `${h}px`;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  game.W = w;
-  game.H = h;
-}
-window.addEventListener('resize', resize);
-window.addEventListener('orientationchange', () => window.setTimeout(resize, 60));
-resize();
+async function boot(): Promise<void> {
+  await initView(glCanvas);
+  const game = new Game();
+  game.resetCar(0, false);
+  game.phase = 'title';
 
-// single-pointer input
-let activeId: number | null = null;
-canvas.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  if (activeId !== null) return;
-  activeId = e.pointerId;
-  canvas.setPointerCapture(e.pointerId);
-  game.pointerDown(e.clientX, e.clientY);
-});
-canvas.addEventListener('pointermove', (e) => {
-  if (e.pointerId !== activeId) return;
-  e.preventDefault();
-  game.pointerMove(e.clientX, e.clientY);
-});
-const endPointer = (e: PointerEvent): void => {
-  if (e.pointerId !== activeId) return;
-  activeId = null;
-  game.pointerUp(e.clientX, e.clientY);
-};
-canvas.addEventListener('pointerup', endPointer);
-canvas.addEventListener('pointercancel', endPointer);
-window.addEventListener('blur', () => {
-  if (activeId !== null) {
-    activeId = null;
-    game.pointerUp(game.pointer.x, game.pointer.y);
+  function resize(): void {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    view.resize(w, h, dpr);
+    fxCanvas.width = Math.round(w * dpr);
+    fxCanvas.height = Math.round(h * dpr);
+    fxCanvas.style.width = `${w}px`;
+    fxCanvas.style.height = `${h}px`;
+    fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    game.W = w;
+    game.H = h;
   }
-});
-document.addEventListener('gesturestart', (e) => e.preventDefault());
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => window.setTimeout(resize, 60));
+  resize();
 
-let last = performance.now();
-function frame(now: number): void {
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
-  game.update(dt);
-  ctx.clearRect(0, 0, game.W, game.H);
-  render(game, ctx);
+  // single-pointer input
+  let activeId: number | null = null;
+  glCanvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (activeId !== null) return;
+    activeId = e.pointerId;
+    glCanvas.setPointerCapture(e.pointerId);
+    game.pointerDown(e.clientX, e.clientY);
+  });
+  glCanvas.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== activeId) return;
+    e.preventDefault();
+    game.pointerMove(e.clientX, e.clientY);
+  });
+  const endPointer = (e: PointerEvent): void => {
+    if (e.pointerId !== activeId) return;
+    activeId = null;
+    game.pointerUp(e.clientX, e.clientY);
+  };
+  glCanvas.addEventListener('pointerup', endPointer);
+  glCanvas.addEventListener('pointercancel', endPointer);
+  window.addEventListener('blur', () => {
+    if (activeId !== null) {
+      activeId = null;
+      game.pointerUp(game.pointer.x, game.pointer.y);
+    }
+  });
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  glCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  let last = performance.now();
+  function frame(now: number): void {
+    const dt = Math.min(0.12, (now - last) / 1000);
+    last = now;
+    game.update(dt);
+    view.update(game, dt);
+    view.render();
+    drawOverlay(game, fctx);
+    requestAnimationFrame(frame);
+  }
   requestAnimationFrame(frame);
-}
-requestAnimationFrame(frame);
 
-// E2E / debug hook
+  // E2E / debug hook
+  window.__game = { debug: () => game.debug(), game };
+  (window as unknown as { __view: unknown }).__view = view;
+}
+
 declare global {
   interface Window { __game?: { debug: () => Record<string, unknown>; game: Game } }
 }
-window.__game = { debug: () => game.debug(), game };
+
+void boot();

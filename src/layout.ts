@@ -1,8 +1,10 @@
 import { clamp } from './gfx';
-import { UW, UH } from './car';
+import { view } from './three/scene3d';
 
-// All layout is recomputed from the current canvas size every frame,
-// so device rotation never loses state — positions are derived, not stored.
+// Screen-space layout adapter over the 3D scene: every value here is a live
+// projection of a world-space anchor, so game logic, hints and the E2E hooks
+// keep working in plain screen pixels while the renderer is fully 3D.
+// Rotation safety is free: layouts are re-projected every query.
 
 export interface GarageLayout {
   portrait: boolean;
@@ -10,123 +12,69 @@ export interface GarageLayout {
   carW: number;
   carX: number;
   groundY: number;
-  liftMax: number;         // px the car rises
-  colX: number;            // lift column (right)
-  colXL: number;           // lift column (left)
-  leverX: number; leverY: number; leverTravel: number;
-  mechHomeX: number;       // where the creeper waits (right of car)
-  mechY: number;           // floor line for the creeper
-  mechS: number;           // robot head radius
-  plateX: number; plateY: number; plateR: number; // practice plate (free play)
+  liftMax: number;
+  leverX: number; leverY: number;
+  mechHomeX: number; mechY: number;
+  mechS: number;
+  plateX: number; plateY: number; plateR: number;
   homeX: number; homeY: number; homeR: number;
-  doorX: number;
-  signY: number;
 }
 
 export function layoutGarage(W: number, H: number): GarageLayout {
-  const portrait = H > W;
-  // cap the car size so body + lift travel always fit above the floor line
-  const carW = portrait
-    ? clamp(Math.min(W * 0.72, H * 0.42), 220, 430)
-    : clamp(Math.min(W * 0.46, H * 0.72), 230, 460);
-  const carX = portrait ? W * 0.45 : W * 0.40;
-  const groundY = portrait ? H * 0.64 : H * 0.76;
-  const liftMax = clamp(carW * 0.52, 100, Math.max(110, groundY - carW * 0.56 - 12));
-  const colX = carX + carW * 0.575;
-  const colXL = carX - carW * 0.575;
-  const leverX = clamp(colX + carW * 0.16, 60, W - 46);
-  const leverY = groundY - carW * 0.44;
-  const mechS = clamp(carW * 0.062, 13, 24);
-  const mechHomeX = portrait ? clamp(carX + carW * 0.62, 0, W - mechS * 3.4) : clamp(carX + carW * 0.82, 0, W - mechS * 4);
-  const mechY = portrait ? Math.min(groundY + carW * 0.30, H - mechS * 4.2) : groundY + carW * 0.13;
-  const plateR = clamp(carW * 0.17, 46, 86);
+  const gi = view.garageInfo();
   return {
-    portrait, W, H, carW, carX, groundY, liftMax, colX, colXL,
-    leverX, leverY, leverTravel: clamp(carW * 0.22, 60, 110),
-    mechHomeX, mechY, mechS,
-    plateX: Math.max(plateR * 1.25, W * 0.11),
-    plateY: groundY - carW * 0.30,
-    plateR,
+    portrait: H > W,
+    W, H,
+    carW: gi.carW,
+    carX: gi.carX,
+    groundY: gi.groundY,
+    liftMax: gi.liftMax,
+    leverX: gi.leverX, leverY: gi.leverY,
+    mechHomeX: gi.mechX, mechY: gi.mechY,
+    mechS: clamp(gi.carW * 0.055, 12, 26),
+    plateX: gi.plateX, plateY: gi.plateY, plateR: Math.max(46, gi.plateR),
     homeX: 44, homeY: 44, homeR: 26,
-    doorX: W * 0.985,
-    signY: portrait ? H * 0.16 : H * 0.16,
   };
 }
 
 export interface UnderLayout {
   portrait: boolean;
-  rot: boolean;             // portrait rotates the chassis 90° so it fills the screen
+  rot: boolean;
   W: number; H: number;
-  scale: number;
-  ox: number; oy: number;   // top-left of the underbody plate in screen px
-  mechX: number; mechY: number; mechS: number;
-  floorY: number;           // where drips land
-  grabR: number;            // generous touch radius for parts
+  grabR: number;
+  floorY: number;
+  mechS: number;
 }
 
 export function layoutUnder(W: number, H: number): UnderLayout {
-  const portrait = H > W;
-  if (portrait) {
-    // rotated: plate is UH wide x UW tall on screen, car front at the top
-    const scale = Math.min((W * 0.94) / UH, (H * 0.70) / UW);
-    const ox = (W - UH * scale) / 2;
-    const oy = H * 0.04;
-    const mechY = Math.min(oy + UW * scale + H * 0.13, H * 0.91);
-    return {
-      portrait, rot: true, W, H, scale, ox, oy,
-      mechX: W * 0.5, mechY,
-      mechS: clamp(Math.min(W, H) * 0.05, 14, 26),
-      floorY: mechY + 10,
-      grabR: clamp(Math.min(W, H) * 0.12, 46, 84),
-    };
-  }
-  const scale = Math.min((W * 0.86) / UW, (H * 0.62) / UH);
-  const ox = (W - UW * scale) / 2;
-  const oy = H * 0.06;
-  const mechY = H * 0.84;
+  const ui = view.underInfo();
   return {
-    portrait, rot: false, W, H, scale, ox, oy,
-    mechX: W * 0.5, mechY,
-    mechS: clamp(Math.min(W, H) * 0.045, 14, 26),
-    floorY: mechY + 10,
-    grabR: clamp(Math.min(W, H) * 0.11, 44, 80),
+    portrait: H > W,
+    rot: H > W,
+    W, H,
+    grabR: ui.grabR,
+    floorY: ui.floorY,
+    mechS: clamp(Math.min(W, H) * 0.05, 14, 26),
   };
 }
 
-export function underToScreen(l: UnderLayout, ux: number, uy: number): { x: number; y: number } {
-  if (l.rot) return { x: l.ox + uy * l.scale, y: l.oy + (UW - ux) * l.scale };
-  return { x: l.ox + ux * l.scale, y: l.oy + uy * l.scale };
+export function underToScreen(_l: UnderLayout, ux: number, uy: number): { x: number; y: number } {
+  return view.underToScreenPart(ux, uy);
 }
 
-export function screenToUnder(l: UnderLayout, x: number, y: number): { x: number; y: number } {
-  if (l.rot) return { x: UW - (y - l.oy) / l.scale, y: (x - l.ox) / l.scale };
-  return { x: (x - l.ox) / l.scale, y: (y - l.oy) / l.scale };
+export function screenToUnder(_l: UnderLayout, x: number, y: number): { x: number; y: number } {
+  return view.screenToUnderPart(x, y);
 }
 
 export interface WeldLayout {
   W: number; H: number;
-  bigW: number;         // car body length in px for the zoomed view
+  bigW: number;
   carX: number; carGroundY: number;
-  mechX: number; mechY: number; mechS: number;
 }
 
-// place the crack's local center at a comfortable screen point
-export function layoutWeld(
-  W: number, H: number,
-  crackCenter: { u: number; v: number },
-): WeldLayout {
-  const portrait = H > W;
-  const bigW = portrait ? Math.min(W * 2.6, H * 1.4) : Math.min(W * 1.35, H * 2.2);
-  const cx = W * 0.5;
-  const cy = portrait ? H * 0.42 : H * 0.40;
-  const carX = cx - crackCenter.u * bigW;
-  const carGroundY = cy + crackCenter.v * bigW;
-  return {
-    W, H, bigW, carX, carGroundY,
-    mechX: portrait ? W * 0.5 : W * 0.30,
-    mechY: H * 0.985,
-    mechS: clamp(Math.min(W, H) * 0.06, 18, 34),
-  };
+export function layoutWeld(W: number, H: number, _crackCenter: { u: number; v: number }): WeldLayout {
+  const wf = view.weldFrame();
+  return { W, H, bigW: wf.bigW, carX: wf.carX, carGroundY: wf.carGroundY };
 }
 
 export interface ChoiceLayout {
@@ -135,8 +83,8 @@ export interface ChoiceLayout {
 
 export function layoutChoice(W: number, H: number): ChoiceLayout {
   const portrait = H > W;
-  // the H cap keeps the stacked buttons + labels from overlapping on tall screens
-  const r = Math.min(clamp(Math.min(W, H) * 0.135, 46, 96), H * 0.068);
+  const base = clamp(Math.min(W, H) * 0.135, 46, 96);
+  const r = portrait ? Math.min(base, H * 0.068) : base;
   if (portrait) {
     const cx = W / 2;
     const y0 = H * 0.40;
@@ -160,7 +108,7 @@ export function layoutChoice(W: number, H: number): ChoiceLayout {
   };
 }
 
-// under-local coordinates of the four repairable parts
+// under-body part positions in PART coordinates (1000 x 420, front = +x)
 export const PART = {
   boltPos: { x: 640, y: 268 },
   oilPan: { x: 640, y: 210 },
