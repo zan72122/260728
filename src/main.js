@@ -117,6 +117,7 @@ try {
 
 try {
   physics = new Physics({
+    scene,
     getWaterHeight: (x, z) => (water ? water.displacementAt(x, z) : 0),
   });
 } catch (err) {

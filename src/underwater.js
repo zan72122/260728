@@ -96,7 +96,6 @@ class CavityInstance {
       metalness: 0,
       side: THREE.DoubleSide,
       depthWrite: false,
-      transmission: 0.15,
     });
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.visible = false;
