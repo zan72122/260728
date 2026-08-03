@@ -13,6 +13,8 @@ import { Physics } from './physics.js';
 import { InputController } from './input.js';
 import { CameraFX } from './cameraFX.js';
 import { AudioFX } from './audio.js';
+import { Rabbit } from './rabbit.js';
+import { GameFlow } from './gameflow.js';
 import { WATER_LAYER, GrabPass, sharedWaterUniforms } from './watershading.js';
 import { DropletSystem } from './droplets.js';
 
@@ -116,9 +118,19 @@ let physics = null;
 let cameraFX = null;
 let audio = null;
 let input = null;
+let rabbit = null;
+let gameflow = null;
 
 try {
   sceneEnv = new SceneEnv(scene);
+} catch (err) {
+  recordError(err);
+}
+
+try {
+  // Rabbit builds its own procedural mesh + toy boxes; it needs the scene
+  // (to add itself) and sceneEnv (platform tips to stand near/climb to).
+  rabbit = new Rabbit(scene, sceneEnv);
 } catch (err) {
   recordError(err);
 }
@@ -194,16 +206,37 @@ try {
 }
 
 try {
+  // GameFlow orchestrates rabbit/cameraFX/physics per
+  // docs/CONTRACTS-RABBIT.md. isSplashActive resolves the contract's
+  // splashView-duration gap: splashView's real dwell depends on BOTH
+  // splash.isActive() and underwater.isActive() (droplets deliberately
+  // excluded — the contract addendum names only these two); reuse the
+  // same isModuleActive() helper as the pass-2 render decision below so a
+  // module that's briefly missing the method mid-parallel-dev is treated
+  // as "still active" (safer default) rather than cutting splashView short.
+  gameflow = new GameFlow({
+    rabbit,
+    cameraFX,
+    physics,
+    audio,
+    water,
+    isSplashActive: () => isModuleActive(splash, 'isActive') || isModuleActive(underwater, 'isActive'),
+  });
+  if (sceneEnv && Array.isArray(sceneEnv.platforms)) {
+    gameflow.setPlatformsRef(sceneEnv.platforms);
+  }
+} catch (err) {
+  recordError(err);
+}
+
+try {
   input = new InputController({
     dom: canvas,
     getCamera: () => (cameraFX ? cameraFX.camera : null),
     physics,
     sceneEnv,
     audio,
-    onPlatformChange: () => {
-      /* InputController owns respawn behavior per contract; no extra
-         bookkeeping needed here. */
-    },
+    gameflow,
   });
 } catch (err) {
   recordError(err);
@@ -223,6 +256,14 @@ if (physics) {
       if (underwater) underwater.trigger(spec);
       if (cameraFX) cameraFX.onImpact(spec);
       if (audio) audio.onImpact(spec);
+    } catch (err) {
+      recordError(err);
+    }
+    // GameFlow drives the splashView state/camera lock; kept in its own try
+    // so a hiccup here can never suppress the splash/audio/camera-FX
+    // forwarding above (or vice versa).
+    try {
+      if (gameflow) gameflow.notifyImpact(spec);
     } catch (err) {
       recordError(err);
     }
@@ -253,6 +294,20 @@ if (droplets) {
       recordError(err);
     }
   };
+}
+
+// ---------------------------------------------------------------------
+// Initial boot (docs/CONTRACTS-RABBIT.md): the game opens with the rabbit
+// already holding the heavyball on the mid board — GameFlow owns this via
+// its own fetch flow (never spawn a held toy directly from main).
+// ---------------------------------------------------------------------
+try {
+  if (gameflow) {
+    const heavyball = Array.isArray(TOYS) ? TOYS.find((t) => t.id === 'heavyball') : null;
+    if (heavyball) gameflow.initialFetch(heavyball);
+  }
+} catch (err) {
+  recordError(err);
 }
 
 // ---------------------------------------------------------------------
@@ -329,19 +384,56 @@ function state() {
 window.__lab.drop = drop;
 window.__lab.state = state;
 
+// __lab.flowState() — GameFlow/Rabbit state for automated tests (S3, per
+// docs/CONTRACTS-RABBIT.md). `platform` reads rabbit.currentPlatformId per
+// the contract text; fall back to gameflow's own tracked platform if rabbit
+// isn't available yet (defensive, matches this file's guard-everything style).
+function flowState() {
+  try {
+    return {
+      state: gameflow ? gameflow.state : null,
+      rabbitState: rabbit ? rabbit.state : null,
+      platform: (rabbit && rabbit.currentPlatformId) || (gameflow && gameflow.currentPlatformId) || null,
+    };
+  } catch (err) {
+    recordError(err);
+    return null;
+  }
+}
+window.__lab.flowState = flowState;
+
+// __lab.throwViaRabbit(vx,vy,vz) — programmatic throw through the real
+// gameflow/rabbit windup+release path (as opposed to __lab.drop's direct
+// spawn+release, which bypasses rabbit entirely). Requires gameflow to
+// already be in 'ready' with a held toy (see GameFlow.commitThrow).
+function throwViaRabbit(vx = 0, vy = 0, vz = 0) {
+  try {
+    if (!gameflow) return null;
+    gameflow.commitThrow(new THREE.Vector3(vx, vy, vz));
+    return true;
+  } catch (err) {
+    recordError(err);
+    return null;
+  }
+}
+window.__lab.throwViaRabbit = throwViaRabbit;
+
 // QA helper (engineer N, input-flow verification): CSS-pixel screen position
-// of the currently-held toy's mesh, or null if nothing is held. Reuses the
-// same "held body" scan as computeFocusPoint() below — no reach into
-// InputController internals needed.
+// of the currently-held toy's mesh, or null if nothing is held. Now sourced
+// from gameflow.heldBody (GameFlow owns the held-toy lifecycle) rather than
+// scanning physics.bodies directly; falls back to the old scan if gameflow
+// or its heldBody aren't available (defensive, mid-parallel-dev safety).
 const _heldScreenScratch = new THREE.Vector3();
 function heldScreenPos() {
   try {
-    if (!physics || !Array.isArray(physics.bodies) || !cameraFX || !cameraFX.camera) return null;
-    let body = null;
-    for (let i = 0; i < physics.bodies.length; i++) {
-      if (physics.bodies[i].state === 'held') {
-        body = physics.bodies[i];
-        break;
+    if (!cameraFX || !cameraFX.camera) return null;
+    let body = gameflow && gameflow.heldBody ? gameflow.heldBody : null;
+    if (!body && Array.isArray(physics && physics.bodies)) {
+      for (let i = 0; i < physics.bodies.length; i++) {
+        if (physics.bodies[i].state === 'held') {
+          body = physics.bodies[i];
+          break;
+        }
       }
     }
     if (!body || !body.mesh) return null;
@@ -535,6 +627,30 @@ function animate(now) {
     recordError(err);
   }
   try {
+    // Rabbit gets SCALED dt + timeSec (per docs/CONTRACTS-RABBIT.md "IMPORTANT
+    // dt rule"), same as sceneEnv/water/splash above.
+    if (rabbit) rabbit.update(dtScaled, timeSec);
+  } catch (err) {
+    recordError(err);
+  }
+  try {
+    // GameFlow reads rabbit.pawAnchor's world position this frame (for the
+    // held-toy pinning / spawn-at-paws logic); force a matrix-world refresh
+    // right after rabbit.update() so that read isn't a frame stale (three.js
+    // otherwise only recomputes world matrices during renderer.render(),
+    // which happens at the end of this loop).
+    if (rabbit) scene.updateMatrixWorld(true);
+  } catch (err) {
+    recordError(err);
+  }
+  try {
+    // GameFlow gets SCALED dt as 1st arg, REAL dt as 2nd (per contract: the
+    // splashView/return clamp timers use dtReal).
+    if (gameflow) gameflow.update(dtScaled, dtReal);
+  } catch (err) {
+    recordError(err);
+  }
+  try {
     if (splash) splash.update(dtScaled, timeSec);
   } catch (err) {
     recordError(err);
@@ -555,7 +671,15 @@ function animate(now) {
     recordError(err);
   }
   try {
-    if (cameraFX) cameraFX.setFocus(computeFocusPoint());
+    // S2/CONTRACTS-RABBIT.md: setFocus is a no-op in followFlight/splashView/
+    // returning modes anyway (cameraFX guards it internally), but only call
+    // it at all while gameflow is 'ready'/'busy' — belt-and-braces so a
+    // stale focus point can never even be offered during windup/flight/
+    // splashView/return.
+    const gfState = gameflow ? gameflow.state : 'ready';
+    if (cameraFX && (gfState === 'ready' || gfState === 'busy')) {
+      cameraFX.setFocus(computeFocusPoint());
+    }
   } catch (err) {
     recordError(err);
   }
