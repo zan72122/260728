@@ -475,6 +475,19 @@ export class GameFlow {
   // 'high' (reuse _climb), boardGondola, animate balloon 0->1 over ~4.5s
   // real, fetchGiantToy(currentGiantDef||default) -> ready, skyMode=true.
   // ==========================================================================
+  // M6 INTEGRATION FIX (supervisor concern (b) — see cameraFX.js's
+  // SKY_READY_* comment for the full bug writeup): verified in-game that
+  // nothing ever moved the camera off ascendView's wide "world shrinking
+  // below" end pose once the ascent finished, leaving the rabbit/gondola/
+  // held giant toy completely out of frame for the entire sky-ready/aiming
+  // window. Switch to the dedicated close skyReadyView every time sky-ready
+  // begins or is re-entered (initial ascent, and again after each mega
+  // splash's return-and-refetch) — cheap and idempotent if called while
+  // already active (see skyReadyView's own "no snap on repeat" note).
+  _enterSkyReadyView() {
+    safeCall(this.cameraFX, 'skyReadyView', () => this._gondolaWorldPos());
+  }
+
   _doSkyEntry() {
     this._busyStarting = true;
     this._setState('busy');
@@ -486,6 +499,7 @@ export class GameFlow {
             this._fetchGiant(def, () => {
               this.skyMode = true;
               this._busyStarting = false;
+              this._enterSkyReadyView();
               this._setState('ready');
               this._maybeDrainQueue();
             });
@@ -525,6 +539,7 @@ export class GameFlow {
     this._stow(() => {
       this._fetchGiant(def, () => {
         this._busyStarting = false;
+        this._enterSkyReadyView();
         this._setState('ready');
         this._maybeDrainQueue();
       });
@@ -745,6 +760,12 @@ export class GameFlow {
       if (wasMega) {
         // MEGA: balloon STAYS UP; rabbit fetches the next giant toy in the
         // gondola and we go back to 'ready' with skyMode still true.
+        // M6: switch to skyReadyView BEFORE the fetch animation plays (not
+        // just once it's done) — returnFromMega's own landing pose is
+        // 'idle' mode pinned on a huge deltaH (sky altitude vs. the 'mid'
+        // platform idle math is tuned for), which reads just as wrong as the
+        // original ascendView bug this fixes; skip straight past it.
+        this._enterSkyReadyView();
         const def = this.currentGiantDef || this._defaultGiantDef();
         this._fetchGiant(def, () => {
           this._setState('ready');

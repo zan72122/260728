@@ -540,6 +540,33 @@ function heldScreenPos() {
 }
 window.__lab.heldScreenPos = heldScreenPos;
 
+// QA helper (M6 integration acceptance): CSS-pixel screen position of the
+// balloon (sceneEnv.balloon.group), so an automated test can drive the REAL
+// input path (a genuine pointer tap on the balloon, exactly like
+// input.js's own raycast-against-balloon.group logic) instead of reaching
+// into gameflow directly. Mirrors heldScreenPos's projection math above.
+const _balloonScreenScratch = new THREE.Vector3();
+function balloonScreenPos() {
+  try {
+    if (!cameraFX || !cameraFX.camera) return null;
+    const grp = sceneEnv && sceneEnv.balloon && sceneEnv.balloon.group;
+    if (!grp) return null;
+    grp.getWorldPosition(_balloonScreenScratch);
+    const camera = cameraFX.camera;
+    _balloonScreenScratch.project(camera);
+    const el = (renderer && renderer.domElement) || canvas;
+    const rect = el.getBoundingClientRect();
+    return {
+      x: (_balloonScreenScratch.x * 0.5 + 0.5) * rect.width + rect.left,
+      y: (-_balloonScreenScratch.y * 0.5 + 0.5) * rect.height + rect.top,
+    };
+  } catch (err) {
+    recordError(err);
+    return null;
+  }
+}
+window.__lab.balloonScreenPos = balloonScreenPos;
+
 // QA helper (final acceptance pass): expose combined draw-call / triangle
 // counts for the WHOLE frame. IMPORTANT: renderer.info.autoReset defaults to
 // true, and the two-pass loop below (R1, CONTRACTS-SPLASH2) calls
@@ -561,6 +588,31 @@ function renderInfo() {
   }
 }
 window.__lab.renderInfo = renderInfo;
+
+// QA-only helper (M6 integration acceptance): expose cameraFX's internal view
+// mode + live pose so automated screenshot series can be correlated with
+// exactly what the camera is doing at a given wall-clock moment. Read-only,
+// no behavior change; safe to keep permanently alongside waterDebug/flowState.
+function cameraDebug() {
+  try {
+    if (!cameraFX || !cameraFX.camera) return null;
+    return {
+      mode: cameraFX._mode || null,
+      pos: cameraFX.camera.position.toArray(),
+      lookAt: cameraFX._lastLookAt ? cameraFX._lastLookAt.toArray() : null,
+      timeScale: cameraFX.timeScale,
+      phase: cameraFX._phase,
+      phaseTimer: cameraFX._phaseTimer,
+      slowmoDur: cameraFX._slowmoDur,
+      dipAmount: cameraFX._dipAmount,
+      megaElapsed: cameraFX._megaElapsed,
+    };
+  } catch (err) {
+    recordError(err);
+    return null;
+  }
+}
+window.__lab.cameraDebug = cameraDebug;
 
 // ---------------------------------------------------------------------
 // Water-layer render-loop helpers (R1, docs/CONTRACTS-SPLASH2.md).

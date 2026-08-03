@@ -194,15 +194,62 @@ const ASCEND_LOOK_POOL_WEIGHT_START = 0.15; // how much look-at leans toward poo
 const ASCEND_LOOK_POOL_WEIGHT_END = 0.55;
 const ASCEND_SMOOTH_TIME = 0.5;
 
+// M6 INTEGRATION FIX (supervisor concern (b), docs/CONTRACTS-MEGA.md M6
+// verification "Rabbit readability inside the big basket from the actual
+// game camera"): ascendView's own END framing (ASCEND_DIST_END/CAMY_OFFSET_
+// END above) is tuned for the CLIMB's "world shrinking below" drama, not for
+// resting/aiming — and nothing ever switched the camera to anything else
+// once the ascent finished (gameflow's sky-entry only calls ascendView once,
+// then just sits in 'ready'). Verified in-game: this left the camera parked
+// at ascendView's wide pulled-back end pose (dist 10m, +4m over the gondola)
+// for the ENTIRE sky-ready/aiming window — the rabbit, gondola, and held
+// giant toy were completely out of frame (only a sliver of sky + the tiny
+// pool far below). skyReadyView is a dedicated close framing GameFlow now
+// switches to once the ascent (and first giant fetch) completes, and again
+// each time it returns to sky-ready after a mega splash — same "live getPos
+// callback, smoothDamp settle" shape as ascendView/followFlight so entering
+// it (mid-ascendView) or leaving it (into followFlight on throw) is never a
+// snap. Numbers tuned empirically (playwright screenshot iteration) so the
+// held giant toy (radius up to 1.5m) and the rabbit both read clearly in
+// both orientations.
+const SKY_READY_DIST = 5.5;
+const SKY_READY_CAMY_OFFSET = 7.4; // camera Y = gondola floor Y + this — ABOVE the basket rim (0.95) and the held toy's top, so the downward look angle below clears the rim and reveals the rabbit standing inside instead of just showing the basket's outer wall
+const SKY_READY_LOOK_Y_OFFSET = 0.2; // look-at Y = gondola floor Y + this — aimed near rabbit-head height, not the held toy
+// Dedicated azimuth (NOT the shared withIdleAzimuth helper — that hard-codes
+// a compass direction tuned for the ground boards/pillars and ignores its
+// own inputs' sign). scene.js's giant crate sits at a LOCAL +X offset from
+// the gondola center (== world +X, the balloon never yaws) — approaching
+// from the same +X side (as a naive reuse of withIdleAzimuth's fixed +X/+Z
+// quadrant would) puts the crate directly in the sightline to the rabbit,
+// visually overlapping the held toy above it (verified in-game). This angle
+// approaches mostly from +Z with a slight -X lean instead, keeping the crate
+// off to the side of frame rather than in front of the rabbit.
+const SKY_READY_AZIMUTH_RAD = (100 * Math.PI) / 180;
+const SKY_READY_SMOOTH_TIME = 0.5;
+
 // followFlight, MEGA case: a sky drop starts far higher (>15 per contract)
 // than any normal platform, so it gets its own wider/longer chase framing,
 // passing close to the cloud layers (y~10/18) on the way down. Detected
 // internally from the very first getPos() sample (see _updateFollowFlight).
+//
+// M6 INTEGRATION FIX: DIST_END/Y_END must land close to megaSplashView's own
+// locked framing (MEGA_SPLASH_DIST_BASE/MEGA_SPLASH_Y below), exactly the
+// same "END state already sits inside splashView's own framing numbers, so
+// the handoff is seamless" principle the normal (non-mega) followFlight
+// tunables above already follow (FOLLOW_DIST_END 3.4 ~= SPLASH_DIST 3.5,
+// FOLLOW_Y_END 1.6 ~= SPLASH_Y 1.7). The original mega values here (4.2 /
+// 2.0) were roughly HALF of megaSplashView's ~9-11m/3.2 locked preset —
+// verified in-game (both __lab.megaDrop and the full rabbit sky path): the
+// camera's smoothDamp from followFlight's end pose into megaSplashView takes
+// ~1-1.5s real to close that gap, which swallows almost the entire ①disc-
+// flash/②white-dome window (0-0.8s) in the OLD wide framing instead of the
+// dramatic close mega shot. Matching these to megaSplashView's base numbers
+// makes that handoff seamless, the same way it already is for normal drops.
 const FOLLOW_MEGA_START_Y_THRESHOLD = 15;
 const FOLLOW_MEGA_DIST_START = 12.0;
-const FOLLOW_MEGA_DIST_END = 4.2;
+const FOLLOW_MEGA_DIST_END = 9.5;
 const FOLLOW_MEGA_Y_START = 14.0;
-const FOLLOW_MEGA_Y_END = 2.0;
+const FOLLOW_MEGA_Y_END = 3.2;
 
 // megaSplashView: wider locked-on preset (fit an 8m column) + scripted E3
 // reaction cut sub-timeline.
@@ -308,6 +355,18 @@ export class CameraFX {
     // resets this so a later normal return is completely unaffected.
     this._returnIsMega = false;
 
+    // M6 INTEGRATION FIX: best-known REAL gondola world position, refreshed
+    // every frame ascendView/skyReadyView are active (both already read a
+    // live getPos() callback from GameFlow — see their update functions
+    // below). GONDOLA_APPROX is only a rough static guess ("close enough
+    // for framing purposes" per its own comment); verified in-game that the
+    // E3 reaction cut (which used GONDOLA_APPROX directly) framed noticeably
+    // BELOW the real gondola once actually up at sky height, showing empty
+    // sky instead of the rabbit. Seed from GONDOLA_APPROX so the cut still
+    // degrades gracefully for callers that never ran ascendView/skyReadyView
+    // first (e.g. __lab.megaDrop's rabbit-bypass test path).
+    this._cachedGondolaPos = new THREE.Vector3(GONDOLA_APPROX.x, GONDOLA_APPROX.y, GONDOLA_APPROX.z);
+
     // MEGA: ascendView state (climb alongside the gondola).
     this._ascendGetPos = null;
     this._ascendInitialized = false;
@@ -317,6 +376,17 @@ export class CameraFX {
     this._ascendVelLookAt = new THREE.Vector3();
     this._ascendDesiredPos = new THREE.Vector3();
     this._ascendDesiredLookAt = new THREE.Vector3();
+
+    // M6: skyReadyView state (close resting/aiming framing on the gondola —
+    // see SKY_READY_* comment above for why this mode exists).
+    this._skyReadyGetPos = null;
+    this._skyReadyInitialized = false;
+    this._skyReadyCamPos = new THREE.Vector3();
+    this._skyReadyVelPos = new THREE.Vector3();
+    this._skyReadyLookAt = new THREE.Vector3();
+    this._skyReadyVelLookAt = new THREE.Vector3();
+    this._skyReadyDesiredPos = new THREE.Vector3();
+    this._skyReadyDesiredLookAt = new THREE.Vector3();
 
     // MEGA: megaSplashView state.
     this._megaPoint = new THREE.Vector3();
@@ -532,6 +602,20 @@ export class CameraFX {
     this._mode = 'ascendView';
   }
 
+  // M6: close resting/aiming framing on the gondola — GameFlow calls this
+  // once the ascent (+ first giant fetch) completes, and again each time
+  // sky-ready is re-entered after a mega splash. See SKY_READY_* comment
+  // above for why this exists (ascendView's own end-pose is not a usable
+  // aiming shot). Calling again while already active (e.g. a toy swap while
+  // sky-ready) just keeps tracking smoothly, same "no snap on repeat" rule
+  // as every other mode here.
+  skyReadyView(getPos) {
+    if (typeof getPos !== 'function') return;
+    this._skyReadyGetPos = getPos;
+    if (this._mode !== 'skyReady') this._skyReadyInitialized = false;
+    this._mode = 'skyReady';
+  }
+
   // Wider locked-on mega splash preset with a scripted E3 reaction cut.
   // Calling again while already active (secondary impact, e.g. jelly
   // fragment rain) re-targets smoothly without restarting the sub-timeline
@@ -559,8 +643,20 @@ export class CameraFX {
     const cb = typeof onDone === 'function' ? onDone : null;
     this._returnStartPos.copy(this.camera.position);
     this._returnStartLookAt.copy(this._lastLookAt);
-    this._idleTip.set(GONDOLA_APPROX.x, GONDOLA_APPROX.y, GONDOLA_APPROX.z);
-    this._computeIdleRaw(this._idleTip, this._returnTargetPos, this._returnTargetLookAt);
+    // M6 FIX: _computeIdleRaw's height-delta scaling (IDLE_HEIGHT_POS_K/
+    // LOOK_K) is tuned for the ~0-3m spread between ground platforms — fed
+    // a sky-altitude tip (~20m+ delta from MID_TIP_Y) it produces a camera
+    // pose that isn't actually pointed at the gondola. Reuse ascendView's
+    // own "wide gondola + world below" end framing instead (same shape
+    // this mode already hands off to/from), anchored on the cached REAL
+    // gondola position so it's accurate even though cameraFX has no direct
+    // scene access. This is only ever on screen for returnFromMega's own
+    // ~1.2s pan — GameFlow switches to skyReadyView the instant it lands
+    // (see _enterSkyReadyView), so this never needs to be the final resting
+    // framing, just a correct-enough target to pan toward.
+    const gp = this._cachedGondolaPos;
+    this._returnTargetPos.set(gp.x + ASCEND_DIST_END * COS_AZ, gp.y + ASCEND_CAMY_OFFSET_END, gp.z + ASCEND_DIST_END * SIN_AZ);
+    this._returnTargetLookAt.set(lerp(gp.x, 0, ASCEND_LOOK_POOL_WEIGHT_END), lerp(gp.y, 0, ASCEND_LOOK_POOL_WEIGHT_END * 0.5), lerp(gp.z, 0, ASCEND_LOOK_POOL_WEIGHT_END));
     this._returnTimer = 0;
     this._returnFired = false;
     this._returnOnDone = cb;
@@ -889,6 +985,7 @@ export class CameraFX {
       this._setTint(0);
       return;
     }
+    this._cachedGondolaPos.copy(p);
     if (!this._ascendInitialized) {
       this._ascendInitialized = true;
       this._ascendCamPos.copy(this.camera.position);
@@ -928,6 +1025,47 @@ export class CameraFX {
     this._setTint(0);
   }
 
+  // M6: close resting/aiming framing on the gondola (see SKY_READY_* /
+  // skyReadyView comments above). Same live-getPos + smoothDamp shape as
+  // ascendView, but with FIXED offsets tuned for "read the rabbit + held
+  // giant toy clearly" rather than ascendView's progress-scaled pull-back.
+  // Uses the same wide IDLE_AZIMUTH as the ground idle view (proven fix for
+  // held-toy-eclipses-rabbit framing, docs/CONTRACTS-RABBIT.md) since giant
+  // toys are even bigger and would eclipse the rabbit at least as badly at
+  // the tighter flight/splash azimuth.
+  _updateSkyReadyView(dtReal) {
+    const p = this._skyReadyGetPos ? this._skyReadyGetPos() : null;
+    if (!p) {
+      this._setTint(0);
+      return;
+    }
+    this._cachedGondolaPos.copy(p);
+    if (!this._skyReadyInitialized) {
+      this._skyReadyInitialized = true;
+      this._skyReadyCamPos.copy(this.camera.position);
+      this._skyReadyVelPos.set(0, 0, 0);
+      this._skyReadyLookAt.copy(this._lastLookAt);
+      this._skyReadyVelLookAt.set(0, 0, 0);
+    }
+
+    const azX = SKY_READY_DIST * Math.cos(SKY_READY_AZIMUTH_RAD);
+    const azZ = SKY_READY_DIST * Math.sin(SKY_READY_AZIMUTH_RAD);
+    this._skyReadyDesiredPos.set(p.x + azX, p.y + SKY_READY_CAMY_OFFSET, p.z + azZ);
+    this._skyReadyDesiredLookAt.set(p.x, p.y + SKY_READY_LOOK_Y_OFFSET, p.z);
+
+    smoothDampVec3(this._skyReadyCamPos, this._skyReadyVelPos, this._skyReadyDesiredPos, SKY_READY_SMOOTH_TIME, dtReal);
+    smoothDampVec3(this._skyReadyLookAt, this._skyReadyVelLookAt, this._skyReadyDesiredLookAt, SKY_READY_SMOOTH_TIME, dtReal);
+
+    this._finalPos.copy(this._skyReadyCamPos);
+    this._finalPos.x += this._shakeOffset.x;
+    this._finalPos.y += this._shakeOffset.y;
+    this.camera.position.copy(this._finalPos);
+    this.camera.lookAt(this._skyReadyLookAt);
+    this._lastLookAt.copy(this._skyReadyLookAt);
+
+    this._setTint(0);
+  }
+
   // MEGA: wide locked-on mega splash preset with a scripted ~0.7s E3
   // reaction cut to the gondola at ~1.8s in, then back to the locked splash.
   _updateMegaSplashView(dtReal) {
@@ -944,8 +1082,23 @@ export class CameraFX {
     const inCut = this._megaElapsed >= MEGA_CUT_START_S && this._megaElapsed < MEGA_CUT_START_S + MEGA_CUT_DUR_S;
     if (inCut) {
       // E3: fixed close view near the gondola, looking down at the rabbit.
-      this._megaCutPos.set(GONDOLA_APPROX.x + 1.4, GONDOLA_APPROX.y + 0.6, GONDOLA_APPROX.z + 1.4);
-      this._megaCutLookAt.set(GONDOLA_APPROX.x, GONDOLA_APPROX.y - 1.2, GONDOLA_APPROX.z);
+      // M6 FIX: use the cached REAL gondola position (kept fresh by
+      // ascendView/skyReadyView) instead of the static GONDOLA_APPROX guess
+      // — verified in-game the approximation sat ~1-2m off, enough that
+      // this cut framed empty sky below the actual gondola instead of the
+      // rabbit. See _cachedGondolaPos's own comment for the fallback.
+      // Reuses skyReadyView's own proven "see the rabbit inside the
+      // basket" offsets (see SKY_READY_* comments) rather than the
+      // original tiny (+1.4,+0.6,+1.4) offset, which — now anchored on the
+      // ACCURATE gondola position instead of the old approximation — was
+      // verified in-game to put the camera clipping through the basket's
+      // own wicker wall (the offset was tuned against GONDOLA_APPROX's
+      // error, not real geometry).
+      const gp = this._cachedGondolaPos;
+      const cutAzX = SKY_READY_DIST * Math.cos(SKY_READY_AZIMUTH_RAD);
+      const cutAzZ = SKY_READY_DIST * Math.sin(SKY_READY_AZIMUTH_RAD);
+      this._megaCutPos.set(gp.x + cutAzX, gp.y + SKY_READY_CAMY_OFFSET, gp.z + cutAzZ);
+      this._megaCutLookAt.set(gp.x, gp.y + SKY_READY_LOOK_Y_OFFSET, gp.z);
       this._finalPos.copy(this._megaCutPos);
       this._finalPos.x += this._shakeOffset.x;
       this._finalPos.y += this._shakeOffset.y;
@@ -1052,6 +1205,8 @@ export class CameraFX {
       this._updateMegaSplashView(dtReal);
     } else if (this._mode === 'ascendView') {
       this._updateAscendView(dtReal);
+    } else if (this._mode === 'skyReady') {
+      this._updateSkyReadyView(dtReal);
     } else if (this._mode === 'returning') {
       this._updateReturning(dtReal);
     } else {

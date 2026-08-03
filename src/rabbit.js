@@ -144,6 +144,23 @@ const HEAVE_THROW_DUR = 0.8; // slow whole-body push, per contract "~0.8s"
 // report for the exact number and the geometric reasoning above.
 const GONDOLA_PAW_Y_OFFSET = 2.2;
 
+// M6 INTEGRATION FIX (supervisor concern (b), docs/CONTRACTS-MEGA.md M6
+// verification "Rabbit readability... ensure the child can see the rabbit
+// hold and heave"): originally the rabbit's root (and therefore the held
+// toy directly above it) sat EXACTLY at gondolaAnchor with zero horizontal
+// offset — verified in-game (skyReadyView camera, any azimuth) that a giant
+// toy up to 3m across, centered on that same vertical axis, always
+// completely eclipses the much smaller rabbit standing directly beneath it;
+// no camera angle can see past a same-axis occluder. This mirrors the
+// EXACT problem the ground workflow already solved (pawAnchor offset from
+// the rabbit's own stance, revealed by IDLE_AZIMUTH_DEG's wide angle — see
+// that constant's comment) — apply the same fix here: stand the rabbit
+// slightly off the gondola's center (toward -X, away from the giant crate
+// at local +0.75x so it can never overlap it) so the held toy hangs beside,
+// not directly atop, the rabbit, and a 3/4 camera angle can show both.
+const GONDOLA_STAND_OFFSET_X = -1.0;
+const GONDOLA_STAND_OFFSET_Z = -0.75;
+
 // ---------------------------------------------------------------------------
 // Canvas face texture (baked once, shared by every Rabbit instance).
 // Sphere UV: u=0.5,v=0.5 lands on local +X at the equator for a default
@@ -1029,8 +1046,13 @@ export class Rabbit {
     const e = easeInOutCubic(p);
 
     const anchor = this._gondolaAnchor();
-    if (anchor) anchor.getWorldPosition(this._pawTargetScratch);
-    else this._pawTargetScratch.copy(a.from);
+    if (anchor) {
+      anchor.getWorldPosition(this._pawTargetScratch);
+      this._pawTargetScratch.x += GONDOLA_STAND_OFFSET_X;
+      this._pawTargetScratch.z += GONDOLA_STAND_OFFSET_Z;
+    } else {
+      this._pawTargetScratch.copy(a.from);
+    }
     const target = this._pawTargetScratch;
 
     const x = lerp(a.from.x, target.x, e);
@@ -1286,6 +1308,8 @@ export class Rabbit {
     const anchor = this._gondolaAnchor();
     if (anchor) {
       anchor.getWorldPosition(this._pawTargetScratch);
+      this._pawTargetScratch.x += GONDOLA_STAND_OFFSET_X;
+      this._pawTargetScratch.z += GONDOLA_STAND_OFFSET_Z;
       this.root.position.copy(this._pawTargetScratch);
     }
 
@@ -1458,6 +1482,13 @@ export class Rabbit {
       // Gondola-riding: hold point is above the basket floor (== root
       // position while riding), not above a board tip. See
       // GONDOLA_PAW_Y_OFFSET's comment for the clearance tradeoff.
+      // NOTE: the paw anchor deliberately stays at the gondolaAnchor's own
+      // (un-offset) position — only the rabbit's STANCE (root, see
+      // _updateRideIdle/_stepBoard) moves by GONDOLA_STAND_OFFSET_*. This
+      // mirrors the ground workflow exactly: pawAnchor sits at the board
+      // tip while the rabbit stands STAND_BACK_FROM_TIP away from it, a
+      // real separation between paw and root is what lets a 3/4 camera
+      // angle show both rather than one directly behind the other.
       const anchor = this._gondolaAnchor();
       if (anchor) anchor.getWorldPosition(this._pawTargetScratch);
       else this._pawTargetScratch.copy(this.root.position);

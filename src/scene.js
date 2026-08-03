@@ -315,18 +315,27 @@ function buildOpenShellGeometry(w, h, d, includeFloor = true) {
 // narrow neck at the bottom (where the ropes gather) flaring to a wide
 // bulge, tapering to a point at the top vent. Local origin sits at the very
 // bottom of the neck skirt.
+// M6 INTEGRATION FIX (supervisor concern (a)): radii (x) scaled 1.2x from
+// the original profile — verified in-game the envelope read as visually
+// small/thin next to the huge gondola basket (BASKET_W=2.9); the original
+// max radius (1.3, diameter 2.6) was barely narrower than the basket's own
+// width. Widening it past the basket's half-width makes the envelope read
+// as the dominant, "huge hot air balloon" silhouette it's meant to be.
+// Height (y) untouched — NECK_Y above already gives it the vertical
+// clearance the held giant toy needs.
+const ENVELOPE_RADIUS_SCALE = 1.2;
 function buildEnvelopeGeometry() {
   const pts = [
-    new THREE.Vector2(0.0, 0.0),
-    new THREE.Vector2(0.4, 0.05),
-    new THREE.Vector2(0.55, 0.16),
-    new THREE.Vector2(0.95, 0.55),
-    new THREE.Vector2(1.22, 1.05),
-    new THREE.Vector2(1.3, 1.55),
-    new THREE.Vector2(1.14, 2.15),
-    new THREE.Vector2(0.74, 2.85),
-    new THREE.Vector2(0.26, 3.22),
-    new THREE.Vector2(0.0, 3.4),
+    new THREE.Vector2(0.0 * ENVELOPE_RADIUS_SCALE, 0.0),
+    new THREE.Vector2(0.4 * ENVELOPE_RADIUS_SCALE, 0.05),
+    new THREE.Vector2(0.55 * ENVELOPE_RADIUS_SCALE, 0.16),
+    new THREE.Vector2(0.95 * ENVELOPE_RADIUS_SCALE, 0.55),
+    new THREE.Vector2(1.22 * ENVELOPE_RADIUS_SCALE, 1.05),
+    new THREE.Vector2(1.3 * ENVELOPE_RADIUS_SCALE, 1.55),
+    new THREE.Vector2(1.14 * ENVELOPE_RADIUS_SCALE, 2.15),
+    new THREE.Vector2(0.74 * ENVELOPE_RADIUS_SCALE, 2.85),
+    new THREE.Vector2(0.26 * ENVELOPE_RADIUS_SCALE, 3.22),
+    new THREE.Vector2(0.0 * ENVELOPE_RADIUS_SCALE, 3.4),
   ];
   return new THREE.LatheGeometry(pts, 20);
 }
@@ -370,8 +379,21 @@ const BASKET_D = 1.9; // gondola footprint, local Z
 const BASKET_H = 0.95; // wicker wall height above the floor
 const ROPE_COUNT = 8;
 const ROPE_R = 0.018;
-const NECK_Y = BASKET_H + 1.5; // envelope neck height above the basket floor
-const NECK_R = 0.55;
+// M6 INTEGRATION FIX (supervisor concern (a), docs/CONTRACTS-MEGA.md M1):
+// verified in-game (rabbit.js's real sky-ready view, GONDOLA_PAW_Y_OFFSET =
+// basket floor + 2.2m) that the ORIGINAL NECK_Y (BASKET_H + 1.5 = 2.45) put
+// the envelope's flare starting well BELOW the held giant toy's lowest
+// point for every giant def — worst case giantbeach (paw 2.2 + radius 1.5 =
+// top 3.7, bottom 0.7) already has its bottom hemisphere overlapping the
+// neck/flare at 2.45, and even the smallest, giantheavy (top 3.3), still
+// overlaps it substantially. On screen this reads as the giant ball
+// swallowed into the balloon's fabric, not held beneath it. Raising the
+// neck comfortably above the tallest held-toy point (giantbeach's 3.7)
+// fixes the clipping outright; per the contract's own guidance ("bigger/
+// higher envelope is likely better than moving the paw" — moving the paw
+// down instead would just crowd the toy back into the basket rim/rabbit).
+const NECK_Y = BASKET_H + 3.4; // envelope neck height above the basket floor
+const NECK_R = 0.55 * 1.2; // matches ENVELOPE_RADIUS_SCALE below so ropes meet the (now wider) neck
 // "~4x normal crate" per contract (normal: 0.34 x 0.16 x 0.26, see
 // rabbit.js) — 3.2x rather than a literal 4x so the crate (1.09 x 0.51 x
 // 0.83) fits inside a gondola basket sized to also hold a standing rabbit
@@ -840,8 +862,8 @@ export class SceneEnv {
     const topPlat = this.platforms[this.platforms.length - 1];
     const mooredPos = new THREE.Vector3(
       topPlat.tip.x - 1.2,
-      topPlat.tip.y + 0.35,
-      topPlat.tip.z + 1.9
+      topPlat.tip.y - 4.7,
+      topPlat.tip.z - 1.5
     );
     const dropPos = new THREE.Vector3(SKY.drop.x, SKY.drop.y, SKY.drop.z);
     group.position.copy(mooredPos);
