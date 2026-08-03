@@ -1,17 +1,20 @@
 // ============================================================
-// みずみちラボ - ジオラマ描画
-//   縦オブリーク投影: screenX = ox + x*cs
-//                     screenY = oy + y*rs - h*eh
-//   奥の行から手前の行へ描き、段差は「壁面」として描く
+// みずみちラボ - ジオラマ描画 (真アイソメ投影)
+//   px = view.ox + (gx - gy) * view.tw / 2
+//   py = view.oy + (gx + gy) * view.th / 2 - h * view.eh
+//   対角線 s = x + y の昇順(奥→手前)に、各セルの上面ひし形+右面+左面を描く
 // ============================================================
 "use strict";
 
+// 2点間の内分点 (スクリーン座標)
+function lerpPt(a, b, t) { return { px: lerp(a.px, b.px, t), py: lerp(a.py, b.py, t) }; }
+
 const Render = {
   canvas: null, ctx: null,
-  view: { ox: 0, oy: 0, cs: 12, rs: 9, eh: 7, w: 0, h: 0 },
+  view: { ox: 0, oy: 0, tw: 20, th: 10, eh: 6, cs: 10, w: 0, h: 0 },
   dpr: 1,
-  fish: { t: -3, x: 8, y: 26 },   // ときどきはねる さかな
-  boat: { x: 33, y: 26.5 },
+  fish: { t: -3, x: 8, y: 26, wait: 5 },   // ときどきはねる さかな
+  _boatCell: null, _boatMapRef: null,      // ふねの位置 (World.h の参照でキャッシュ有効性を判定)
 
   init(canvas) {
     this.canvas = canvas;
@@ -24,38 +27,12 @@ const Render = {
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
     this.canvas.width = Math.max(2, Math.round(st.width * this.dpr));
     this.canvas.height = Math.max(2, Math.round(st.height * this.dpr));
-    const W = st.width, H = st.height;
-    // マップ全体 (壁の高さぶんを含む) が収まる cs を計算
-    const worldW = CFG.GW;                                  // cs 単位
-    const worldH = CFG.GH * CFG.ROW + CFG.MAX_H * CFG.EH;   // cs 単位
-    const pad = 18;
-    const cs = Math.min((W - pad * 2) / worldW, (H - pad * 2) / worldH);
-    const v = this.view;
-    v.cs = cs; v.rs = cs * CFG.ROW; v.eh = cs * CFG.EH;
-    v.ox = (W - CFG.GW * cs) / 2;
-    v.oy = (H - CFG.GH * v.rs + CFG.MAX_H * v.eh) / 2;
-    v.w = W; v.h = H;
+    this.view = Iso.fitView(st.width, st.height, 18);
   },
 
-  // スクリーン座標 → セル (高さを考慮して手前から探す)
+  // スクリーン座標 → セル
   pick(sx, sy) {
-    const { ox, oy, cs, rs, eh } = this.view;
-    const fx = (sx - ox) / cs;
-    const x = Math.floor(fx);
-    if (x < 0 || x >= CFG.GW) return null;
-    for (let y = CFG.GH - 1; y >= 0; y--) {
-      const h = World.h[idx(x, y)] + Water.w[idx(x, y)];
-      const top = oy + y * rs - h * eh;
-      const hS = (y + 1 < CFG.GH) ? World.h[idx(x, y + 1)] + Water.w[idx(x, y + 1)] : 0;
-      const bottom = oy + (y + 1) * rs - hS * eh;
-      if (sy >= top && sy <= Math.max(top + rs, bottom)) {
-        return { x: fx, y: y + clamp((sy - top) / rs, 0, 0.99) };
-      }
-    }
-    // 地面レベルでフォールバック
-    const fy = (sy - oy) / rs;
-    if (fy < -2 || fy > CFG.GH + 2) return null;
-    return { x: fx, y: clamp(fy, 0, CFG.GH - 0.01) };
+    return Iso.pick(this.view, sx, sy);
   },
 
   // ---------- セルの色 ----------
@@ -105,118 +82,36 @@ const Render = {
   draw(now) {
     const ctx = this.ctx;
     const v = this.view;
-    const { ox, oy, cs, rs, eh } = v;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
     this.drawTable(ctx, v);
     this.drawTray(ctx, v);
 
     const GW = CFG.GW, GH = CFG.GH;
-    const h = World.h, w = Water.w, type = World.type, sea = World.seaMask;
-
-    // 行ごとに: 地形 → 水 → オブジェクト
-    for (let y = 0; y < GH; y++) {
-      // --- 地形 ---
-      for (let x = 0; x < GW; x++) {
-        const i = idx(x, y);
-        const hh = h[i];
-        const px = ox + x * cs;
-        const topY = oy + y * rs - hh * eh;
-
-        // 上面
-        const c = this.topColor(i, x, y);
-        // ぬれあと: すこし濃く、あおっぽく
-        const wet = Water.wet[i];
-        if (wet > 0.03 && w[i] < 0.02 && !sea[i]) {
-          const k = wet * 0.35;
-          c[0] = lerp(c[0], c[0] * 0.62, k);
-          c[1] = lerp(c[1], c[1] * 0.72, k);
-          c[2] = lerp(c[2], c[2] * 0.86 + 30, k);
-        }
-        ctx.fillStyle = "rgb(" + (c[0] | 0) + "," + (c[1] | 0) + "," + (c[2] | 0) + ")";
-        ctx.fillRect(px, topY, cs + 0.7, rs + 0.7);
-
-        // 手前への壁面 (段差)
-        const hS = (y + 1 < GH) ? h[idx(x, y + 1)] : 0;
-        const drop = hh - hS;
-        if (drop > 0.02) {
-          const wallH = drop * eh;
-          const wallY = topY + rs;
-          // ちいさな段差は地表色をすこし暗く (なだらかな等高線)、
-          // おおきな段差は土や石の壁 (がけ・だんめん)
-          const soil = this.wallColor(i);
-          const wk = clamp((drop - 0.5) / 0.8, 0, 1);
-          const wc = mixRGB([c[0] * 0.87, c[1] * 0.87, c[2] * 0.9], soil, wk);
-          const grad = ctx.createLinearGradient(0, wallY, 0, wallY + wallH);
-          grad.addColorStop(0, rgb(wc, 1.02));
-          grad.addColorStop(1, rgb(wc, 0.78));
-          ctx.fillStyle = grad;
-          ctx.fillRect(px, wallY - 0.5, cs + 0.7, wallH + 0.5);
-          // 壁の上ふち: あかるいライン (はっきりした がけ だけ)
-          if (drop > 0.9) {
-            ctx.fillStyle = "rgba(255,255,255,.3)";
-            ctx.fillRect(px, wallY - 0.5, cs + 0.7, Math.max(1, cs * 0.06));
-          }
-          // たかだいには かいだん
-          if (World.stairs[i] && drop > 0.6) {
-            this.drawStairs(ctx, px, wallY, cs, wallH);
-          } else if (drop > 0.8 && type[i] !== T_LEVEE) {
-            // 地層のよこ線
-            ctx.fillStyle = "rgba(120,85,40,.10)";
-            const n = Math.min(4, Math.floor(wallH / (cs * 0.4)));
-            for (let k = 1; k <= n; k++) {
-              ctx.fillRect(px, wallY + wallH * k / (n + 1), cs + 0.7, Math.max(1, cs * 0.04));
-            }
-          }
-          if (type[i] === T_LEVEE) {
-            // ていぼうの いしがき模様
-            ctx.strokeStyle = "rgba(140,140,150,.35)";
-            ctx.lineWidth = Math.max(1, cs * 0.04);
-            const rows2 = Math.max(1, Math.floor(wallH / (cs * 0.34)));
-            for (let k = 1; k <= rows2; k++) {
-              const yy = wallY + wallH * k / (rows2 + 1);
-              ctx.beginPath(); ctx.moveTo(px, yy); ctx.lineTo(px + cs, yy); ctx.stroke();
-            }
-            ctx.beginPath(); ctx.moveTo(px + cs * 0.5, wallY); ctx.lineTo(px + cs * 0.5, wallY + wallH); ctx.stroke();
-          }
-        }
-
-        // ていぼうの上面: まるいふちどり
-        if (type[i] === T_LEVEE) {
-          ctx.fillStyle = "rgba(255,255,255,.5)";
-          ctx.fillRect(px + cs * 0.08, topY + rs * 0.08, cs * 0.84, Math.max(1, cs * 0.09));
-          ctx.fillStyle = "rgba(120,120,130,.18)";
-          ctx.fillRect(px + cs * 0.08, topY + rs * 0.8, cs * 0.84, Math.max(1, cs * 0.09));
-        }
-        // かわらの小石
-        if (type[i] === T_RIVER && ((x * 7 + y * 13) % 5 === 0)) {
-          ctx.fillStyle = "rgba(255,255,255,.4)";
-          ctx.beginPath();
-          ctx.ellipse(px + cs * (0.25 + ((x * 31 + y * 17) % 10) / 20), topY + rs * 0.5, cs * 0.09, cs * 0.06, 0, 0, 7);
-          ctx.fill();
-        }
+    const maxS = (GW - 1) + (GH - 1);
+    for (let s = 0; s <= maxS; s++) {
+      const yFrom = Math.max(0, s - (GW - 1));
+      const yTo = Math.min(GH - 1, s);
+      for (let y = yFrom; y <= yTo; y++) {
+        this.drawCell(ctx, v, s - y, y);
       }
-
-      // --- 水 ---
-      this.drawWaterRow(ctx, y, now);
-
-      // --- 行に属するオブジェクト ---
-      this.drawObjectsOnRow(ctx, y, now);
+      IsoWater.drawDiagonal(ctx, v, s, now);
+      this.drawObjectsForS(ctx, v, s, now);
     }
 
     // 海の生きもの
-    this.drawSeaLife(ctx, now);
+    this.drawSeaLife(ctx, v, now);
 
     // みくらべ: まえの水の跡をピンクのてんせんで
-    if (Modes.compareMask) this.drawCompareOutline(ctx, now);
+    if (Modes.compareMask) this.drawCompareOutline(ctx, v, now);
 
     // おだいのターゲットマーカー
-    if (Modes.current === "quest") Modes.drawQuestMarkers(ctx, this.view, now);
+    if (Modes.current === "quest") Modes.drawQuestMarkers(ctx, v, now);
 
-    Particles.draw(ctx, this.view, now);
+    Particles.draw(ctx, v, now);
 
     // 指カーソル
-    if (Input.cursor) this.drawCursor(ctx, now);
+    if (Input.cursor) this.drawCursor(ctx, v, now);
   },
 
   // ---------- 背景: つくえ + トレイ ----------
@@ -232,201 +127,282 @@ const Render = {
     ctx.fillRect(0, 0, v.w, v.h * 0.25);
   },
 
-  drawTray(ctx, v) {
-    const { ox, oy, cs, rs, eh } = v;
-    const pad = cs * 0.9;
-    const x0 = ox - pad, y0 = oy - CFG.MAX_H * eh - pad * 0.6;
-    const x1 = ox + CFG.GW * cs + pad, y1 = oy + CFG.GH * rs + pad * 0.8;
-    ctx.save();
-    ctx.shadowColor = PAL.trayShadow;
-    ctx.shadowBlur = cs * 1.4;
-    ctx.shadowOffsetY = cs * 0.5;
-    ctx.fillStyle = PAL.trayEdge;
-    rr(ctx, x0, y0, x1 - x0, y1 - y0, cs * 1.3);
-    ctx.fill();
-    ctx.restore();
-    ctx.fillStyle = PAL.tray;
-    rr(ctx, x0 + cs * 0.28, y0 + cs * 0.28, x1 - x0 - cs * 0.56, y1 - y0 - cs * 0.56, cs);
-    ctx.fill();
-  },
-
-  drawStairs(ctx, px, wallY, cs, wallH) {
-    const steps = Math.max(2, Math.round(wallH / (cs * 0.3)));
-    ctx.fillStyle = "#e8d9b8";
-    ctx.fillRect(px + cs * 0.12, wallY, cs * 0.76, wallH);
-    for (let k = 0; k < steps; k++) {
-      ctx.fillStyle = k % 2 ? "#d9c69c" : "#efe3c4";
-      ctx.fillRect(px + cs * 0.12, wallY + wallH * k / steps, cs * 0.76, wallH / steps * 0.85);
-    }
-    ctx.strokeStyle = "rgba(120,85,40,.25)";
-    ctx.lineWidth = Math.max(1, cs * 0.04);
-    ctx.strokeRect(px + cs * 0.12, wallY, cs * 0.76, wallH);
-  },
-
-  // ---------- 水の描画 ----------
-  drawWaterRow(ctx, y, now) {
-    const v = this.view;
-    const { ox, oy, cs, rs, eh } = v;
-    const GW = CFG.GW, GH = CFG.GH;
-    const h = World.h, w = Water.w, sea = World.seaMask;
-
-    for (let x = 0; x < GW; x++) {
-      const i = idx(x, y);
-      const d = w[i];
-      if (d < 0.015) continue;
-      const surf = h[i] + d;
-      const px = ox + x * cs;
-      const py = oy + y * rs - surf * eh;
-
-      const isSea = sea[i] === 1;
-      const depthK = clamp(d / (isSea ? 1.0 : 0.6), 0, 1);
-      const c = isSea
-        ? mixRGB(PAL.seaShallow, PAL.seaDeep, depthK)
-        : mixRGB(PAL.waterShallow, PAL.waterDeep, depthK);
-      // 海のなみ模様
-      let lum = 1;
-      if (isSea) {
-        lum = 1 + 0.035 * Math.sin(x * 0.5 + y * 0.9 - now * 0.0028) + 0.025 * Math.sin(x * 0.23 - now * 0.0016);
-      } else {
-        lum = 1 + 0.035 * Math.sin(x * 0.8 + y * 0.6 + now * 0.003);
-      }
-      const alpha = clamp(0.5 + depthK * 0.38, 0, 0.9);
-      ctx.fillStyle = rgba(c, alpha, lum);
-
-      // となりに水がない側の角をまるく → ぷるんとした ふち
-      const wL = x > 0 ? w[i - 1] : 1, wR = x < GW - 1 ? w[i + 1] : 1;
-      const wU = y > 0 ? w[i - GW] : 1, wD = y < GH - 1 ? w[i + GW] : 1;
-      const e = 0.015;
-      const rad = cs * 0.42;
-      const rTL = (wL < e || wU < e) ? rad : 0;
-      const rTR = (wR < e || wU < e) ? rad : 0;
-      const rBL = (wL < e || wD < e) ? rad : 0;
-      const rBR = (wR < e || wD < e) ? rad : 0;
-      this.roundedCell(ctx, px, py, cs + 0.7, rs + 0.7, rTL, rTR, rBR, rBL);
-      ctx.fill();
-
-      // 水の手前壁 (だんさを流れおちる水)
-      const jS = (y + 1 < GH) ? idx(x, y + 1) : -1;
-      const surfS = jS >= 0 ? h[jS] + w[jS] : 0;
-      const dropW = surf - Math.max(surfS, h[i]);
-      if (dropW > 0.1 && (jS < 0 || surf - surfS > 0.1)) {
-        const fallH = clamp((surf - surfS), 0, 3) * eh;
-        ctx.fillStyle = rgba(mixRGB(c, [255, 255, 255], 0.25), alpha * 0.9);
-        ctx.fillRect(px, py + rs, cs + 0.7, fallH);
-        // おちる水の白いすじ
-        if (fallH > cs * 0.3) {
-          ctx.fillStyle = "rgba(255,255,255,.45)";
-          const ph = (now * 0.006 + x * 1.3) % 1;
-          ctx.fillRect(px + cs * 0.2, py + rs + fallH * ph * 0.7, cs * 0.12, fallH * 0.3);
-          ctx.fillRect(px + cs * 0.6, py + rs + fallH * ((ph + 0.4) % 1) * 0.7, cs * 0.1, fallH * 0.25);
-        }
-      }
-
-      // ふちの白いハイライト (みずのぷるん感)
-      if (wU < e) {
-        ctx.strokeStyle = "rgba(255,255,255,.55)";
-        ctx.lineWidth = Math.max(1, cs * 0.08);
-        ctx.beginPath();
-        ctx.moveTo(px + rTL * 0.7, py + cs * 0.05);
-        ctx.lineTo(px + cs - rTR * 0.7, py + cs * 0.05);
-        ctx.stroke();
-      }
-
-      // なぎさの あわあわ
-      if (isSea && y > 0 && !sea[i - GW] && w[i - GW] < 0.03) {
-        const ph = 0.5 + 0.5 * Math.sin(now * 0.0022 + x * 0.8);
-        ctx.fillStyle = "rgba(255,255,255," + (0.35 + ph * 0.35) + ")";
-        ctx.beginPath();
-        for (let k = 0; k < 3; k++) {
-          ctx.arc(px + cs * (0.2 + k * 0.3), py + rs * 0.18 + ph * rs * 0.1, cs * (0.1 + 0.04 * Math.sin(x * 3 + k * 2)), 0, 7);
-        }
-        ctx.fill();
-      }
-
-      // きらきら・あわ (ときどき)
-      const glow = Water.flowGlow[i];
-      if (glow > 0.3 && Math.random() < glow * 0.018) Particles.sparkle(x + Math.random(), y + Math.random() * 0.5, surf);
-      if (isSea && Math.random() < 0.0007) Particles.sparkle(x + Math.random(), y + Math.random() * 0.5, surf);
-      if (!isSea && d > 0.25 && Math.random() < 0.002) Particles.bubble(x + Math.random(), y + Math.random() * 0.5, surf);
-    }
-  },
-
-  roundedCell(ctx, x, y, w2, h2, rTL, rTR, rBR, rBL) {
+  // 角丸ポリゴンのパスを begin する (fill/stroke は呼び出し側)
+  roundedPolyPath(ctx, pts, r) {
+    const n = pts.length;
     ctx.beginPath();
-    ctx.moveTo(x + rTL, y);
-    ctx.lineTo(x + w2 - rTR, y);
-    if (rTR) ctx.quadraticCurveTo(x + w2, y, x + w2, y + rTR);
-    ctx.lineTo(x + w2, y + h2 - rBR);
-    if (rBR) ctx.quadraticCurveTo(x + w2, y + h2, x + w2 - rBR, y + h2);
-    ctx.lineTo(x + rBL, y + h2);
-    if (rBL) ctx.quadraticCurveTo(x, y + h2, x, y + h2 - rBL);
-    ctx.lineTo(x, y + rTL);
-    if (rTL) ctx.quadraticCurveTo(x, y, x + rTL, y);
+    for (let i = 0; i < n; i++) {
+      const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n];
+      const d1x = p1.px - p0.px, d1y = p1.py - p0.py, len1 = Math.hypot(d1x, d1y) || 1;
+      const d2x = p2.px - p1.px, d2y = p2.py - p1.py, len2 = Math.hypot(d2x, d2y) || 1;
+      const rr2 = Math.min(r, len1 * 0.45, len2 * 0.45);
+      const a = { px: p1.px - d1x / len1 * rr2, py: p1.py - d1y / len1 * rr2 };
+      const b = { px: p1.px + d2x / len2 * rr2, py: p1.py + d2y / len2 * rr2 };
+      if (i === 0) ctx.moveTo(a.px, a.py); else ctx.lineTo(a.px, a.py);
+      ctx.quadraticCurveTo(p1.px, p1.py, b.px, b.py);
+    }
     ctx.closePath();
   },
 
-  // ---------- オブジェクト ----------
-  drawObjectsOnRow(ctx, y, now) {
-    const v = this.view;
-    const { ox, oy, cs, rs, eh } = v;
-    // 建物 (2x2 の下端の行で描く)
+  // マップのひし形にそった、角丸ひし形の白い盤
+  drawTray(ctx, v) {
+    const GW = CFG.GW, GH = CFG.GH;
+    const N0 = Iso.project(v, 0, 0, 0);
+    const E0 = Iso.project(v, GW, 0, 0);
+    const S0 = Iso.project(v, GW, GH, 0);
+    const W0 = Iso.project(v, 0, GH, 0);
+    const padXY = v.cs * 0.9;
+    const padTop = padXY + CFG.MAX_H * v.eh + padXY * 0.6; // 山の高さぶんの余白
+    const outer = [
+      { px: N0.px, py: N0.py - padTop },
+      { px: E0.px + padXY, py: E0.py },
+      { px: S0.px, py: S0.py + padXY },
+      { px: W0.px - padXY, py: W0.py },
+    ];
+    ctx.save();
+    ctx.shadowColor = PAL.trayShadow;
+    ctx.shadowBlur = v.cs * 1.4;
+    ctx.shadowOffsetY = v.cs * 0.5;
+    ctx.fillStyle = PAL.trayEdge;
+    this.roundedPolyPath(ctx, outer, v.cs * 1.3);
+    ctx.fill();
+    ctx.restore();
+
+    const inset = v.cs * 0.28;
+    const inner = [
+      { px: N0.px, py: N0.py - (padTop - inset) },
+      { px: E0.px + (padXY - inset), py: E0.py },
+      { px: S0.px, py: S0.py + (padXY - inset) },
+      { px: W0.px - (padXY - inset), py: W0.py },
+    ];
+    ctx.fillStyle = PAL.tray;
+    this.roundedPolyPath(ctx, inner, v.cs * 1.0);
+    ctx.fill();
+  },
+
+  // ---------- 面をつくる小物 ----------
+  wallPath(ctx, top1, top2, bot1, bot2) {
+    ctx.beginPath();
+    ctx.moveTo(top1.px, top1.py);
+    ctx.lineTo(top2.px, top2.py);
+    ctx.lineTo(bot2.px, bot2.py);
+    ctx.lineTo(bot1.px, bot1.py);
+    ctx.closePath();
+  },
+
+  // 壁の帯 (t0〜t1: 上→下の割合)
+  wallStrip(ctx, top1, top2, bot1, bot2, t0, t1) {
+    t0 = clamp(t0, 0, 1); t1 = clamp(t1, 0, 1);
+    const a = lerpPt(top1, bot1, t0), b = lerpPt(top2, bot2, t0);
+    const c = lerpPt(top2, bot2, t1), d = lerpPt(top1, bot1, t1);
+    ctx.beginPath();
+    ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.lineTo(c.px, c.py); ctx.lineTo(d.px, d.py);
+    ctx.closePath();
+  },
+
+  drawStairsFace(ctx, top1, top2, bot1, bot2) {
+    const cs = this.view.cs;
+    const dropPx = bot1.py - top1.py;
+    const steps = Math.max(2, Math.round(dropPx / (cs * 0.3)));
+    ctx.fillStyle = "#e8d9b8";
+    this.wallPath(ctx, top1, top2, bot1, bot2); ctx.fill();
+    for (let k = 0; k < steps; k++) {
+      ctx.fillStyle = k % 2 ? "#d9c69c" : "#efe3c4";
+      const t0 = k / steps, t1 = t0 + (1 / steps) * 0.85;
+      this.wallStrip(ctx, top1, top2, bot1, bot2, t0, t1); ctx.fill();
+    }
+    ctx.strokeStyle = "rgba(120,85,40,.25)"; ctx.lineWidth = Math.max(1, cs * 0.04);
+    this.wallPath(ctx, top1, top2, bot1, bot2); ctx.stroke();
+  },
+
+  // 段差の面 (右面 or 左面) をひとつ描く
+  //   top1-top2: 上面の共有辺 (右面なら E-S、左面なら W-S)
+  //   drop: となりとの高さの差、mult: 面の明度 (右0.72 / 左0.86)
+  //   c: セル上面の色 (ぬれ反映ずみ)、isLeftFace: 階段を描いてよいか
+  drawWallFace(ctx, view, i, top1, top2, drop, mult, c, isLeftFace, type) {
+    if (drop <= 0.02) return;
+    const eh = view.eh, cs = view.cs;
+    const bot1 = { px: top1.px, py: top1.py + drop * eh };
+    const bot2 = { px: top2.px, py: top2.py + drop * eh };
+    // ちいさな段差は上面色を暗くした色、おおきな段差は土/石/堤防の壁色へブレンド
+    const wk = clamp((drop - 0.5) / 0.8, 0, 1);
+    const soil = this.wallColor(i);
+    const baseC = [c[0] * mult, c[1] * mult, c[2] * mult];
+    const wc = mixRGB(baseC, soil, wk);
+    const dark = [wc[0] * 0.88, wc[1] * 0.88, wc[2] * 0.88];
+    const light = [Math.min(255, wc[0] * 1.12), Math.min(255, wc[1] * 1.12), Math.min(255, wc[2] * 1.12)];
+    const darkStyle = "rgb(" + (dark[0] | 0) + "," + (dark[1] | 0) + "," + (dark[2] | 0) + ")";
+    const lightStyle = "rgb(" + (light[0] | 0) + "," + (light[1] | 0) + "," + (light[2] | 0) + ")";
+
+    // 縦グラデの近似 (2色 fill): 下地を暗色でぬり、上がわだけ明色をかさねる
+    ctx.fillStyle = darkStyle;
+    this.wallPath(ctx, top1, top2, bot1, bot2);
+    ctx.fill();
+    ctx.strokeStyle = darkStyle; ctx.lineWidth = 1; ctx.stroke(); // となりとのすじ消し
+    ctx.fillStyle = lightStyle;
+    this.wallStrip(ctx, top1, top2, bot1, bot2, 0, 0.55);
+    ctx.fill();
+
+    if (isLeftFace && World.stairs[i] && drop > 0.6) {
+      // たかだいには かいだん (左面のみ)
+      this.drawStairsFace(ctx, top1, top2, bot1, bot2);
+    } else if (drop > 0.8 && type !== T_LEVEE) {
+      // 地層のよこ線
+      const n = Math.min(4, Math.floor((drop * eh) / (cs * 0.4)));
+      ctx.fillStyle = "rgba(120,85,40,.10)";
+      for (let k = 1; k <= n; k++) {
+        const t = k / (n + 1);
+        this.wallStrip(ctx, top1, top2, bot1, bot2, t - 0.035, t + 0.035);
+        ctx.fill();
+      }
+    }
+    if (type === T_LEVEE) {
+      // ていぼうの いしがき模様 (よこ線+たて線)
+      ctx.strokeStyle = "rgba(140,140,150,.35)";
+      ctx.lineWidth = Math.max(1, cs * 0.04);
+      const rows2 = Math.max(1, Math.floor((drop * eh) / (cs * 0.34)));
+      for (let k = 1; k <= rows2; k++) {
+        const t = k / (rows2 + 1);
+        const a = lerpPt(top1, bot1, t), b = lerpPt(top2, bot2, t);
+        ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+      }
+      const ca = lerpPt(top1, top2, 0.5), cb = lerpPt(bot1, bot2, 0.5);
+      ctx.beginPath(); ctx.moveTo(ca.px, ca.py); ctx.lineTo(cb.px, cb.py); ctx.stroke();
+    }
+    // 壁の上ふち: あかるいライン (はっきりした がけ だけ)
+    if (drop > 0.9) {
+      ctx.fillStyle = "rgba(255,255,255,.3)";
+      this.wallStrip(ctx, top1, top2, bot1, bot2, 0, 0.09);
+      ctx.fill();
+    }
+  },
+
+  // ---------- 1セルぶんの地形 (上面+右面+左面) ----------
+  drawCell(ctx, view, x, y) {
+    const i = idx(x, y);
+    const h = World.h[i];
+    const [N, E, S, W] = Iso.cellCorners(view, x, y, h);
+    let c = this.topColor(i, x, y);
+    // ぬれあと: すこし濃く、あおっぽく
+    const wet = Water.wet[i];
+    if (wet > 0.03 && Water.w[i] < 0.02 && !World.seaMask[i]) {
+      const k = wet * 0.35;
+      c = [lerp(c[0], c[0] * 0.62, k), lerp(c[1], c[1] * 0.72, k), lerp(c[2], c[2] * 0.86 + 30, k)];
+    }
+    const topFill = "rgb(" + (c[0] | 0) + "," + (c[1] | 0) + "," + (c[2] | 0) + ")";
+    ctx.fillStyle = topFill;
+    ctx.beginPath();
+    ctx.moveTo(N.px, N.py); ctx.lineTo(E.px, E.py); ctx.lineTo(S.px, S.py); ctx.lineTo(W.px, W.py);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = topFill; ctx.lineWidth = 1; ctx.stroke(); // となりとのすじ消し
+
+    const type = World.type[i];
+    if (type === T_LEVEE) {
+      // ていぼうの上面: まるいふちどり (おく=あかるい、てまえ=かげ)
+      const cs = view.cs;
+      ctx.strokeStyle = "rgba(255,255,255,.5)"; ctx.lineWidth = Math.max(1, cs * 0.09);
+      let a = lerpPt(N, E, 0.08), b = lerpPt(N, E, 0.92);
+      ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+      a = lerpPt(N, W, 0.08); b = lerpPt(N, W, 0.92);
+      ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+      ctx.strokeStyle = "rgba(120,120,130,.18)";
+      a = lerpPt(S, E, 0.08); b = lerpPt(S, E, 0.92);
+      ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+      a = lerpPt(S, W, 0.08); b = lerpPt(S, W, 0.92);
+      ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
+    }
+    if (type === T_RIVER && ((x * 7 + y * 13) % 5 === 0)) {
+      // かわらの小石
+      const ex = 0.25 + ((x * 31 + y * 17) % 10) / 20;
+      const pt = Iso.project(view, x + ex, y + 0.5, h);
+      ctx.fillStyle = "rgba(255,255,255,.4)";
+      ctx.beginPath();
+      ctx.ellipse(pt.px, pt.py, view.cs * 0.09, view.cs * 0.06, 0, 0, 7);
+      ctx.fill();
+    }
+
+    // 右面 (+x側)
+    const hR = inGrid(x + 1, y) ? World.h[idx(x + 1, y)] : 0;
+    this.drawWallFace(ctx, view, i, E, S, h - hR, 0.72, c, false, type);
+    // 左面 (+y側)
+    const hL = inGrid(x, y + 1) ? World.h[idx(x, y + 1)] : 0;
+    this.drawWallFace(ctx, view, i, W, S, h - hL, 0.86, c, true, type);
+  },
+
+  // ---------- 対角線 s に属するオブジェクト ----------
+  drawObjectsForS(ctx, view, s, now) {
+    // 建物 (2x2 の手前角のとき)
     for (const b of World.buildings) {
-      if (b.y + 1 !== y) continue;
-      const gx = b.x + 1, gy = b.y + 1.4;
+      if (s !== b.x + b.y + 2) continue;
       const hh = World.h[idx(b.x, b.y)];
-      const px = ox + gx * cs;
-      const py = oy + gy * rs - hh * eh;
-      drawBuildingObj(ctx, b, px, py, cs, now);
+      const p = Iso.project(view, b.x + 1, b.y + 1.4, hh);
+      drawBuildingObj(ctx, b, p.px, p.py, view.cs, now);
     }
     // 木
     for (const t of World.trees) {
-      if (Math.round(t.y) !== y) continue;
-      const i = idx(clamp(Math.round(t.x), 0, CFG.GW - 1), clamp(Math.round(t.y), 0, CFG.GH - 1));
-      const px = ox + (t.x + 0.5) * cs;
-      const py = oy + (t.y + 0.7) * rs - World.h[i] * eh;
-      drawTreeObj(ctx, t, px, py, cs, now);
+      if (s !== Math.floor(t.x) + Math.floor(t.y)) continue;
+      const i = idx(clamp(Math.floor(t.x), 0, CFG.GW - 1), clamp(Math.floor(t.y), 0, CFG.GH - 1));
+      const p = Iso.project(view, t.x + 0.5, t.y + 0.7, World.h[i]);
+      drawTreeObj(ctx, t, p.px, p.py, view.cs, now);
     }
     // 花 (水にしずんでいたら かくす)
     for (const f of World.flowers) {
-      if (Math.floor(f.y) !== y) continue;
+      if (s !== Math.floor(f.x) + Math.floor(f.y)) continue;
       const i = idx(clamp(Math.floor(f.x), 0, CFG.GW - 1), clamp(Math.floor(f.y), 0, CFG.GH - 1));
       if (Water.w[i] > 0.08) continue;
-      const px = ox + f.x * cs;
-      const py = oy + f.y * rs - World.h[i] * eh;
-      drawFlowerObj(ctx, f, px, py, cs);
+      const p = Iso.project(view, f.x, f.y, World.h[i]);
+      drawFlowerObj(ctx, f, p.px, p.py, view.cs);
     }
     // 湧き水マーク
-    for (const s of World.springs) {
-      if (Math.round(s.y) !== y) continue;
-      const i = idx(Math.round(s.x), Math.round(s.y));
-      const px = ox + (s.x + 0.5) * cs;
-      const py = oy + (s.y + 0.4) * rs - (World.h[i] + Water.w[i]) * eh;
+    for (const sp of World.springs) {
+      if (s !== Math.floor(sp.x) + Math.floor(sp.y)) continue;
+      const i = idx(clamp(Math.floor(sp.x), 0, CFG.GW - 1), clamp(Math.floor(sp.y), 0, CFG.GH - 1));
+      const p = Iso.project(view, sp.x + 0.5, sp.y + 0.4, World.h[i] + Water.w[i]);
       const ph = 0.5 + 0.5 * Math.sin(now * 0.005);
       ctx.globalAlpha = 0.5 + ph * 0.4;
-      drawDropShape(ctx, px, py - cs * 0.5 - ph * cs * 0.15, cs * 0.26, "#7fd4ee");
+      drawDropShape(ctx, p.px, p.py - view.cs * 0.5 - ph * view.cs * 0.15, view.cs * 0.26, "#7fd4ee");
       ctx.globalAlpha = 1;
     }
   },
 
-  drawSeaLife(ctx, now) {
-    const v = this.view;
-    const { ox, oy, cs, rs, eh } = v;
+  // ---------- 海の生きもの ----------
+  // 手前寄りのふかい海セルをえらぶ (マップ再生成で World.h の参照が変わったら選びなおす)
+  pickBoatCell() {
+    const GW = CFG.GW, GH = CFG.GH;
+    let best = null, bestScore = -Infinity;
+    for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+      const i = idx(x, y);
+      if (!World.seaMask[i]) continue;
+      const score = y * 2 - World.h[i] * 4; // てまえ(y大)ほど、ふかい(h小)ほど高スコア
+      if (score > bestScore) { bestScore = score; best = { x, y }; }
+    }
+    return best;
+  },
+
+  drawSeaLife(ctx, view, now) {
+    const GW = CFG.GW, GH = CFG.GH;
+    if (this._boatMapRef !== World.h) {
+      this._boatMapRef = World.h;
+      this._boatCell = this.pickBoatCell();
+    }
     // ふね
-    const b = this.boat;
-    const bi = idx(Math.round(b.x), Math.round(b.y));
-    if (World.seaMask[bi]) {
-      const surf = World.h[bi] + Water.w[bi];
-      drawBoat(ctx, ox + b.x * cs, oy + b.y * rs - surf * eh, cs * 0.9, now);
+    if (this._boatCell) {
+      const bi = idx(this._boatCell.x, this._boatCell.y);
+      if (World.seaMask[bi]) {
+        const surf = World.h[bi] + Water.w[bi];
+        const p = Iso.project(view, this._boatCell.x + 0.5, this._boatCell.y + 0.5, surf);
+        drawBoat(ctx, p.px, p.py, view.cs * 0.9, now);
+      }
     }
     // さかなのジャンプ
     const f = this.fish;
     if (f.t < 0) {
       f.t = 0;
       f.wait = 4 + Math.random() * 6;
-      // 海のセルをさがす
       for (let tries = 0; tries < 20; tries++) {
-        const x = 2 + Math.floor(Math.random() * (CFG.GW - 4));
-        const y = CFG.GH - 2 - Math.floor(Math.random() * 4);
+        const x = 2 + Math.floor(Math.random() * (GW - 4));
+        const y = GH - 2 - Math.floor(Math.random() * 4);
         if (World.seaMask[idx(x, y)]) { f.x = x; f.y = y; break; }
       }
     }
@@ -435,7 +411,8 @@ const Render = {
       const ph = (f.t - f.wait) / 1.1;
       const i = idx(Math.round(f.x), Math.round(f.y));
       const surf = World.h[i] + Water.w[i];
-      drawFish(ctx, ox + f.x * cs, oy + f.y * rs - surf * eh, cs * 0.8, ph);
+      const p = Iso.project(view, f.x + 0.5, f.y + 0.5, surf);
+      drawFish(ctx, p.px, p.py, view.cs * 0.8, ph);
       if (ph < 0.08 || ph > 0.92) Particles.splash(f.x, f.y, surf);
     } else if (f.t >= f.wait + 1.1) {
       f.t = -1;
@@ -443,35 +420,33 @@ const Render = {
   },
 
   // ---------- みくらべの跡 ----------
-  drawCompareOutline(ctx, now) {
-    const v = this.view;
-    const { ox, oy, cs, rs, eh } = v;
+  drawCompareOutline(ctx, view, now) {
     const m = Modes.compareMask;
+    const GW = CFG.GW, GH = CFG.GH;
     ctx.save();
     ctx.strokeStyle = "rgba(255,110,160,.85)";
-    ctx.lineWidth = Math.max(2, cs * 0.13);
-    ctx.setLineDash([cs * 0.4, cs * 0.3]);
+    ctx.lineWidth = Math.max(2, view.cs * 0.13);
+    ctx.setLineDash([view.cs * 0.4, view.cs * 0.3]);
     ctx.lineDashOffset = -now * 0.01;
     ctx.lineCap = "round";
-    for (let y = 0; y < CFG.GH; y++) {
-      for (let x = 0; x < CFG.GW; x++) {
+    for (let y = 0; y < GH; y++) {
+      for (let x = 0; x < GW; x++) {
         const i = idx(x, y);
         if (!m[i]) continue;
         const hh = World.h[i] + Water.w[i];
-        const px = ox + x * cs;
-        const py = oy + y * rs - hh * eh;
-        // 外周だけ線を引く
-        if (y === 0 || !m[i - CFG.GW]) {
-          ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + cs, py); ctx.stroke();
+        const [N, E, S, W] = Iso.cellCorners(view, x, y, hh);
+        // 露出辺だけ線を引く (§2 の共有辺マッピング)
+        if (y === 0 || !m[i - GW]) { // 隣(x,y-1) = N-E辺
+          ctx.beginPath(); ctx.moveTo(N.px, N.py); ctx.lineTo(E.px, E.py); ctx.stroke();
         }
-        if (y === CFG.GH - 1 || !m[i + CFG.GW]) {
-          ctx.beginPath(); ctx.moveTo(px, py + rs); ctx.lineTo(px + cs, py + rs); ctx.stroke();
+        if (x === 0 || !m[i - 1]) { // 隣(x-1,y) = N-W辺
+          ctx.beginPath(); ctx.moveTo(N.px, N.py); ctx.lineTo(W.px, W.py); ctx.stroke();
         }
-        if (x === 0 || !m[i - 1]) {
-          ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py + rs); ctx.stroke();
+        if (x === GW - 1 || !m[i + 1]) { // 隣(x+1,y) = E-S辺
+          ctx.beginPath(); ctx.moveTo(E.px, E.py); ctx.lineTo(S.px, S.py); ctx.stroke();
         }
-        if (x === CFG.GW - 1 || !m[i + 1]) {
-          ctx.beginPath(); ctx.moveTo(px + cs, py); ctx.lineTo(px + cs, py + rs); ctx.stroke();
+        if (y === GH - 1 || !m[i + GW]) { // 隣(x,y+1) = W-S辺
+          ctx.beginPath(); ctx.moveTo(W.px, W.py); ctx.lineTo(S.px, S.py); ctx.stroke();
         }
       }
     }
@@ -479,31 +454,29 @@ const Render = {
   },
 
   // ---------- カーソル ----------
-  drawCursor(ctx, now) {
+  drawCursor(ctx, view, now) {
     const c = Input.cursor;
-    const v = this.view;
     const i = idx(clamp(Math.floor(c.x), 0, CFG.GW - 1), clamp(Math.floor(c.y), 0, CFG.GH - 1));
     const surf = World.h[i] + Water.w[i];
-    const px = v.ox + c.x * v.cs;
-    const py = v.oy + c.y * v.rs - surf * v.eh;
+    const p = Iso.project(view, c.x, c.y, surf);
     const pulse = 1 + 0.12 * Math.sin(now * 0.012);
-    let r = v.cs * 1.2, col = "rgba(255,255,255,.75)";
+    let r = view.cs * 1.2, col = "rgba(255,255,255,.75)";
     const tl = Input.tool;
-    if (tl === "mountain" || tl === "plateau") { r = v.cs * 2.3; col = "rgba(170,220,120,.8)"; }
-    else if (tl === "ditch") { r = v.cs * 1.0; col = "rgba(190,170,110,.85)"; }
-    else if (tl === "river") { r = v.cs * 1.4; col = "rgba(120,210,235,.85)"; }
-    else if (tl === "levee") { r = v.cs * 0.8; col = "rgba(230,230,235,.9)"; }
-    else if (tl === "water") { r = v.cs * 1.1; col = "rgba(110,205,240,.9)"; }
-    else if (tl === "eraser") { r = v.cs * 1.6; col = "rgba(255,160,190,.85)"; }
+    if (tl === "mountain" || tl === "plateau") { r = view.cs * 2.3; col = "rgba(170,220,120,.8)"; }
+    else if (tl === "ditch") { r = view.cs * 1.0; col = "rgba(190,170,110,.85)"; }
+    else if (tl === "river") { r = view.cs * 1.4; col = "rgba(120,210,235,.85)"; }
+    else if (tl === "levee") { r = view.cs * 0.8; col = "rgba(230,230,235,.9)"; }
+    else if (tl === "water") { r = view.cs * 1.1; col = "rgba(110,205,240,.9)"; }
+    else if (tl === "eraser") { r = view.cs * 1.6; col = "rgba(255,160,190,.85)"; }
     ctx.strokeStyle = col;
-    ctx.lineWidth = Math.max(2, v.cs * 0.12);
+    ctx.lineWidth = Math.max(2, view.cs * 0.12);
     ctx.beginPath();
-    ctx.ellipse(px, py, r * pulse, r * pulse * 0.62, 0, 0, 7);
+    ctx.ellipse(p.px, p.py, r * pulse, r * pulse * 0.5, 0, 0, 7); // 2:1 のだえん
     ctx.stroke();
 
     // 建物ゴースト
     if (tl === "building" && Input.down) {
-      drawBuildingObj(ctx, { kind: Input.buildingKind, wet: 0, happy: 0 }, px, py, v.cs, now);
+      drawBuildingObj(ctx, { kind: Input.buildingKind, wet: 0, happy: 0 }, p.px, p.py, view.cs, now);
     }
   },
 };
