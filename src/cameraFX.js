@@ -14,6 +14,11 @@
 // read the setFocus point at all.
 import * as THREE from 'three';
 import { PLATFORMS } from './constants.js';
+// MEGA (docs/CONTRACTS-MEGA.md "M5"): namespace import for SKY, which M1
+// appends to constants.js in parallel — a named `import { SKY }` would throw
+// a hard SyntaxError at module-link time until that edit lands. PLATFORMS is
+// already a stable export today so the named import above stays as-is.
+import * as ConstantsNS from './constants.js';
 
 // ---- small math helpers (no allocation) --------------------------------
 function clamp01(x) {
@@ -166,6 +171,59 @@ const SPLASH_LOOK_HEADROOM_PORT = 1.1; // ...and portrait (lower-center third)
 // returnToTower: fixed ~1.0s real-time eased pan/dolly back to idle framing.
 const RETURN_DUR = 1.0;
 
+// ---- MEGA additions (docs/CONTRACTS-MEGA.md "M5") ------------------------
+// Guarded fallback (SKY may not exist in constants.js yet mid-parallel-dev).
+const SKY = ConstantsNS.SKY || { id: 'sky', height: 26.0, drop: { x: -1.2, y: 26.0, z: 0 } };
+const HIGH_PLATFORM = PLATFORMS.find((p) => p.id === 'high') || PLATFORMS[PLATFORMS.length - 1];
+const HIGH_PLATFORM_Y = HIGH_PLATFORM.height;
+// cameraFX has no live scene refs (by design — S2's rework note: no scene
+// graph access, only camera math). The gondola's real position lives in
+// scene.js/rabbit.js; this approximation (drop-point XZ, just under sky
+// height) is close enough for framing purposes for ascendView's climb and
+// the E3 reaction cut / returnFromMega's wide sky idle view below.
+const GONDOLA_APPROX = { x: SKY.drop.x, y: SKY.height - 1.0, z: SKY.drop.z };
+
+// ascendView: camera climbs alongside the gondola from the tower top up to
+// sky height, pulling back as it rises so the shrinking world (pool) stays
+// visible below at high progress.
+const ASCEND_DIST_START = 5.5;
+const ASCEND_DIST_END = 10.0;
+const ASCEND_CAMY_OFFSET_START = 1.6;
+const ASCEND_CAMY_OFFSET_END = 4.0;
+const ASCEND_LOOK_POOL_WEIGHT_START = 0.15; // how much look-at leans toward pool center (0,0,0)
+const ASCEND_LOOK_POOL_WEIGHT_END = 0.55;
+const ASCEND_SMOOTH_TIME = 0.5;
+
+// followFlight, MEGA case: a sky drop starts far higher (>15 per contract)
+// than any normal platform, so it gets its own wider/longer chase framing,
+// passing close to the cloud layers (y~10/18) on the way down. Detected
+// internally from the very first getPos() sample (see _updateFollowFlight).
+const FOLLOW_MEGA_START_Y_THRESHOLD = 15;
+const FOLLOW_MEGA_DIST_START = 12.0;
+const FOLLOW_MEGA_DIST_END = 4.2;
+const FOLLOW_MEGA_Y_START = 14.0;
+const FOLLOW_MEGA_Y_END = 2.0;
+
+// megaSplashView: wider locked-on preset (fit an 8m column) + scripted E3
+// reaction cut sub-timeline.
+const MEGA_SPLASH_DIST_BASE = 9.0; // m, before the megaScale nudge, clamped to ~[9,11]
+const MEGA_SPLASH_DIST_SCALE_GAIN = 0.35;
+const MEGA_SPLASH_DIST_MAX_BONUS = 2.0;
+const MEGA_SPLASH_Y = 3.2;
+const MEGA_SPLASH_LOOK_HEADROOM_LAND = 1.6;
+const MEGA_SPLASH_LOOK_HEADROOM_PORT = 2.4;
+const MEGA_SPLASH_SMOOTH_TIME = 0.4;
+const MEGA_CUT_START_S = 1.8; // E3 reaction cut begins ~1.8s into the mega splash
+const MEGA_CUT_DUR_S = 0.7;
+// Slow-mo envelope for mega impacts: phases ①-④ run through the first ~3s
+// real, then timeScale returns to 1 for ⑤-⑦ — implemented as a longer
+// _slowmoDur fed into the SAME hitstop/slowmo/recover state machine used for
+// every normal impact (see onImpact below): extends it, doesn't fork it.
+const MEGA_SLOWMO_TOTAL_S = 3.0;
+
+// returnFromMega: wider idle-sky view (gondola + pool), ~1.2s real.
+const RETURN_MEGA_DUR = 1.2;
+
 export class CameraFX {
   constructor(renderer) {
     this.renderer = renderer;
@@ -214,6 +272,9 @@ export class CameraFX {
     this._followGetPos = null;
     this._followInitialized = false;
     this._followStartY = 1;
+    // MEGA: detected from the very first getPos() sample's height (see
+    // _updateFollowFlight) — true widens/lengthens the chase for a sky drop.
+    this._followIsMega = false;
     this._followCamPos = new THREE.Vector3();
     this._followVelPos = new THREE.Vector3();
     this._followLookAt = new THREE.Vector3();
@@ -242,6 +303,34 @@ export class CameraFX {
     this._returnTimer = 0;
     this._returnFired = false;
     this._returnOnDone = null;
+    // MEGA: which duration/target returning is easing toward — set by
+    // returnToTower (false) vs returnFromMega (true); returnToTower always
+    // resets this so a later normal return is completely unaffected.
+    this._returnIsMega = false;
+
+    // MEGA: ascendView state (climb alongside the gondola).
+    this._ascendGetPos = null;
+    this._ascendInitialized = false;
+    this._ascendCamPos = new THREE.Vector3();
+    this._ascendVelPos = new THREE.Vector3();
+    this._ascendLookAt = new THREE.Vector3();
+    this._ascendVelLookAt = new THREE.Vector3();
+    this._ascendDesiredPos = new THREE.Vector3();
+    this._ascendDesiredLookAt = new THREE.Vector3();
+
+    // MEGA: megaSplashView state.
+    this._megaPoint = new THREE.Vector3();
+    this._megaScale = 1;
+    this._megaInitialized = false;
+    this._megaElapsed = 0;
+    this._megaCamPos = new THREE.Vector3();
+    this._megaVelPos = new THREE.Vector3();
+    this._megaLookAt = new THREE.Vector3();
+    this._megaVelLookAt = new THREE.Vector3();
+    this._megaDesiredPos = new THREE.Vector3();
+    this._megaDesiredLookAt = new THREE.Vector3();
+    this._megaCutPos = new THREE.Vector3();
+    this._megaCutLookAt = new THREE.Vector3();
 
     // Last look-at actually applied to the camera, tracked every frame so
     // any mode transition can start its blend/spring from where the camera
@@ -422,6 +511,60 @@ export class CameraFX {
     this._returnTimer = 0;
     this._returnFired = false;
     this._returnOnDone = cb;
+    this._returnIsMega = false;
+    this._mode = 'returning';
+  }
+
+  // ---------------------------------------------------------------------
+  // MEGA additions (docs/CONTRACTS-MEGA.md "M5"). Same "ignore setFocus"
+  // rule as every other non-idle mode below — setFocus() already returns
+  // early for any this._mode !== 'idle', so ascendView/megaSplashView are
+  // covered by that existing guard with no further change needed there.
+  // ---------------------------------------------------------------------
+
+  // Smooth climb alongside the gondola: getPos() returns the gondola's
+  // current world position each frame (called every frame while active,
+  // same contract shape as followFlight's getPos).
+  ascendView(getPos) {
+    if (typeof getPos !== 'function') return;
+    this._ascendGetPos = getPos;
+    this._ascendInitialized = false;
+    this._mode = 'ascendView';
+  }
+
+  // Wider locked-on mega splash preset with a scripted E3 reaction cut.
+  // Calling again while already active (secondary impact, e.g. jelly
+  // fragment rain) re-targets smoothly without restarting the sub-timeline
+  // or re-seeding the spring — same "no snap on repeat" rule as splashView.
+  megaSplashView(spec) {
+    if (!spec || !spec.point) return;
+    const wasActive = this._mode === 'megaSplashView';
+    this._megaPoint.set(spec.point.x, spec.point.y, spec.point.z);
+    const scale = spec.megaScale;
+    this._megaScale = typeof scale === 'number' && isFinite(scale) && scale > 0 ? scale : 1;
+    if (!wasActive) {
+      this._megaInitialized = false;
+      this._megaElapsed = 0;
+    }
+    this._mode = 'megaSplashView';
+  }
+
+  // Wide idle-sky view (gondola + pool), ~1.2s real; onDone() fires exactly
+  // once at arrival, then mode becomes 'idle' — pinned on the gondola-height
+  // framing (via the SAME idle spring/composition every other mode hands
+  // back to) until something calls setIdleView again, which is exactly what
+  // happens the next time GameFlow climbs to a real board (exiting sky
+  // mode) — see _updateReturning's arrival branch.
+  returnFromMega(onDone) {
+    const cb = typeof onDone === 'function' ? onDone : null;
+    this._returnStartPos.copy(this.camera.position);
+    this._returnStartLookAt.copy(this._lastLookAt);
+    this._idleTip.set(GONDOLA_APPROX.x, GONDOLA_APPROX.y, GONDOLA_APPROX.z);
+    this._computeIdleRaw(this._idleTip, this._returnTargetPos, this._returnTargetLookAt);
+    this._returnTimer = 0;
+    this._returnFired = false;
+    this._returnOnDone = cb;
+    this._returnIsMega = true;
     this._mode = 'returning';
   }
 
@@ -451,7 +594,14 @@ export class CameraFX {
       this._impactPoint.set(spec.point.x, spec.point.y, spec.point.z);
       const energy = clamp01(spec.energy || 0);
       this._underwaterEligible = energy > 0.45;
-      this._slowmoDur = SLOWMO_BASE_DUR + (energy > 0.7 ? SLOWMO_ENERGY_BONUS : 0);
+      // MEGA: extend (don't fork) the SAME hitstop/slowmo/recover state
+      // machine — a longer _slowmoDur naturally keeps timeScale in slow-mo
+      // through phases ①-④ (first ~3s real), then recover/idle bring it back
+      // to 1 for ⑤-⑦, matching "slow-mo only through the first ~3s" without
+      // any extra phase/branch in _advanceTimeline below.
+      this._slowmoDur = spec.mega
+        ? Math.max(0.1, MEGA_SLOWMO_TOTAL_S - HITSTOP_DUR)
+        : SLOWMO_BASE_DUR + (energy > 0.7 ? SLOWMO_ENERGY_BONUS : 0);
       this._phase = 'hitstop';
       this._phaseTimer = 0;
 
@@ -610,6 +760,11 @@ export class CameraFX {
     if (!this._followInitialized) {
       this._followInitialized = true;
       this._followStartY = Math.max(p.y, 0.5);
+      // MEGA: a sky drop starts far higher than any normal platform — widen
+      // and lengthen the chase (it naturally also takes longer real time to
+      // fall the extra height, which is what makes it read as "the longest,
+      // most dramatic follow" on top of the wider framing here).
+      this._followIsMega = this._followStartY > FOLLOW_MEGA_START_Y_THRESHOLD;
       // Seed the spring from wherever the camera currently is so entering
       // this mode from idle never teleports.
       this._followCamPos.copy(this.camera.position);
@@ -634,8 +789,12 @@ export class CameraFX {
       lerp(p.z, this._followLanding.z, pivotW)
     );
 
-    const dist = lerp(FOLLOW_DIST_START, FOLLOW_DIST_END, eu);
-    const camY = lerp(FOLLOW_Y_START, FOLLOW_Y_END, eu);
+    const distStart = this._followIsMega ? FOLLOW_MEGA_DIST_START : FOLLOW_DIST_START;
+    const distEnd = this._followIsMega ? FOLLOW_MEGA_DIST_END : FOLLOW_DIST_END;
+    const yStart = this._followIsMega ? FOLLOW_MEGA_Y_START : FOLLOW_Y_START;
+    const yEnd = this._followIsMega ? FOLLOW_MEGA_Y_END : FOLLOW_Y_END;
+    const dist = lerp(distStart, distEnd, eu);
+    const camY = lerp(yStart, yEnd, eu);
     this._followDesiredPos.set(
       this._followPivot.x + dist * COS_AZ,
       camY,
@@ -723,9 +882,127 @@ export class CameraFX {
     this._setTint(amt);
   }
 
+  // MEGA: smooth climb alongside the gondola (see ascendView above).
+  _updateAscendView(dtReal) {
+    const p = this._ascendGetPos ? this._ascendGetPos() : null;
+    if (!p) {
+      this._setTint(0);
+      return;
+    }
+    if (!this._ascendInitialized) {
+      this._ascendInitialized = true;
+      this._ascendCamPos.copy(this.camera.position);
+      this._ascendVelPos.set(0, 0, 0);
+      this._ascendLookAt.copy(this._lastLookAt);
+      this._ascendVelLookAt.set(0, 0, 0);
+    }
+
+    // Progress 0 (tower top) -> 1 (sky height): pulls the camera back and up
+    // as the gondola rises, keeping the shrinking pool visible below at high
+    // progress (look-at leans further toward the pool center as u grows).
+    const span = Math.max(1, SKY.height - HIGH_PLATFORM_Y);
+    const u = clamp01((p.y - HIGH_PLATFORM_Y) / span);
+    const eu = smoothstep(u);
+
+    const dist = lerp(ASCEND_DIST_START, ASCEND_DIST_END, eu);
+    const camY = p.y + lerp(ASCEND_CAMY_OFFSET_START, ASCEND_CAMY_OFFSET_END, eu);
+    this._ascendDesiredPos.set(p.x + dist * COS_AZ, camY, p.z + dist * SIN_AZ);
+
+    const poolW = lerp(ASCEND_LOOK_POOL_WEIGHT_START, ASCEND_LOOK_POOL_WEIGHT_END, eu);
+    this._ascendDesiredLookAt.set(
+      lerp(p.x, 0, poolW),
+      lerp(p.y, 0, poolW * 0.5),
+      lerp(p.z, 0, poolW)
+    );
+
+    smoothDampVec3(this._ascendCamPos, this._ascendVelPos, this._ascendDesiredPos, ASCEND_SMOOTH_TIME, dtReal);
+    smoothDampVec3(this._ascendLookAt, this._ascendVelLookAt, this._ascendDesiredLookAt, ASCEND_SMOOTH_TIME, dtReal);
+
+    this._finalPos.copy(this._ascendCamPos);
+    this._finalPos.x += this._shakeOffset.x;
+    this._finalPos.y += this._shakeOffset.y;
+    this.camera.position.copy(this._finalPos);
+    this.camera.lookAt(this._ascendLookAt);
+    this._lastLookAt.copy(this._ascendLookAt);
+
+    this._setTint(0);
+  }
+
+  // MEGA: wide locked-on mega splash preset with a scripted ~0.7s E3
+  // reaction cut to the gondola at ~1.8s in, then back to the locked splash.
+  _updateMegaSplashView(dtReal) {
+    if (!this._megaInitialized) {
+      this._megaInitialized = true;
+      this._megaElapsed = 0;
+      this._megaCamPos.copy(this.camera.position);
+      this._megaVelPos.set(0, 0, 0);
+      this._megaLookAt.copy(this._lastLookAt);
+      this._megaVelLookAt.set(0, 0, 0);
+    }
+    this._megaElapsed += dtReal;
+
+    const inCut = this._megaElapsed >= MEGA_CUT_START_S && this._megaElapsed < MEGA_CUT_START_S + MEGA_CUT_DUR_S;
+    if (inCut) {
+      // E3: fixed close view near the gondola, looking down at the rabbit.
+      this._megaCutPos.set(GONDOLA_APPROX.x + 1.4, GONDOLA_APPROX.y + 0.6, GONDOLA_APPROX.z + 1.4);
+      this._megaCutLookAt.set(GONDOLA_APPROX.x, GONDOLA_APPROX.y - 1.2, GONDOLA_APPROX.z);
+      this._finalPos.copy(this._megaCutPos);
+      this._finalPos.x += this._shakeOffset.x;
+      this._finalPos.y += this._shakeOffset.y;
+      this.camera.position.copy(this._finalPos);
+      this.camera.lookAt(this._megaCutLookAt);
+      this._lastLookAt.copy(this._megaCutLookAt);
+      // Re-seed the splash spring at the cut's pose (zero velocity) so
+      // "then back" (below, once inCut goes false again) eases smoothly
+      // back to the locked splash framing instead of snapping to it.
+      this._megaCamPos.copy(this._finalPos);
+      this._megaVelPos.set(0, 0, 0);
+      this._megaLookAt.copy(this._megaCutLookAt);
+      this._megaVelLookAt.set(0, 0, 0);
+      this._setTint(0);
+      return;
+    }
+
+    // Locked-on framing (same shape as splashView, wider + higher to fit an
+    // 8m mega column): distance ~9-11m, scaled by megaScale.
+    const bonus = Math.max(0, Math.min(MEGA_SPLASH_DIST_MAX_BONUS, (this._megaScale - 1) * MEGA_SPLASH_DIST_SCALE_GAIN));
+    const dist = MEGA_SPLASH_DIST_BASE + bonus;
+    const swAng = CAMERA_AZIMUTH_RAD + Math.sin(this._megaElapsed * SPLASH_SWAY_ANG_SPEED) * SPLASH_SWAY_ANG;
+    const rBreath = dist + Math.sin(this._megaElapsed * SPLASH_SWAY_RADIUS_SPEED) * SPLASH_SWAY_RADIUS;
+    this._megaDesiredPos.set(
+      this._megaPoint.x + rBreath * Math.cos(swAng),
+      MEGA_SPLASH_Y,
+      this._megaPoint.z + rBreath * Math.sin(swAng)
+    );
+
+    const headroom = lerp(MEGA_SPLASH_LOOK_HEADROOM_LAND, MEGA_SPLASH_LOOK_HEADROOM_PORT, this._portraitAmount);
+    this._megaDesiredLookAt.set(this._megaPoint.x, this._megaPoint.y + headroom, this._megaPoint.z);
+
+    smoothDampVec3(this._megaCamPos, this._megaVelPos, this._megaDesiredPos, MEGA_SPLASH_SMOOTH_TIME, dtReal);
+    smoothDampVec3(this._megaLookAt, this._megaVelLookAt, this._megaDesiredLookAt, MEGA_SPLASH_SMOOTH_TIME, dtReal);
+
+    // Underwater dip composes with the locked mega framing exactly like the
+    // normal splashView does.
+    const amt = this._dipAmount;
+    this._dipCamPos.set(this._megaPoint.x + 1.4, -0.5, this._megaPoint.z + 1.4);
+    this._dipLookAt.set(this._megaPoint.x, -0.9, this._megaPoint.z);
+
+    this._finalPos.copy(this._megaCamPos).lerp(this._dipCamPos, amt);
+    this._finalPos.x += this._shakeOffset.x;
+    this._finalPos.y += this._shakeOffset.y;
+    this.camera.position.copy(this._finalPos);
+
+    this._finalLookAt.copy(this._megaLookAt).lerp(this._dipLookAt, amt);
+    this.camera.lookAt(this._finalLookAt);
+    this._lastLookAt.copy(this._finalLookAt);
+
+    this._setTint(amt);
+  }
+
   _updateReturning(dtReal) {
     this._returnTimer += dtReal;
-    const t = clamp01(this._returnTimer / RETURN_DUR);
+    const dur = this._returnIsMega ? RETURN_MEGA_DUR : RETURN_DUR;
+    const t = clamp01(this._returnTimer / dur);
     const e = easeInOutCubic(t);
 
     this._finalPos.lerpVectors(this._returnStartPos, this._returnTargetPos, e);
@@ -771,6 +1048,10 @@ export class CameraFX {
       this._updateFollowFlight(dtReal);
     } else if (this._mode === 'splashView') {
       this._updateSplashView(dtReal);
+    } else if (this._mode === 'megaSplashView') {
+      this._updateMegaSplashView(dtReal);
+    } else if (this._mode === 'ascendView') {
+      this._updateAscendView(dtReal);
     } else if (this._mode === 'returning') {
       this._updateReturning(dtReal);
     } else {

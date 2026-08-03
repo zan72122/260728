@@ -4,6 +4,10 @@
 
 import * as THREE from 'three';
 import { PLATFORMS } from './constants.js';
+// MEGA (docs/CONTRACTS-MEGA.md "M5"): namespace import for SKY, which M1
+// appends to constants.js in parallel — a named `import { SKY }` would throw
+// a hard SyntaxError at module-link time until that lands.
+import * as ConstantsNS from './constants.js';
 import { SceneEnv } from './scene.js';
 import { WaterSurface } from './water.js';
 import { SplashFX } from './splash.js';
@@ -120,6 +124,12 @@ let audio = null;
 let input = null;
 let rabbit = null;
 let gameflow = null;
+// MEGA (docs/CONTRACTS-MEGA.md "M2"): populated asynchronously below (see
+// the dynamic import right after `underwater` is constructed) — every use
+// of `megasplash` elsewhere in this file is null-guarded so a not-yet-
+// resolved (or altogether missing, mid-parallel-dev) module never breaks
+// anything else.
+let megasplash = null;
 
 try {
   sceneEnv = new SceneEnv(scene);
@@ -184,10 +194,32 @@ try {
   recordError(err);
 }
 
+// MEGA (docs/CONTRACTS-MEGA.md "M2"/"M5"): megasplash.js is M2's file and
+// may not exist yet mid-parallel-dev — a STATIC `import { MegaSplashFX }
+// from './megasplash.js'` would throw a fatal module-resolution error for
+// this WHOLE bootstrap the instant that file is missing (unlike a missing
+// named export from an existing file, a missing MODULE can't be worked
+// around with a namespace import). A dynamic import keeps that failure
+// local/recoverable, exactly like every other try/catch-wrapped subsystem
+// construction in this file.
+import('./megasplash.js')
+  .then((mod) => {
+    if (mod && typeof mod.MegaSplashFX === 'function') {
+      megasplash = new mod.MegaSplashFX(scene, waterCtx);
+    }
+  })
+  .catch((err) => {
+    recordError(err);
+  });
+
 try {
   physics = new Physics({
     scene,
     getWaterHeight: (x, z) => (water ? water.displacementAt(x, z) : 0),
+    // MEGA (docs/CONTRACTS-MEGA.md "M4"): floating giants bob using
+    // displacementAt + sloshOffsetAt (M4 reads this option once it lands);
+    // guarded so this is simply unused/harmless until then.
+    getSloshOffset: (x, z) => (water && typeof water.sloshOffsetAt === 'function' ? water.sloshOffsetAt(x, z) : 0),
   });
 } catch (err) {
   recordError(err);
@@ -220,7 +252,19 @@ try {
     physics,
     audio,
     water,
-    isSplashActive: () => isModuleActive(splash, 'isActive') || isModuleActive(underwater, 'isActive'),
+    // MEGA (docs/CONTRACTS-MEGA.md "M5"): balloon.setProgress is gameflow-
+    // driven, per M1's contract; sceneEnv.balloon may not exist yet
+    // mid-parallel-dev (undefined is fine — GameFlow guards every call).
+    balloon: sceneEnv && sceneEnv.balloon,
+    // gameflow.js deliberately doesn't import toys.js itself (see its own
+    // comment) — main.js resolves the real 'giantheavy' ToyDef here instead
+    // (findToyDef is a hoisted function declaration, defined further down
+    // this file). null until M4 appends it; GameFlow has its own fallback.
+    defaultGiantDef: findToyDef('giantheavy'),
+    isSplashActive: () =>
+      isModuleActive(splash, 'isActive') ||
+      isModuleActive(underwater, 'isActive') ||
+      isModuleActive(megasplash, 'isActive'),
   });
   if (sceneEnv && Array.isArray(sceneEnv.platforms)) {
     gameflow.setPlatformsRef(sceneEnv.platforms);
@@ -251,11 +295,28 @@ if (physics) {
   physics.onImpact = (spec) => {
     lastImpactSpec = spec;
     try {
-      if (water) water.addRipple(spec.point.x, spec.point.z, Math.min(1, spec.energy + 0.15));
-      if (splash) splash.trigger(spec);
-      if (underwater) underwater.trigger(spec);
-      if (cameraFX) cameraFX.onImpact(spec);
-      if (audio) audio.onImpact(spec);
+      // MEGA (docs/CONTRACTS-MEGA.md "Shared definitions" + "M5"): mega
+      // impacts are routed to megasplash/water.megaImpact/underwater's mega
+      // jet/audio.onMegaImpact INSTEAD of the normal splash/underwater
+      // trigger + audio.onImpact calls — cameraFX.onImpact still fires
+      // either way (its hit-stop/slow-mo timeline applies to both; GameFlow
+      // is what picks splashView vs. megaSplashView). Non-mega specs take
+      // the exact same path as before this addendum — byte-for-byte.
+      if (spec && spec.mega) {
+        if (water && typeof water.megaImpact === 'function') {
+          water.megaImpact(spec.point.x, spec.point.z, Math.min(1, spec.energy * 0.85 + 0.15));
+        }
+        if (megasplash && typeof megasplash.trigger === 'function') megasplash.trigger(spec);
+        if (underwater && typeof underwater.triggerMegaJet === 'function') underwater.triggerMegaJet(spec);
+        if (cameraFX) cameraFX.onImpact(spec);
+        if (audio && typeof audio.onMegaImpact === 'function') audio.onMegaImpact(spec);
+      } else {
+        if (water) water.addRipple(spec.point.x, spec.point.z, Math.min(1, spec.energy + 0.15));
+        if (splash) splash.trigger(spec);
+        if (underwater) underwater.trigger(spec);
+        if (cameraFX) cameraFX.onImpact(spec);
+        if (audio) audio.onImpact(spec);
+      }
     } catch (err) {
       recordError(err);
     }
@@ -394,6 +455,8 @@ function flowState() {
       state: gameflow ? gameflow.state : null,
       rabbitState: rabbit ? rabbit.state : null,
       platform: (rabbit && rabbit.currentPlatformId) || (gameflow && gameflow.currentPlatformId) || null,
+      // MEGA (docs/CONTRACTS-MEGA.md "M5"): flowState() gains skyMode.
+      skyMode: !!(gameflow && gameflow.skyMode),
     };
   } catch (err) {
     recordError(err);
@@ -401,6 +464,31 @@ function flowState() {
   }
 }
 window.__lab.flowState = flowState;
+
+// MEGA (docs/CONTRACTS-MEGA.md "M5"): __lab.megaDrop(giantToyId) — spawn
+// that giant def at SKY.drop and release(0,0,0), bypassing rabbit entirely
+// (works for tests even in normal mode), same spirit as __lab.drop above.
+const SKY_DROP_FALLBACK = { x: -1.2, y: 26.0, z: 0 };
+function megaDrop(giantToyId) {
+  try {
+    if (!physics) return null;
+    const def = findToyDef(giantToyId);
+    if (!def) {
+      recordError(new Error(`__lab.megaDrop: unknown toyId "${giantToyId}"`));
+      return null;
+    }
+    const sky = ConstantsNS.SKY;
+    const d = (sky && sky.drop) || SKY_DROP_FALLBACK;
+    const pos = new THREE.Vector3(d.x, d.y, d.z);
+    const body = physics.spawnToy(def, pos);
+    physics.release(body, new THREE.Vector3(0, 0, 0));
+    return body;
+  } catch (err) {
+    recordError(err);
+    return null;
+  }
+}
+window.__lab.megaDrop = megaDrop;
 
 // __lab.throwViaRabbit(vx,vy,vz) — programmatic throw through the real
 // gameflow/rabbit windup+release path (as opposed to __lab.drop's direct
@@ -499,7 +587,10 @@ function splashSystemsActive() {
   return (
     isModuleActive(splash, 'isActive') ||
     isModuleActive(underwater, 'isActive') ||
-    isModuleActive(droplets, 'isAlive')
+    isModuleActive(droplets, 'isAlive') ||
+    // MEGA (docs/CONTRACTS-MEGA.md "M5"): megasplash added to the pass-2
+    // predicate so mega visuals keep rendering through their own lifetime.
+    isModuleActive(megasplash, 'isActive')
   );
 }
 
@@ -662,6 +753,13 @@ function animate(now) {
   }
   try {
     if (droplets) droplets.update(dtScaled, timeSec);
+  } catch (err) {
+    recordError(err);
+  }
+  try {
+    // MEGA (docs/CONTRACTS-MEGA.md "M5"): megasplash.update, alongside the
+    // other splash-lifetime systems above.
+    if (megasplash) megasplash.update(dtScaled, timeSec);
   } catch (err) {
     recordError(err);
   }

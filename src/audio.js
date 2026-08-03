@@ -41,6 +41,10 @@ export class AudioFX {
     this._noiseWhite = null;
     this._noisePink = null;
     this._noiseClick = null;
+    // MEGA (docs/CONTRACTS-MEGA.md "M5"): preImpactHush()'s auto-restore
+    // fallback timer id.
+    this._hushRestoreTimer = null;
+    this._masterLevel = 0.5; // kept in sync with unlock()'s safe master level
   }
 
   // Create/resume the AudioContext. Idempotent — safe to call repeatedly
@@ -301,6 +305,151 @@ export class AudioFX {
       });
     } catch (e) {
       // no-op
+    }
+  }
+
+  // ---- MEGA (docs/CONTRACTS-MEGA.md "M5") --------------------------------
+
+  // Ramp the master gain back toward its normal level (used both by the
+  // preImpactHush() auto-restore fallback and, deliberately, at the top of
+  // onMegaImpact() so the boom is never still-ducked when it fires).
+  _restoreMasterGain(rampS) {
+    try {
+      if (!this.ctx || !this.master) return;
+      if (this._hushRestoreTimer) {
+        clearTimeout(this._hushRestoreTimer);
+        this._hushRestoreTimer = null;
+      }
+      const t0 = this.ctx.currentTime;
+      const g = this.master.gain;
+      g.cancelScheduledValues(t0);
+      g.setValueAtTime(g.value, t0);
+      g.linearRampToValueAtTime(this._masterLevel, t0 + Math.max(rampS, 0.01));
+    } catch (e) {
+      // no-op
+    }
+  }
+
+  // 0.3s pre-impact SILENCE dip: duck the master gain to ~0.05 over 0.15s.
+  // Called by gameflow during a mega flight, ~0.3s before the toy reaches
+  // the water. Auto-restores on the NEXT impact (onMegaImpact calls
+  // _restoreMasterGain itself) or after 1s if that never arrives, so a
+  // dropped/aborted mega flight can never leave the game permanently quiet.
+  preImpactHush() {
+    try {
+      if (!this.ctx || !this.master) return;
+      const t0 = this.ctx.currentTime;
+      const g = this.master.gain;
+      g.cancelScheduledValues(t0);
+      g.setValueAtTime(g.value, t0);
+      g.linearRampToValueAtTime(0.05, t0 + 0.15);
+      if (this._hushRestoreTimer) clearTimeout(this._hushRestoreTimer);
+      this._hushRestoreTimer = setTimeout(() => this._restoreMasterGain(0.2), 1000);
+    } catch (e) {
+      // no-op
+    }
+  }
+
+  // Low, LFO-wobbled lowpass-noise "slosh groan" — a few of these are
+  // scheduled by onMegaImpact between +5s and +8s.
+  _sloshGroan(startS) {
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime + startS;
+    const dur = 1.1 + Math.random() * 0.4;
+    const src = ctx.createBufferSource();
+    src.buffer = this._noisePink;
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.value = 220;
+    filt.Q.value = 1.2;
+    const lfo = ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.8 + Math.random() * 0.4;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 90;
+    lfo.connect(lfoGain);
+    lfoGain.connect(filt.frequency);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(0.12, t0 + 0.15);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(filt);
+    filt.connect(g);
+    g.connect(this.master);
+    lfo.start(t0);
+    src.start(t0, 0, dur);
+    lfo.stop(t0 + dur + 0.05);
+    src.stop(t0 + dur + 0.05);
+  }
+
+  // Mega impact: routed INSTEAD of onImpact for spec.mega impacts (main.js
+  // wiring) — onImpact itself stays completely unchanged. Restores any
+  // pending preImpactHush duck immediately, then: 40-70Hz sub boom (long
+  // decay ~1.5s, slight pitch drop) + layered noise crash; wall-wave
+  // "zabaaa" bandpass sweep at +0.8s; rain loop (filtered noise, gentle,
+  // ~3s) from +3s; 2-3 low slosh groans between +5s and +8s; long haptic
+  // pattern.
+  onMegaImpact(spec) {
+    try {
+      if (!this.ctx) return;
+      this._restoreMasterGain(0.05);
+
+      const energy = clamp01((spec && spec.energy) || 0.8);
+      const scaleT = clamp01((((spec && spec.megaScale) || 1) - 1) / 6);
+
+      // (a) sub-bass boom — 40-70Hz, long decay ~1.5s, slight downward
+      // pitch drop; bigger toys (higher megaScale) sit lower in the range.
+      this._tone({
+        type: 'sine',
+        freq: lerp(70, 40, scaleT),
+        freqEnd: lerp(45, 26, scaleT),
+        duration: 1.5,
+        gain: lerp(0.4, 0.75, energy),
+        attack: 0.01,
+      });
+
+      // (b) layered noise crash — initial slap + deeper body whoosh, same
+      // shape as onImpact's (a)/(b) layers but bigger/longer for the mega
+      // scale of the moment.
+      this._noiseBurst({
+        buffer: this._noiseWhite, duration: lerp(0.18, 0.32, energy), filterType: 'lowpass',
+        freq: lerp(700, 2200, energy), freqEnd: lerp(300, 900, energy), Q: 0.8,
+        gain: lerp(0.35, 0.7, energy), attack: 0.004,
+      });
+      this._noiseBurst({
+        buffer: this._noisePink, duration: lerp(0.5, 0.9, energy), filterType: 'lowpass',
+        freq: lerp(180, 500, energy), freqEnd: lerp(90, 260, energy), Q: 0.6,
+        gain: lerp(0.25, 0.55, energy), attack: 0.02,
+      });
+
+      // (c) wall-wave "zabaaa" — bandpass sweep at +0.8s.
+      this._noiseBurst({
+        buffer: this._noisePink, start: 0.8, duration: 0.9, filterType: 'bandpass',
+        freq: 900, freqEnd: 260, Q: 0.9, gain: 0.32, attack: 0.05,
+      });
+
+      // (d) rain loop — gentle filtered noise, ~3s, starting at +3s.
+      this._noiseBurst({
+        buffer: this._noiseWhite, start: 3.0, duration: 3.0, filterType: 'lowpass',
+        freq: 2400, freqEnd: 1400, Q: 0.5, gain: 0.1, attack: 0.3,
+      });
+
+      // (e) 2-3 low slosh groans between +5s and +8s.
+      const groanCount = 2 + (Math.random() < 0.5 ? 0 : 1);
+      for (let i = 0; i < groanCount; i++) {
+        this._sloshGroan(5.0 + i * 1.4 + Math.random() * 0.6);
+      }
+
+      // Long haptic pattern — guarded for iOS Safari / no-vibrate devices.
+      try {
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate([80, 60, 40, 200]);
+        }
+      } catch (e) {
+        // no-op
+      }
+    } catch (e) {
+      // never throw — audio must not break the game
     }
   }
 }

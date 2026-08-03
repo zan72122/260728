@@ -23,6 +23,9 @@ const BOARD_TAP_WORLD_TOLERANCE = 0.9; // m — generous ray-to-tip distance tol
 const BOARD_TAP_SCREEN_RADIUS = 90; // px — screen-space fallback tolerance
 const PRESS_FEEDBACK_MS = 180;
 
+// MEGA (docs/CONTRACTS-MEGA.md "M5"): balloon tap -> requestPlatform('sky').
+const BALLOON_TAP_SCREEN_RADIUS = 110; // px — a bit more generous than a board tip
+
 // Gesture → velocity mapping (screen px → world m/s). Kept in the same
 // spirit as the old drag-the-toy gesture math: right/left maps to a
 // camera-relative lateral axis, downward drag adds forward+down "throw"
@@ -35,10 +38,18 @@ const UP_GAIN = 0.9;
 const DOWN_BIAS = 0.3; // downward drags dip the arc slightly (plunge feel)
 
 // Trajectory preview.
-const PREVIEW_DOT_COUNT = 14;
+const PREVIEW_DOT_COUNT_NORMAL = 14;
+// MEGA: sky (giant-toy) throws start from a much greater height — a longer
+// dotted arc reads better and matches M4's own aim-assist radius for sky
+// drops (bigger objects need center room, so the landing point is clamped
+// tighter too — see SKY_AIM_CLAMP_FRACTION below).
+const PREVIEW_DOT_COUNT_SKY = 22;
+const PREVIEW_DOT_COUNT_MAX = Math.max(PREVIEW_DOT_COUNT_NORMAL, PREVIEW_DOT_COUNT_SKY);
+const SKY_AIM_HEIGHT_THRESHOLD = 15; // m — matches cameraFX's mega-followFlight detection
 const PREVIEW_DOT_RADIUS = 0.055; // m
 const PREVIEW_RING_SCALE = 2.1; // landing dot is this many times bigger
 const POOL_CLAMP_FRACTION = 0.82; // matches Physics' own aim-assist radius
+const SKY_AIM_CLAMP_FRACTION = 0.55; // matches M4's sky-drop aim-assist radius
 
 // Board tap pulse feedback (real time, tiny UI feedback — not gameplay).
 const BOARD_PULSE_DURATION = 0.32; // s
@@ -116,6 +127,14 @@ const CSS_TEXT = `
   .h-toybar { padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); gap: 8px; }
   .h-toybtn { width: clamp(60px, 9vh, 80px); height: clamp(60px, 9vh, 80px); font-size: clamp(26px, 5vh, 34px); }
 }
+
+/* MEGA (docs/CONTRACTS-MEGA.md "M5"): sky-mode toy bar shows only the giant
+   (sky-flagged) defs, slightly bigger than the normal 8-button row. */
+.h-toybar.h-toybar-sky .h-toybtn {
+  width: clamp(84px, 13vw, 112px);
+  height: clamp(84px, 13vw, 112px);
+  font-size: clamp(38px, 7vw, 54px);
+}
 `;
 
 export class InputController {
@@ -145,6 +164,9 @@ export class InputController {
     this._audioUnlocked = false;
     this._boardPulse = null; // { target, materials:[{mat,base}], baseScale:Vector3, t }
     this._toyBarHidden = false;
+    // MEGA: cached skyMode flag so the toy bar only rebuilds on an actual
+    // transition (cheap per-frame poll, per contract), not every frame.
+    this._toyBarSkyMode = false;
 
     // Pre-allocated scratch objects (avoid per-event allocations).
     this._raycaster = new THREE.Raycaster();
@@ -168,7 +190,13 @@ export class InputController {
   // -- public contract fields (proxy GameFlow; keep existing so nothing
   // else that reads these two properties breaks) --------------------------
   get currentToyDef() {
-    if (this.gameflow && this.gameflow.currentToyDef) return this.gameflow.currentToyDef;
+    if (this.gameflow) {
+      // MEGA: while in sky mode the "current toy" for selection-highlight/
+      // audio purposes is the held giant toy, not the normal one it was
+      // swapped out of.
+      if (this.gameflow.skyMode && this.gameflow.currentGiantDef) return this.gameflow.currentGiantDef;
+      if (this.gameflow.currentToyDef) return this.gameflow.currentToyDef;
+    }
     return this._fallbackToyDef;
   }
 
@@ -201,19 +229,7 @@ export class InputController {
     const toyBar = document.createElement('div');
     toyBar.className = 'h-toybar';
     TOYS.forEach((def) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'h-toybtn';
-      btn.setAttribute('aria-label', def.name || def.id);
-      btn.dataset.toyId = def.id;
-      const colorHex = '#' + (def.color >>> 0).toString(16).padStart(6, '0').slice(-6);
-      btn.style.setProperty('--toy-color', colorHex);
-      btn.innerHTML = `<span class="h-toybtn-emoji">${def.emoji}</span>`;
-      btn.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-        this._pressFeedback(btn);
-        this._selectToy(def);
-      });
+      const btn = this._createToyButton(def);
       toyBar.appendChild(btn);
       this._toyButtons[def.id] = btn;
     });
@@ -221,6 +237,50 @@ export class InputController {
     this._toyBar = toyBar;
 
     this._updateToySelectionUI();
+  }
+
+  _createToyButton(def) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'h-toybtn';
+    btn.setAttribute('aria-label', def.name || def.id);
+    btn.dataset.toyId = def.id;
+    const colorHex = '#' + (def.color >>> 0).toString(16).padStart(6, '0').slice(-6);
+    btn.style.setProperty('--toy-color', colorHex);
+    btn.innerHTML = `<span class="h-toybtn-emoji">${def.emoji}</span>`;
+    btn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      this._pressFeedback(btn);
+      this._selectToy(def);
+    });
+    return btn;
+  }
+
+  // MEGA: swap the toy bar's contents between the normal 8-button row and
+  // the sky-mode-only giant-toy defs (TOYS.filter(t=>t.sky)). Called both
+  // from the onStateChange hook (immediate rebuild right as a sky
+  // entry/exit lands on 'ready') and from the per-frame update() poll below
+  // (covers skyMode flipping mid-'busy', e.g. _doSkyExit clearing it before
+  // 'ready' is reached) — see _syncToyBarForSkyMode.
+  _rebuildToyBar() {
+    if (!this._toyBar) return;
+    while (this._toyBar.firstChild) this._toyBar.removeChild(this._toyBar.firstChild);
+    this._toyButtons = {};
+    const defs = this._toyBarSkyMode ? TOYS.filter((t) => t && t.sky) : TOYS;
+    this._toyBar.classList.toggle('h-toybar-sky', this._toyBarSkyMode);
+    defs.forEach((def) => {
+      const btn = this._createToyButton(def);
+      this._toyBar.appendChild(btn);
+      this._toyButtons[def.id] = btn;
+    });
+    this._updateToySelectionUI();
+  }
+
+  _syncToyBarForSkyMode() {
+    const sky = !!(this.gameflow && this.gameflow.skyMode);
+    if (sky === this._toyBarSkyMode) return;
+    this._toyBarSkyMode = sky;
+    this._rebuildToyBar();
   }
 
   _pressFeedback(btn) {
@@ -294,6 +354,11 @@ export class InputController {
     if (this._aiming && state !== 'ready') {
       this._cancelAim();
     }
+    // MEGA: immediate rebuild right as a state change lands (e.g. sky
+    // entry's busy->ready) — see _rebuildToyBar's doc comment; update()'s
+    // poll below is the cheap fallback for any skyMode flip that happens
+    // mid-'busy' instead.
+    this._syncToyBarForSkyMode();
   }
 
   _setToyBarHidden(hidden) {
@@ -404,6 +469,40 @@ export class InputController {
     return bestScreen ? bestScreen.id : null;
   }
 
+  // MEGA (docs/CONTRACTS-MEGA.md "M5"): raycast sceneEnv.balloon?.group,
+  // falling back to a screen-space check near its projected world position
+  // — same two-tier pattern as _hitTestBoard above. Guarded throughout since
+  // scene.js/M1 may not have built `balloon` yet mid-parallel-dev.
+  _hitTestBalloon(clientX, clientY, camera) {
+    const balloon = this.sceneEnv && this.sceneEnv.balloon;
+    const grp = balloon && balloon.group;
+    if (!grp) return false;
+    const { ndc, rect } = this._ndcFromClient(clientX, clientY);
+    this._raycaster.setFromCamera(ndc, camera);
+    try {
+      if (this._raycaster.intersectObject(grp, true).length > 0) return true;
+    } catch (_) {
+      /* no-op — fall through to the screen-space fallback below */
+    }
+    try {
+      if (typeof grp.getWorldPosition === 'function') {
+        grp.getWorldPosition(this._tmpProj);
+      } else if (grp.position) {
+        this._tmpProj.copy(grp.position);
+      } else {
+        return false;
+      }
+    } catch (_) {
+      return false;
+    }
+    this._tmpProj.project(camera);
+    const sx = (this._tmpProj.x * 0.5 + 0.5) * rect.width + rect.left;
+    const sy = (-this._tmpProj.y * 0.5 + 0.5) * rect.height + rect.top;
+    const dx = sx - clientX;
+    const dy = sy - clientY;
+    return dx * dx + dy * dy <= BALLOON_TAP_SCREEN_RADIUS * BALLOON_TAP_SCREEN_RADIUS;
+  }
+
   _pulseBoard(id) {
     const plat = this._platformById(id);
     if (!plat) return;
@@ -502,8 +601,13 @@ export class InputController {
       opacity: 0.55,
       depthWrite: false,
     });
-    const total = PREVIEW_DOT_COUNT + 1; // + landing ring
+    // MEGA: capacity sized for the larger sky-drop dot count (22); normal
+    // throws just draw fewer instances via mesh.count below (InstancedMesh
+    // draws only the first `count` instances, so this never costs extra
+    // draw calls or renders stale dots from a previous frame's larger arc).
+    const total = PREVIEW_DOT_COUNT_MAX + 1; // + landing ring
     const mesh = new THREE.InstancedMesh(geo, mat, total);
+    mesh.count = PREVIEW_DOT_COUNT_NORMAL + 1;
     mesh.visible = false;
     mesh.frustumCulled = false;
     if (this.sceneEnv && this.sceneEnv.scene) this.sceneEnv.scene.add(mesh);
@@ -521,6 +625,14 @@ export class InputController {
     const vy = vel.y;
     const vz = vel.z;
 
+    // MEGA: sky drops start far higher than any normal platform — a longer
+    // dotted arc (~22 vs 14 dots) reads better, and the landing point clamps
+    // tighter (0.55*WATER_RADIUS, matching M4's own sky aim-assist radius —
+    // "big objects need center room") instead of the normal 0.82 fraction.
+    const startHigh = y0 > SKY_AIM_HEIGHT_THRESHOLD;
+    const dotCount = startHigh ? PREVIEW_DOT_COUNT_SKY : PREVIEW_DOT_COUNT_NORMAL;
+    const clampFraction = startHigh ? SKY_AIM_CLAMP_FRACTION : POOL_CLAMP_FRACTION;
+
     // Vertical-only ballistic solve for the impact time (y(t)=0). Horizontal
     // clamping (below) never touches timing, matching Physics' own
     // aim-assist which "bends the horizontal velocity/direction" only.
@@ -532,15 +644,16 @@ export class InputController {
     let landX = x0 + vx * tImpact;
     let landZ = z0 + vz * tImpact;
     const landR = Math.hypot(landX, landZ);
-    const maxR = POOL_CLAMP_FRACTION * POOL.WATER_RADIUS;
+    const maxR = clampFraction * POOL.WATER_RADIUS;
     if (landR > maxR && landR > 1e-6) {
       const s = maxR / landR;
       landX *= s;
       landZ *= s;
     }
 
-    for (let i = 0; i < PREVIEW_DOT_COUNT; i++) {
-      const f = (i + 1) / PREVIEW_DOT_COUNT; // skip t=0 (that's the paw, not the arc)
+    mesh.count = dotCount + 1;
+    for (let i = 0; i < dotCount; i++) {
+      const f = (i + 1) / dotCount; // skip t=0 (that's the paw, not the arc)
       const t = f * tImpact;
       const y = Math.max(0, y0 + vy * t - 0.5 * G * t * t);
       // Linear interpolation toward the (possibly clamped) landing point —
@@ -555,7 +668,7 @@ export class InputController {
     // Landing/target ring: bigger dot right at the (clamped) impact point.
     this._tmpMatrix.makeScale(PREVIEW_RING_SCALE, PREVIEW_RING_SCALE, PREVIEW_RING_SCALE);
     this._tmpMatrix.setPosition(landX, 0.02, landZ);
-    mesh.setMatrixAt(PREVIEW_DOT_COUNT, this._tmpMatrix);
+    mesh.setMatrixAt(dotCount, this._tmpMatrix);
 
     mesh.instanceMatrix.needsUpdate = true;
     mesh.visible = true;
@@ -680,7 +793,18 @@ export class InputController {
       const state = this.gameflow && this.gameflow.state;
       if (state === 'ready' || state === 'busy') {
         const camera = this.getCamera();
-        if (camera) {
+        if (camera && this._hitTestBalloon(e.clientX, e.clientY, camera)) {
+          // MEGA: balloon tap -> requestPlatform('sky'). No board-pulse
+          // feedback here (that's a board-only affordance); GameFlow's own
+          // busy->ready transition (climb/board/ascend/fetch) is the tell.
+          if (this.gameflow && typeof this.gameflow.requestPlatform === 'function') {
+            try {
+              this.gameflow.requestPlatform('sky');
+            } catch (err) {
+              console.error(err);
+            }
+          }
+        } else if (camera) {
           const id = this._hitTestBoard(e.clientX, e.clientY, camera);
           if (id) {
             if (this.gameflow && typeof this.gameflow.requestPlatform === 'function') {
@@ -734,5 +858,10 @@ export class InputController {
   update(dt) {
     this._updateBoardPulse(dt);
     this._updateToySelectionUI();
+    // MEGA: cheap per-frame poll (a single boolean compare) so a skyMode
+    // flip mid-'busy' (e.g. _doSkyExit clearing it before 'ready') still
+    // rebuilds the toy bar promptly even though no onStateChange fires at
+    // that exact moment.
+    this._syncToyBarForSkyMode();
   }
 }
