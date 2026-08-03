@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>GrabPass / WATER_GLSL infra test</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #111; }
+  #canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #hud {
+    position: fixed; top: 8px; left: 8px; z-index: 10;
+    font: 12px/1.4 monospace; color: #0f0; background: rgba(0,0,0,0.5);
+    padding: 6px 10px; border-radius: 4px; white-space: pre;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="hud">loading…</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "../vendor/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+// Standalone infra test for src/watershading.js (R1): a colored spinning
+// cube scene + one WATER_LAYER quad using waterGlslCommon(true) + GrabPass,
+// proving refraction of the cube through the quad actually works before any
+// of R2/R3/R4's in-progress consumer files exist or are stable.
+import * as THREE from 'three';
+import { WATER_LAYER, GrabPass, sharedWaterUniforms, waterGlslCommon } from '../src/watershading.js';
+
+window.__test = { ready: false, errors: [] };
+function recordError(err) {
+  const msg = err && err.stack ? err.stack : err && err.message ? err.message : String(err);
+  window.__test.errors.push(msg);
+  console.error(err);
+}
+window.onerror = (message, source, lineno, colno) => {
+  window.__test.errors.push(`${message} @ ${source || '?'}:${lineno || 0}:${colno || 0}`);
+  return false;
+};
+window.addEventListener('unhandledrejection', (e) => {
+  const reason = e && e.reason;
+  recordError(reason);
+});
+
+const hud = document.getElementById('hud');
+const canvas = document.getElementById('canvas');
+
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+} catch (err) {
+  recordError(err);
+}
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x274b6e);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(0, 1.4, 5.5);
+camera.lookAt(0, 0.3, 0);
+
+// -- lights (basic, cube uses MeshStandardMaterial so it responds) -------
+const dir = new THREE.DirectionalLight(0xffffff, 2.2);
+dir.position.set(4, 6, 3);
+scene.add(dir);
+const hemi = new THREE.HemisphereLight(0xaaddff, 0x334455, 0.8);
+scene.add(hemi);
+
+// -- colorful cube with a HIGH-CONTRAST GRID texture so refraction bending
+// of straight lines through the water quad is unmistakable in a screenshot
+// (a flat color alone wouldn't visibly reveal a UV-offset refraction). -----
+function makeGridTexture(bg, line) {
+  const size = 256;
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = line;
+  ctx.lineWidth = 6;
+  const step = size / 8;
+  for (let i = 0; i <= 8; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * step, 0);
+    ctx.lineTo(i * step, size);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, i * step);
+    ctx.lineTo(size, i * step);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const gridTex = makeGridTexture('#ffe14d', '#8a1f6e');
+const cubeMats = [
+  new THREE.MeshStandardMaterial({ color: 0xff4d4d, roughness: 0.5 }), // +X red
+  new THREE.MeshStandardMaterial({ color: 0x4dff88, roughness: 0.5 }), // -X green
+  new THREE.MeshStandardMaterial({ color: 0xffe14d, roughness: 0.5 }), // +Y yellow
+  new THREE.MeshStandardMaterial({ color: 0x4dc9ff, roughness: 0.5 }), // -Y cyan
+  new THREE.MeshStandardMaterial({ map: gridTex, roughness: 0.5 }), // +Z grid (faces camera through water quad)
+  new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 }), // -Z white
+];
+const cube = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.4, 1.4), cubeMats);
+cube.position.set(0, 0.4, -0.6);
+scene.add(cube);
+
+// A checker-ish floor for extra visual reference behind the water quad.
+const floorGeo = new THREE.PlaneGeometry(10, 10);
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x8899aa, roughness: 0.9 });
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -0.8;
+scene.add(floor);
+
+// -------------------------------------------------------------------
+// Water-layer infra under test.
+// -------------------------------------------------------------------
+let grabPass = null;
+if (renderer && renderer.capabilities && renderer.capabilities.isWebGL2) {
+  try {
+    grabPass = new GrabPass(renderer);
+  } catch (err) {
+    recordError(err);
+  }
+}
+const waterUniforms = sharedWaterUniforms(grabPass);
+waterUniforms.uSunDir.value.set(0.5, 0.8, 0.3).normalize();
+
+const waterVertex = `
+varying vec3 vWorldPos;
+varying vec3 vNormalW;
+varying float vThickness;
+
+uniform float uTimeW;
+
+void main() {
+  vec3 pos = position;
+  float k = 3.0;
+  // NOTE: amp is exaggerated well beyond anything the real splash shaders
+  // would use — this is a synthetic diagnostic wave whose only job is to
+  // make refractSample()'s normal-based UV offset unmistakably visible in
+  // a screenshot, not to look like a realistic water surface.
+  float amp = 0.22;
+  float phase = uTimeW * 1.1;
+  float dwdx = amp * k * cos(pos.x * k + phase);
+  pos.z += amp * sin(pos.x * k + phase);
+
+  vec3 localNormal = normalize(vec3(-dwdx, 0.0, 1.0));
+  vNormalW = normalize(normalMatrix * localNormal);
+
+  vec4 worldPos = modelMatrix * vec4(pos, 1.0);
+  vWorldPos = worldPos.xyz;
+  vThickness = 0.06 + 0.045 * sin(pos.x * 5.0 + uTimeW * 3.0);
+
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+}
+`;
+
+const waterFragment = `
+varying vec3 vWorldPos;
+varying vec3 vNormalW;
+varying float vThickness;
+
+${waterGlslCommon(!!(grabPass && grabPass.supported))}
+
+void main() {
+  vec3 viewDirW = normalize(cameraPosition - vWorldPos);
+  vec2 screenUV = gl_FragCoord.xy / uViewport;
+  gl_FragColor = waterShade(vNormalW, viewDirW, screenUV, vThickness, 0.0);
+}
+`;
+
+const waterMat = new THREE.ShaderMaterial({
+  uniforms: waterUniforms,
+  vertexShader: waterVertex,
+  fragmentShader: waterFragment,
+  transparent: true,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+const waterQuad = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.0, 48, 36), waterMat);
+waterQuad.position.set(0, 0.4, 0.6);
+waterQuad.layers.set(WATER_LAYER);
+scene.add(waterQuad);
+
+// Lights must be visible to both the layer-0 (opaque) pass and the
+// WATER_LAYER-only pass, exactly per the main.js render-loop contract.
+scene.traverse((obj) => {
+  if (obj.isLight) obj.layers.enableAll();
+});
+
+// -------------------------------------------------------------------
+// Resize
+// -------------------------------------------------------------------
+const sizeScratch = new THREE.Vector2();
+function handleResize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  if (renderer) renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  if (renderer) {
+    const size = renderer.getDrawingBufferSize(sizeScratch);
+    if (grabPass) grabPass.setSize(size.x, size.y);
+    waterUniforms.uViewport.value.set(size.x, size.y);
+  }
+}
+window.addEventListener('resize', handleResize);
+handleResize();
+
+// -------------------------------------------------------------------
+// Two-pass render loop, mirroring the main.js contract exactly.
+// -------------------------------------------------------------------
+let firstFrame = false;
+let frameCount = 0;
+
+function animate(now) {
+  requestAnimationFrame(animate);
+  const t = now / 1000;
+
+  // Gentle wobble (not a full spin) so the grid-textured +Z face stays
+  // facing the camera through the water quad — a full spin would turn the
+  // diagnostic grid away right when a screenshot is taken.
+  cube.rotation.x = Math.sin(t * 0.5) * 0.12;
+  cube.rotation.y = Math.sin(t * 0.35) * 0.25;
+
+  waterUniforms.uTimeW.value = t;
+  if (renderer) {
+    const size = renderer.getDrawingBufferSize(sizeScratch);
+    waterUniforms.uViewport.value.set(size.x, size.y);
+  }
+
+  try {
+    if (renderer) {
+      camera.layers.disable(WATER_LAYER);
+      renderer.render(scene, camera);
+
+      if (grabPass) grabPass.capture(renderer);
+      renderer.autoClear = false;
+      camera.layers.enable(WATER_LAYER);
+      camera.layers.disable(0);
+      try {
+        renderer.render(scene, camera);
+      } finally {
+        camera.layers.enable(0);
+        camera.layers.disable(WATER_LAYER);
+        renderer.autoClear = true;
+      }
+    }
+  } catch (err) {
+    recordError(err);
+  }
+
+  frameCount++;
+  if (!firstFrame) {
+    firstFrame = true;
+    window.__test.ready = true;
+  }
+  hud.textContent = `grabPass.supported: ${grabPass ? grabPass.supported : false}\nisWebGL2: ${renderer ? renderer.capabilities.isWebGL2 : 'n/a'}\nframe: ${frameCount}\nerrors: ${window.__test.errors.length}`;
+}
+
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

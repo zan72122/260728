@@ -13,6 +13,8 @@ import { Physics } from './physics.js';
 import { InputController } from './input.js';
 import { CameraFX } from './cameraFX.js';
 import { AudioFX } from './audio.js';
+import { WATER_LAYER, GrabPass, sharedWaterUniforms } from './watershading.js';
+import { DropletSystem } from './droplets.js';
 
 // ---------------------------------------------------------------------
 // __lab debug API — set up FIRST so window.onerror can record failures
@@ -79,6 +81,29 @@ try {
 const scene = new THREE.Scene();
 
 // ---------------------------------------------------------------------
+// Water shading infra (R1, docs/CONTRACTS-SPLASH2.md) — the grab-pass and
+// shared uniforms are created before any water-layer consumer so waterCtx
+// is ready for their constructors. WebGL1 (or a renderer that failed to
+// init) degrades gracefully: grabPass stays null, uSceneTex stays null,
+// and consumers are expected to fall back to the NO_GRAB look.
+// ---------------------------------------------------------------------
+let grabPass = null;
+if (renderer && renderer.capabilities && renderer.capabilities.isWebGL2) {
+  try {
+    grabPass = new GrabPass(renderer);
+  } catch (err) {
+    recordError(err);
+    grabPass = null;
+  }
+}
+const waterUniforms = sharedWaterUniforms(grabPass);
+// waterCtx.droplets starts null per the droplets.js contract (the
+// DropletSystem constructor receives this same object before it exists
+// yet) and is filled in right after DropletSystem is constructed below.
+const waterCtx = { grabPass, uniforms: waterUniforms, droplets: null };
+const _drawingBufferScratch = new THREE.Vector2();
+
+// ---------------------------------------------------------------------
 // Subsystems — each construction is isolated so one broken module
 // doesn't take the whole app down.
 // ---------------------------------------------------------------------
@@ -86,6 +111,7 @@ let sceneEnv = null;
 let water = null;
 let splash = null;
 let underwater = null;
+let droplets = null;
 let physics = null;
 let cameraFX = null;
 let audio = null;
@@ -98,19 +124,50 @@ try {
 }
 
 try {
+  if (sceneEnv) {
+    // Pass 2 (WATER_LAYER-only render) restricts the camera to layer
+    // WATER_LAYER; lights are filtered by the same camera.layers test as
+    // meshes, so every light must be visible on ALL layers or water-layer
+    // materials would go unlit in pass 2 (and pass 1 would lose nothing
+    // since layer 0 stays enabled there too).
+    scene.traverse((obj) => {
+      if (obj && obj.isLight && obj.layers && typeof obj.layers.enableAll === 'function') {
+        obj.layers.enableAll();
+      }
+    });
+    // uSunDir: world-space direction TO the sun, matching scene.js's
+    // DirectionalLight (position-to-target, normalized).
+    const sun = sceneEnv.sun;
+    if (sun && sun.position) {
+      const targetPos = sun.target && sun.target.position ? sun.target.position : new THREE.Vector3(0, 0, 0);
+      waterUniforms.uSunDir.value.copy(sun.position).sub(targetPos).normalize();
+    }
+  }
+} catch (err) {
+  recordError(err);
+}
+
+try {
   water = new WaterSurface(scene);
 } catch (err) {
   recordError(err);
 }
 
 try {
-  splash = new SplashFX(scene);
+  droplets = new DropletSystem(scene, waterCtx);
+} catch (err) {
+  recordError(err);
+}
+waterCtx.droplets = droplets;
+
+try {
+  splash = new SplashFX(scene, waterCtx);
 } catch (err) {
   recordError(err);
 }
 
 try {
-  underwater = new UnderwaterFX(scene);
+  underwater = new UnderwaterFX(scene, waterCtx);
 } catch (err) {
   recordError(err);
 }
@@ -182,10 +239,16 @@ if (physics) {
   };
 }
 
-if (splash) {
-  splash.onDropletLand = (x, z, r) => {
+// Per docs/CONTRACTS-SPLASH2.md v2: droplet-landing ripples now come from
+// DropletSystem, not SplashFX — `splash.onDropletLand` is REMOVED in the v2
+// contract (R2 keeps a no-op setter there for backward safety only). Wire
+// the new callback instead; typeof-guard so this stays inert if droplets
+// briefly lacks the property during parallel development.
+if (droplets) {
+  droplets.onDropletLand = (x, z, size) => {
     try {
-      if (water) water.addRipple(x, z, 0.06);
+      if (water) water.addRipple(x, z, Math.min(0.12, size * 0.5));
+      if (splash && typeof splash.microSplash === 'function') splash.microSplash(x, z, size);
     } catch (err) {
       recordError(err);
     }
@@ -313,6 +376,53 @@ function renderInfo() {
 window.__lab.renderInfo = renderInfo;
 
 // ---------------------------------------------------------------------
+// Water-layer render-loop helpers (R1, docs/CONTRACTS-SPLASH2.md).
+// ---------------------------------------------------------------------
+// Resilience: R2/R3/R4 (splash/droplets/underwater) may briefly lack the
+// isActive()/isAlive() method the contract requires while under active
+// development. Guard with typeof checks so main keeps working either way:
+// if the object exists but doesn't have the method yet, ASSUME active
+// (safer for co-developers to see their in-progress work rendered) rather
+// than silently skipping pass 2; if the object never got constructed at
+// all there is nothing to render, so treat that as inactive.
+function isModuleActive(obj, methodName) {
+  if (!obj) return false;
+  if (typeof obj[methodName] !== 'function') return true;
+  try {
+    return !!obj[methodName]();
+  } catch (err) {
+    recordError(err);
+    return true;
+  }
+}
+
+function splashSystemsActive() {
+  return (
+    isModuleActive(splash, 'isActive') ||
+    isModuleActive(underwater, 'isActive') ||
+    isModuleActive(droplets, 'isAlive')
+  );
+}
+
+let lastPass2Active = false;
+
+// __lab.waterDebug() — mandated by the addendum for automated verification.
+window.__lab.waterDebug = () => ({
+  pass2Active: lastPass2Active,
+  dropletsAlive: droplets && typeof droplets.isAlive === 'function' ? !!droplets.isAlive() : false,
+  // DropletSystem doesn't expose a separate spray-only accessor in the
+  // contract (only the combined isAlive()); use isSprayAlive() if a
+  // consumer ever adds one, otherwise mirror isAlive() as the best
+  // available signal.
+  sprayAlive:
+    droplets && typeof droplets.isSprayAlive === 'function'
+      ? !!droplets.isSprayAlive()
+      : droplets && typeof droplets.isAlive === 'function'
+        ? !!droplets.isAlive()
+        : false,
+});
+
+// ---------------------------------------------------------------------
 // Resize / orientation handling
 // ---------------------------------------------------------------------
 function handleResize() {
@@ -320,6 +430,18 @@ function handleResize() {
   const h = window.innerHeight;
   try {
     if (renderer) renderer.setSize(w, h);
+  } catch (err) {
+    recordError(err);
+  }
+  try {
+    // GrabPass must be sized in drawing-buffer pixels (post devicePixelRatio),
+    // not CSS pixels, and uViewport (used by screenUV = gl_FragCoord/uViewport
+    // in WATER_GLSL) must match exactly.
+    if (renderer) {
+      const size = renderer.getDrawingBufferSize(_drawingBufferScratch);
+      if (grabPass) grabPass.setSize(size.x, size.y);
+      waterUniforms.uViewport.value.set(size.x, size.y);
+    }
   } catch (err) {
     recordError(err);
   }
@@ -345,6 +467,10 @@ let lastNow = performance.now();
 let fpsAvg = 60;
 let firstFrameRendered = false;
 const focusScratch = new THREE.Vector3(0, 0.3, 0);
+// Scaled game-time accumulator for uTimeW — advances with dtScaled (so it
+// slows/pauses during hit-stop and slow-mo, same as the splash/underwater
+// update loops), NOT with wall-clock time.
+let waterTimeAccum = 0;
 
 function computeFocusPoint() {
   const bodies = (physics && physics.bodies) || [];
@@ -412,6 +538,11 @@ function animate(now) {
     recordError(err);
   }
   try {
+    if (droplets) droplets.update(dtScaled, timeSec);
+  } catch (err) {
+    recordError(err);
+  }
+  try {
     if (input) input.update(dtScaled);
   } catch (err) {
     recordError(err);
@@ -427,9 +558,50 @@ function animate(now) {
     recordError(err);
   }
 
+  // Keep the shared water uniforms fresh every frame (contract: uTimeW and
+  // uViewport update every frame/resize, not just on resize).
   try {
-    if (renderer && cameraFX && cameraFX.camera) {
-      renderer.render(scene, cameraFX.camera);
+    waterTimeAccum += dtScaled;
+    waterUniforms.uTimeW.value = waterTimeAccum;
+    if (renderer) {
+      const size = renderer.getDrawingBufferSize(_drawingBufferScratch);
+      waterUniforms.uViewport.value.set(size.x, size.y);
+    }
+  } catch (err) {
+    recordError(err);
+  }
+
+  // -------------------------------------------------------------------
+  // Two-pass render (docs/CONTRACTS-SPLASH2.md "main.js render-loop
+  // change"): pass 1 is the opaque scene with WATER_LAYER hidden; pass 2
+  // (skipped when idle) grabs pass 1's framebuffer for refraction, then
+  // renders ONLY WATER_LAYER objects on top without clearing.
+  // -------------------------------------------------------------------
+  try {
+    const camera = cameraFX && cameraFX.camera;
+    if (renderer && camera) {
+      camera.layers.disable(WATER_LAYER);
+      renderer.render(scene, camera);
+
+      const pass2Active = splashSystemsActive();
+      lastPass2Active = pass2Active;
+
+      if (pass2Active) {
+        if (grabPass) grabPass.capture(renderer);
+        renderer.autoClear = false;
+        camera.layers.enable(WATER_LAYER);
+        camera.layers.disable(0);
+        try {
+          renderer.render(scene, camera);
+        } finally {
+          // Always restore, even if pass 2 itself throws mid-render, so a
+          // broken splash frame can't leave every subsequent frame dark
+          // (layer 0 disabled) or smeared (autoClear left off).
+          camera.layers.enable(0);
+          camera.layers.disable(WATER_LAYER);
+          renderer.autoClear = true;
+        }
+      }
     }
   } catch (err) {
     recordError(err);
