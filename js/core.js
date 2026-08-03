@@ -121,7 +121,8 @@ const App = {
     const up = e => {
       if (!P.down || (e.pointerId !== undefined && e.pointerId !== P.id)) return;
       P.down = false;
-      const tap = P.moved < 14 * this.S && (performance.now() - P.downT) < 450;
+      /* generous tap window — small children's taps drift and linger */
+      const tap = P.moved < 24 * this.S && (performance.now() - P.downT) < 600;
       if (this.scene && this.scene.onUp) this.scene.onUp(P, tap);
     };
     window.addEventListener('pointerup', up);
@@ -228,6 +229,7 @@ const Snd = {
   tada() { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.blip(f, 0.32, 'triangle', 0.13), i * 130)); },
   gulp() { this.blip(300, 0.18, 'sine', 0.15, 90); setTimeout(() => this.blip(200, 0.14, 'sine', 0.12, 320), 140); },
   ouch() { this.blip(1250, 0.07, 'square', 0.11, 850); setTimeout(() => this.blip(1500, 0.09, 'square', 0.09, 1050), 80); },
+  flip() { this.blip(280, 0.18, 'sine', 0.14, 950); setTimeout(() => this.blip(rnd(620, 760), 0.1, 'sine', 0.16, rnd(1100, 1350)), 140); },
   noise() {
     if (!this._nb && this.c) {
       const len = this.c.sampleRate;
@@ -1428,7 +1430,7 @@ function flourPuff(parts, x, y, n = 12) {
 /* ---------------- shared UI ---------------- */
 function homeBtnPos() { return { x: 54 * App.S, y: 54 * App.S, r: 34 * App.S }; }
 function arrowBtnPos() { return { x: App.W - 76 * App.S, y: App.H - 76 * App.S, r: 52 * App.S }; }
-function hitCircle(p, c) { return dist(p.x, p.y, c.x, c.y) < c.r * 1.25; }
+function hitCircle(p, c) { return dist(p.x, p.y, c.x, c.y) < c.r * 1.4; }
 
 function clayButton(ctx, x, y, r, base, press = 0) {
   const dy = press * 5 * App.S;

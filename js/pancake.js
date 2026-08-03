@@ -303,7 +303,7 @@
         hintAt() { const it = itemsAt(); return !F.flour ? it.flour : (F.eggStage < 2 ? it.egg : it.milk); },
         update(dt) {
           if (pouring && App.pointer.down) {
-            F.milk = Math.min(1, F.milk + dt * 0.4);
+            F.milk = Math.min(1, F.milk + dt * 0.5);
             if (Math.random() < 0.3) {
               const b = bowlAt();
               sc.parts.add({ x: b.x + rnd(-20, 20) * App.S, y: b.y - 10 * App.S, color: '#fdfdf6', r: 4 * App.S, vy: 60 * App.S, life: 0.3 });
@@ -329,12 +329,12 @@
         },
         down(p) {
           const S = App.S, it = itemsAt(), b = bowlAt();
-          if (!F.flour && dist(p.x, p.y, it.flour.x, it.flour.y) < 70 * S) {
+          if (!F.flour && dist(p.x, p.y, it.flour.x, it.flour.y) < 92 * S) {
             F.flour = true; Snd.plop();
             flourPuff(sc.parts, b.x, b.y - 20 * S, 14);
             return;
           }
-          if (F.eggStage < 2 && dist(p.x, p.y, it.egg.x, it.egg.y) < 70 * S) {
+          if (F.eggStage < 2 && dist(p.x, p.y, it.egg.x, it.egg.y) < 92 * S) {
             F.eggStage++;
             if (F.eggStage >= 2) {
               Snd.plop();
@@ -348,7 +348,10 @@
             } else Snd.crunch();
             return;
           }
-          if (dist(p.x, p.y, it.milk.x, it.milk.y) < 80 * S || (pouring === false && F.milk > 0 && dist(p.x, p.y, b.x - 60 * S, b.y - b.r - 60 * S) < 90 * S)) {
+          /* a rough press anywhere near the pitcher counts */
+          if (dist(p.x, p.y, it.milk.x, it.milk.y) < 105 * S ||
+            (p.x > App.W * 0.62 && p.y < App.H * 0.42) ||
+            (pouring === false && F.milk > 0 && dist(p.x, p.y, b.x - 60 * S, b.y - b.r - 60 * S) < 100 * S)) {
             pouring = true; Snd.tick();
           }
         },
@@ -381,6 +384,15 @@
             Snd.tick();
           }
         },
+        /* scrubbing back and forth works too — circles aren't required */
+        move(p) {
+          const b = bowlAt();
+          if (dist(p.x, p.y, b.x, b.y) < b.r * 1.1) {
+            const d = dist(p.px, p.py, p.x, p.y);
+            F.lump = Math.max(0, F.lump - d * 0.00028);
+            F.air = Math.min(1, F.air + d * 0.0001);
+          }
+        },
         draw(ctx) {
           const b = bowlAt();
           drawMixedBowl(ctx, b.x, b.y, b.r);
@@ -411,14 +423,21 @@
         enter() { Snd.setSizzle(0.15); },
         update(dt) {
           const p = App.pointer, pn = panAt();
-          if (p.down && F.batter > 0 && dist(p.x, p.y, pn.x, pn.y) < pn.r * 0.85) {
+          const dd0 = dist(p.x, p.y, pn.x, pn.y);
+          if (p.down && F.batter > 0 && dd0 < pn.r * 1.2) {
+            /* a finger near the edge still pours — snap the landing point into the pan */
+            let tx = p.x, ty = p.y;
+            if (dd0 > pn.r * 0.78) {
+              tx = pn.x + (p.x - pn.x) / dd0 * pn.r * 0.78;
+              ty = pn.y + (p.y - pn.y) / dd0 * pn.r * 0.78;
+            }
             const v = visc();
             let target = null;
             for (const b of F.blobs) {
-              if (dist(p.x, p.y, b.x, b.y) < b.r + 26 * App.S) { target = b; break; }
+              if (dist(tx, ty, b.x, b.y) < b.r + 26 * App.S) { target = b; break; }
             }
             if (!target) {
-              target = { x: p.x, y: p.y, r: 12 * App.S, seed: rnd(10), top: 0, bot: 0, rise: 0, flipping: false, flipT: 0, flippedOnce: false, land: 0, pores: [], bub: [] };
+              target = { x: tx, y: ty, r: 12 * App.S, seed: rnd(10), top: 0, bot: 0, rise: 0, flipping: false, flipT: 0, flippedOnce: false, land: 0, pores: [], bub: [] };
               F.blobs.push(target);
               Snd.plop();
             }
@@ -442,7 +461,7 @@
           for (const b of F.blobs) drawBlob(ctx, b);
           drawHeatMark(ctx, pn.x - pn.r * 1.08, pn.y - pn.r * 0.8, S);
           const p = App.pointer;
-          if (p.down && F.batter > 0 && dist(p.x, p.y, pn.x, pn.y) < pn.r * 0.95) {
+          if (p.down && F.batter > 0 && dist(p.x, p.y, pn.x, pn.y) < pn.r * 1.2) {
             drawLadle(ctx, p.x, p.y - 60 * S, S);
             drawStream(ctx, p.x, p.y - 48 * S, p.x, p.y, 9 * S * (0.6 + visc() * 0.5), '#f6dfa6');
           }
@@ -459,22 +478,47 @@
         done: () => F.blobs.length > 0 && F.batter < 0.92
       };
 
-      /* ================= step 4 : cook & flip ================= */
+      /* ================= step 4 : cook & flip =================
+         フリップは「なぞるだけ」: 指の軌跡がパンケーキを通ればその場で返る。
+         返せない子には段階アシスト(光る→フライ返しが差し込まれてタップでもOK)。
+         ちょんとつつく(タップ)だけは「あちち」で優しく教える。 */
       let popCool = 0;
-      let turnerFx = null;
+      let turnerAnims = [];
+      let assistT = 0;
+      let strokeFlipped = false;
+      /* oblique-aware distance from finger to a blob */
+      const distO = (px, py, b) => Math.hypot(px - b.x, (py - b.y) / 0.74);
+      function startFlip(b, dir) {
+        b.flipping = true; b.flipT = 0; b.swapped = false;
+        turnerAnims.push({ x: b.x, y: b.y, t: 0, dir: dir || 1 });
+        if (turnerAnims.length > 3) turnerAnims.shift();
+        strokeFlipped = true;
+        assistT = 0;
+        Snd.flip();
+      }
       const s4 = {
-        hint: 'flick',
+        hint: 'drag',
+        hintOpt: { dx: 1, dy: 0 },
         bgMode: 'stove',
         hintAt() {
           const b = F.blobs.find(b => !b.flippedOnce) || F.blobs[0];
-          return b ? { x: b.x, y: b.y } : { x: App.W / 2, y: App.H / 2 };
+          return b ? { x: b.x, y: b.y - 20 * App.S } : { x: App.W / 2, y: App.H / 2 };
         },
-        enter() { Snd.setSizzle(0.7); },
+        enter() { Snd.setSizzle(0.7); assistT = 0; turnerAnims = []; },
+        assistStage() { return assistT > 10 ? 2 : assistT > 5 ? 1 : 0; },
+        assistBlob() { return F.blobs.find(b => !b.flippedOnce && !b.flipping); },
         update(dt) {
           popCool -= dt;
-          const pn = panAt();
+          if (F.blobs.some(b => !b.flippedOnce)) {
+            assistT += dt;
+            /* keep the "なぞってね" hint on screen while assisting, even mid-touch */
+            if (this.assistStage() >= 1) sc.lastAct = Math.min(sc.lastAct, App.time - 2.3);
+          }
+          for (const a of turnerAnims) a.t += dt * 2.8;
+          turnerAnims = turnerAnims.filter(a => a.t < 1);
           for (const b of F.blobs) {
             b.land = Math.max(0, (b.land || 0) - dt * 5);
+            b.flipCool = Math.max(0, (b.flipCool || 0) - dt);
             if (b.flipping) {
               b.flipT += dt * 2.6;
               if (b.flipT >= 0.5 && !b.swapped) {
@@ -485,6 +529,7 @@
               if (b.flipT >= 1) {
                 b.flipping = false; b.flipT = 0; b.swapped = false;
                 b.land = 1;
+                b.flipCool = 0.6;
                 for (let k = 0; k < 4; k++) {
                   sc.parts.add({
                     x: b.x + rnd(-b.r, b.r) * 0.7, y: b.y + rnd(0, 10) * App.S,
@@ -515,7 +560,6 @@
               }
             }
             if (Math.random() < dt * 2) steamPuff(sc.parts, b.x, b.y - 20 * App.S);
-            /* oil sparks around the rim */
             if (Math.random() < dt * 1.6) {
               const a = rnd(TAU);
               sc.parts.add({
@@ -533,35 +577,59 @@
           drawPan(ctx, pn.x, pn.y, pn.r);
           for (const b of F.blobs) drawBlob(ctx, b);
           drawHeatMark(ctx, pn.x - pn.r * 1.08, pn.y - pn.r * 0.8, S);
-          /* the turner does the flipping — it follows the finger over the pan */
+          const stage = this.assistStage(), ab = this.assistBlob();
+          /* assist 1: the pancake that still needs flipping glows */
+          if (stage >= 1) {
+            for (const b of F.blobs) {
+              if (b.flippedOnce || b.flipping) continue;
+              ctx.save();
+              ctx.globalAlpha = 0.45 + 0.3 * Math.sin(App.time * 5);
+              ctx.strokeStyle = '#ffffff';
+              ctx.lineWidth = 5 * S;
+              blobPathO(ctx, b.x, b.y - 8 * S, b.r + (14 + 4 * Math.sin(App.time * 4)) * S, 0.07, b.seed, 0.74);
+              ctx.stroke();
+              ctx.restore();
+            }
+          }
+          /* assist 2: turner slides halfway under — now even a touch flips it */
+          if (stage >= 2 && ab) {
+            drawTurner(ctx, ab.x - ab.r * 0.55, ab.y + 6 * S, S, -0.08);
+            if (Math.random() < 0.06) sparkleBurst(sc.parts, ab.x, ab.y - 20 * S, '#fff', 2);
+          }
+          /* flip animations + turner following the finger */
           const p = App.pointer;
-          if (turnerFx) {
-            turnerFx.t += 1 / 60;
-            const k = clamp(turnerFx.t * 3, 0, 1);
-            drawTurner(ctx, turnerFx.x, turnerFx.y - Math.sin(k * Math.PI) * 50 * S, S,
-              -0.1, Math.sin(k * Math.PI));
-            if (k >= 1) turnerFx = null;
-          } else if (p.down) {
-            drawTurner(ctx, p.x, p.y - 6 * S, S, -0.1);
-          } else {
-            drawTurner(ctx, pn.x + pn.r * 1.05, pn.y + pn.r * 0.75, S * 0.92, 0.5);
+          let animDrawn = false;
+          for (const a of turnerAnims) {
+            const k = clamp(a.t, 0, 1);
+            drawTurner(ctx, a.x - a.dir * (1 - k) * 34 * S, a.y - Math.sin(k * Math.PI) * 54 * S, S,
+              -0.1 * a.dir, Math.sin(k * Math.PI));
+            animDrawn = true;
+          }
+          if (!animDrawn && !(stage >= 2 && ab)) {
+            if (p.down) drawTurner(ctx, p.x, p.y - 6 * S, S, -0.1);
+            else drawTurner(ctx, pn.x + pn.r * 1.05, pn.y + pn.r * 0.75, S * 0.92, 0.5);
+          }
+        },
+        down(p) {
+          strokeFlipped = false;
+          const ab = this.assistBlob();
+          if (this.assistStage() >= 2 && ab && distO(p.x, p.y, ab) < ab.r + 60 * App.S) {
+            startFlip(ab, 1);
+          }
+        },
+        move(p) {
+          if (p.moved < 26 * App.S) return;
+          for (const b of F.blobs) {
+            if (b.flipping || (b.flipCool || 0) > 0) continue;
+            if (distO(p.x, p.y, b) < b.r + 40 * App.S) {
+              startFlip(b, Math.sign(p.vx) || 1);
+            }
           }
         },
         up(p, tap) {
-          const sp = Math.hypot(p.vx, p.vy);
-          if (sp > 650 * App.S) {
+          if (tap && !strokeFlipped) {
             for (const b of F.blobs) {
-              if (!b.flipping && dist(p.downX, p.downY, b.x, b.y) < b.r + 50 * App.S) {
-                b.flipping = true; b.flipT = 0; b.swapped = false;
-                turnerFx = { x: b.x, y: b.y, t: 0 };
-                Snd.whoosh();
-                break;
-              }
-            }
-          } else if (tap) {
-            /* poking hot food with a bare finger → gentle "あちち!" lesson */
-            for (const b of F.blobs) {
-              if (dist(p.x, p.y, b.x, b.y) < b.r + 24 * App.S) {
+              if (distO(p.x, p.y, b) < b.r + 24 * App.S) {
                 Ouch.trigger(p.x, p.y);
                 break;
               }
@@ -755,6 +823,7 @@
             return;
           }
           this.dripping = true;
+          this._tapStart = { len: F.syrup.length };
           F.syrup.push(this.syrupPt(p));
         },
         move(p) {
@@ -764,7 +833,20 @@
             if (!last || dist(pt.x, pt.y, last.x, last.y) > 8 * App.S) F.syrup.push(pt);
           }
         },
-        up() { this.dripping = false; },
+        up(p, tap) {
+          this.dripping = false;
+          /* a simple tap places a strawberry right where the finger touched */
+          if (tap && this._tapStart) {
+            F.syrup.length = this._tapStart.len;
+            if (F.berries.length < 6) {
+              const pt = this.syrupPt(p);
+              F.berries.push({ x: pt.x, y: pt.y, s: rnd(0.85, 1.1) });
+              Snd.plop();
+              sparkleBurst(sc.parts, pt.x, pt.y, '#ff9db2', 4);
+            }
+          }
+          this._tapStart = null;
+        },
         done: () => false
       };
 
