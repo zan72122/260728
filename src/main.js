@@ -210,7 +210,7 @@ function findPlatform(platformId) {
   return PLATFORMS[0];
 }
 
-function drop(toyId, platformId, vx = 0, vy = 0, vz = 0) {
+function drop(toyId, platformId, vx = 0, vy = 0, vz = 0, opts = null) {
   try {
     if (!physics) return null;
     const def = findToyDef(toyId);
@@ -222,6 +222,17 @@ function drop(toyId, platformId, vx = 0, vy = 0, vz = 0) {
     const tip = platform.tip;
     const pos = new THREE.Vector3(tip.x, tip.y, tip.z);
     const body = physics.spawnToy(def, pos);
+    if (opts) {
+      if (opts.rotX !== undefined || opts.rotY !== undefined || opts.rotZ !== undefined) {
+        const euler = new THREE.Euler(opts.rotX || 0, opts.rotY || 0, opts.rotZ || 0, 'XYZ');
+        const q = new THREE.Quaternion().setFromEuler(euler);
+        body.quat.copy(q);
+        body.mesh.quaternion.copy(q);
+      }
+      if (opts.spin !== undefined) {
+        body.angVel.set(opts.spin, 0, 0);
+      }
+    }
     physics.release(body, new THREE.Vector3(vx, vy, vz));
     return body;
   } catch (err) {
@@ -241,7 +252,9 @@ function state() {
       energy: s.energy,
       flatness: s.flatness,
       oblique: s.oblique,
+      dir: s.dir ? { x: s.dir.x, z: s.dir.y } : null,
       cupTrap: s.cupTrap,
+      spin: s.spin,
       seed: s.seed,
       isSecondary: !!s.isSecondary,
       toyId: s.def && s.def.id ? s.def.id : null,
@@ -252,6 +265,37 @@ function state() {
 
 window.__lab.drop = drop;
 window.__lab.state = state;
+
+// QA helper (engineer N, input-flow verification): CSS-pixel screen position
+// of the currently-held toy's mesh, or null if nothing is held. Reuses the
+// same "held body" scan as computeFocusPoint() below — no reach into
+// InputController internals needed.
+const _heldScreenScratch = new THREE.Vector3();
+function heldScreenPos() {
+  try {
+    if (!physics || !Array.isArray(physics.bodies) || !cameraFX || !cameraFX.camera) return null;
+    let body = null;
+    for (let i = 0; i < physics.bodies.length; i++) {
+      if (physics.bodies[i].state === 'held') {
+        body = physics.bodies[i];
+        break;
+      }
+    }
+    if (!body || !body.mesh) return null;
+    const camera = cameraFX.camera;
+    _heldScreenScratch.copy(body.mesh.position).project(camera);
+    const el = (renderer && renderer.domElement) || canvas;
+    const rect = el.getBoundingClientRect();
+    return {
+      x: (_heldScreenScratch.x * 0.5 + 0.5) * rect.width + rect.left,
+      y: (-_heldScreenScratch.y * 0.5 + 0.5) * rect.height + rect.top,
+    };
+  } catch (err) {
+    recordError(err);
+    return null;
+  }
+}
+window.__lab.heldScreenPos = heldScreenPos;
 
 // ---------------------------------------------------------------------
 // Resize / orientation handling

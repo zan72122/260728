@@ -379,7 +379,14 @@ export class InputController {
   _pushDragSample(worldPos) {
     const now = performance.now();
     this._dragBuffer.push({ t: now, pos: worldPos.clone() });
-    while (this._dragBuffer.length && now - this._dragBuffer[0].t > DRAG_WINDOW_MS) {
+    // Trim samples older than the rolling window, but ALWAYS keep at least
+    // the two most recent ones. Pointer events don't arrive at a guaranteed
+    // cadence (frame jank, a slow last event before release, a device that
+    // batches touchmove); purging down to a single sample here would make
+    // _releaseVelocityFromBuffer() silently return zero velocity, turning
+    // a real flick into a dead-straight drop. Two points, however old, still
+    // give a meaningful direction+speed estimate.
+    while (this._dragBuffer.length > 2 && now - this._dragBuffer[0].t > DRAG_WINDOW_MS) {
       this._dragBuffer.shift();
     }
   }
@@ -449,6 +456,14 @@ export class InputController {
 
     const body = this._heldBody;
     if (body) {
+      // Capture the exact pointer-up position too, in case no pointermove
+      // fired between the last move sample and this release (event jitter,
+      // or a very short/fast flick) — keeps release velocity accurate.
+      const camera = this.getCamera();
+      if (camera) {
+        const worldPos = this._raycastToDragPlane(e.clientX, e.clientY, camera);
+        if (worldPos) this._pushDragSample(worldPos);
+      }
       const velocity = this._releaseVelocityFromBuffer();
       this.physics.release(body, velocity);
       this.audio.onRelease(this.currentToyDef);

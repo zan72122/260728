@@ -190,13 +190,22 @@ export class Physics {
     const dist = Math.hypot(landX, landZ);
     const maxR = 0.82 * POOL.WATER_RADIUS * AIM_ASSIST_MARGIN;
     if (dist > maxR && dist > 1e-5) {
-      // Bend (rescale) the horizontal velocity so the same ballistic time-of-
-      // flight lands exactly at the assist ring instead of overshooting.
-      // Vertical motion/timing is untouched, so this is invisible in the arc
-      // shape — only the horizontal reach changes.
-      const scale = maxR / dist;
-      vel.x *= scale;
-      vel.z *= scale;
+      // Retarget (not just rescale) the horizontal velocity so the SAME
+      // ballistic time-of-flight lands exactly on the assist ring, on the
+      // same bearing as the original landing point. A pure velocity-rescale
+      // (old approach) only shrinks the vel*t term and leaves `pos` as an
+      // untouched additive offset — if `pos` itself is already far from
+      // center (a fast/violent drag can carry the held toy well past the
+      // platform tip before release), scaling velocity toward zero just
+      // converges the landing toward `pos`, which can still be outside the
+      // pool. Solving vel from `pos + vel*t = target` guarantees the actual
+      // landing point regardless of how far `pos` has drifted.
+      const nx = landX / dist;
+      const nz = landZ / dist;
+      const targetX = nx * maxR;
+      const targetZ = nz * maxR;
+      vel.x = (targetX - pos.x) / t;
+      vel.z = (targetZ - pos.z) / t;
     }
     // Note: given PLATFORMS geometry (tips already inside WATER_RADIUS), a
     // throw can't realistically fall short of the pool, so only the
