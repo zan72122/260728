@@ -45,14 +45,29 @@ body{
   color: var(--ink);
 }
 
-#game{
+/* ---------- canvas 3枚構成 (SPEC-GL): #bg(2D背景) / #game(WebGL、失敗時2D) / #fx(2Dパーティクル、最前面) ---------- */
+#bg, #game, #fx{
   position:fixed;
   inset:0;
   display:block;
   width:100%;
   height:100%;
   touch-action:none;
+  -webkit-user-select:none;
+  user-select:none;
+}
+#bg{
+  z-index:1;
   background: var(--cream);
+}
+#game{
+  z-index:2;
+  background: transparent;
+  pointer-events:none; /* pointer は最前面の #fx が受ける (GestureController は #fx に接続) */
+}
+#fx{
+  z-index:3;
+  background: transparent;
 }
 
 #hud{

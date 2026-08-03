@@ -213,7 +213,8 @@ export class DoughModel {
       const reboundFactor = 0.2 + 1.8 * clamp01(beh.reboundRate);
       const elasticFactor = 0.2 + 1.8 * clamp01(p.elasticity);
       let decayRate = 0.12 * reboundFactor * elasticFactor; // 1/秒 (指数減衰)
-      if (clamp01(p.bakeColor) > 0.5) decayRate *= 8;
+      // 焼成後は生地が硬くなり、プリセットの弾力に関わらずへこみがほぼ残らない
+      if (clamp01(p.bakeColor) > 0.5) decayRate = Math.max(decayRate * 4, 3.0);
       if (!isFinite(decayRate) || decayRate < 0) decayRate = 0;
       const decayMul = Math.exp(-decayRate * dt);
       const dents = this.dents;

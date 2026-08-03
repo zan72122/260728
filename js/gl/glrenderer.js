@@ -121,14 +121,21 @@ void main() {
   float edgeAO = clamp(vExtra.w, 0.0, 1.0);
 
   // ---------- 曲率・縁依存の焼きムラファクタ ----------
+  // 「法線が横向き(horiz)」かつ「ρ大」ほど焼きが進む。中心は常に uBake より控えめ
+  // (=黄金色を残す)、縁だけが最大 uBake*1.15 まで焦げる、という非対称カーブにして
+  // 「中心は明るい黄金色→縁はこんがり焦げ」のコントラストを作る。
   float horiz = 1.0 - abs(N.z);
-  float edgeBoost = clamp(horiz * 0.65 + rho * rho * 0.5, 0.0, 1.2);
-  float lowFreq = fbm(vLocalPos * 0.012 + 11.0); // まだら焼き(低周波)
-  float bakeLocal = clamp(uBake * (1.0 + edgeBoost * 0.85) + (lowFreq - 0.5) * 0.30 * uBake, 0.0, 1.0);
+  float edgeRaw = clamp(horiz * 0.50 + rho * rho * 0.42, 0.0, 1.0);
+  float edgeBoost = pow(edgeRaw, 1.35);
+  float lowFreq = fbm(vLocalPos * 0.012 + 11.0); // まだら焼き(低周波、位相をずらす)
+  float centerT = uBake * 0.55;
+  float edgeT = clamp(uBake * 1.15, 0.0, 1.0);
+  float bakeLocal = mix(centerT, edgeT, edgeBoost);
+  bakeLocal = clamp(bakeLocal + (lowFreq - 0.5) * 0.22 * uBake, 0.0, 1.0);
 
   // ---------- 3段焼き色ランプ: base -> golden -> 焦げ縁 ----------
   vec3 golden = clamp(mix(uBaseColor, uBakedColor, 0.5) * vec3(1.22, 1.14, 0.92) + 0.03, 0.0, 1.0);
-  vec3 crustColor = uBakedColor * vec3(0.5, 0.42, 0.34);
+  vec3 crustColor = uBakedColor * vec3(0.62, 0.50, 0.38);
   vec3 albedo;
   if (bakeLocal < 0.5) {
     albedo = mix(uBaseColor, golden, bakeLocal * 2.0);
@@ -136,27 +143,27 @@ void main() {
     albedo = mix(golden, crustColor, (bakeLocal - 0.5) * 2.0);
   }
 
-  // ---------- fBm 粉肌 (±4%程度の明度ムラ) ----------
-  float flour = fbm(vLocalPos * 0.16 + 3.0);
-  albedo *= (0.96 + flour * 0.08);
+  // ---------- fBm 粉肌 (明度ムラ、やや広めのブロッチで粉っぽさを出す) ----------
+  float flour = fbm(vLocalPos * 0.10 + 3.0);
+  albedo *= (0.97 + flour * 0.06);
 
   // ---------- 気泡ポア: 高周波しきい値、air に比例した密度 ----------
-  float poreN = hash(floor(vLocalPos * 0.85) + 7.0);
-  float poreThresh = mix(0.975, 0.86, clamp(uAir, 0.0, 1.0));
-  float poreDark = step(poreThresh, poreN) * mix(0.12, 0.5, uBake);
+  float poreN = hash(floor(vLocalPos * 0.34) + 7.0);
+  float poreThresh = mix(0.985, 0.90, clamp(uAir, 0.0, 1.0));
+  float poreDark = step(poreThresh, poreN) * mix(0.10, 0.38, uBake);
   albedo *= (1.0 - poreDark);
 
-  // ---------- topping ゾーン: 黄色みマット + 粒子感 ----------
-  vec3 toppingBase = vec3(0.93, 0.80, 0.44);
-  float toppingGrain = fbm(vLocalPos * 0.30 + 50.0);
-  float toppingBakeMix = clamp(uBake * (1.0 + edgeBoost * 0.6), 0.0, 1.0);
-  vec3 toppingAlbedo = mix(toppingBase * 0.82, mix(toppingBase, vec3(0.62, 0.38, 0.16), toppingBakeMix), 0.5 + toppingGrain * 0.5);
+  // ---------- topping ゾーン: 黄色みマット + 粒子感 (crustほど暗く落とさない) ----------
+  vec3 toppingBase = vec3(0.95, 0.83, 0.50);
+  float toppingGrain = fbm(vLocalPos * 0.28 + 50.0);
+  float toppingBakeMix = clamp(uBake * (0.45 + edgeBoost * 0.55), 0.0, 0.78);
+  vec3 toppingAlbedo = mix(toppingBase * 0.92, mix(toppingBase, vec3(0.66, 0.42, 0.20), toppingBakeMix), 0.4 + toppingGrain * 0.5);
   albedo = mix(albedo, toppingAlbedo, toppingMask);
 
   // ---------- 溝(grooveDepth): 溝底を暗く、縁にハイライト ----------
-  albedo *= mix(1.0, 0.58, grooveDepth);
-  float grooveRim = smoothstep(0.10, 0.30, grooveDepth) * (1.0 - smoothstep(0.30, 0.70, grooveDepth));
-  albedo += grooveRim * 0.14;
+  albedo *= mix(1.0, 0.72, grooveDepth);
+  float grooveRim = smoothstep(0.08, 0.26, grooveDepth) * (1.0 - smoothstep(0.26, 0.62, grooveDepth));
+  albedo += grooveRim * 0.16;
 
   // ---------- 亀裂ノイズ (crackAmount / topping.crack) ----------
   float crackField = fbm(vLocalPos * 0.9 + 90.0);
@@ -184,11 +191,12 @@ void main() {
   float w = 0.5;
   float ndl = dot(N, L);
   float wrap = clamp((ndl + w) / (1.0 + w), 0.0, 1.0);
+  wrap = max(wrap, 0.22); // 完全な黒潰れを避ける弱いアンビエント床
 
-  // 擬似SSS: 生地ほど影側へ暖色の透過を足す
+  // 擬似SSS: 生地ほど影側へ暖色の透過を足す(「もちっと」感の要なので少し強めに)
   float sssAmt = (1.0 - uBake) * clamp(uSSS, 0.0, 1.0);
   vec3 sssColor = vec3(1.0, 0.89, 0.72);
-  float sssTerm = (1.0 - clamp(ndl, -1.0, 1.0) * 0.5 - 0.5) * sssAmt * 0.6;
+  float sssTerm = (1.0 - clamp(ndl, -1.0, 1.0) * 0.5 - 0.5) * sssAmt * 0.85;
   sssTerm = clamp(sssTerm, 0.0, 1.0);
 
   // リムライト: 輪郭際にごく淡いクリーム色
@@ -196,11 +204,14 @@ void main() {
   vec3 rimColor = vec3(1.0, 0.97, 0.9) * fres * 0.30 * (0.35 + rho * 0.65);
 
   // スペキュラ: Blinn-Phong。焼けるほど強く鋭く。ノイズでムラ。
+  // ρ→0(極めて曲率の高い頂点/メッシュの極)付近は鏡面ハイライトを弱め、
+  // 低ポリゴンの極特異点がピンポイントの光点として目立つのを防ぐ。
   vec3 Hh = normalize(L + V);
   float shininess = mix(8.0, 48.0, uBake);
   float specStrength = mix(0.045, 0.42, uBake) * (1.0 - toppingMask * 0.75) + uGloss * 0.05 * (1.0 - uBake);
   float glossNoise = 0.55 + 0.45 * fbm(vLocalPos * 0.5 + 200.0);
-  float spec = pow(max(dot(N, Hh), 0.0), shininess) * specStrength * glossNoise;
+  float apexFade = smoothstep(0.0, 0.07, rho);
+  float spec = pow(max(dot(N, Hh), 0.0), shininess) * specStrength * glossNoise * mix(0.2, 1.0, apexFade);
   spec += fillGlossBoost * 0.5 * uBake;
 
   // frying: 下半分に油の照り
@@ -539,11 +550,11 @@ export class GLDoughRenderer {
 
     gl.uniform2f(this.us.uResolution, this.cssW || 1, this.cssH || 1);
     gl.uniform2f(this.us.uCenter, cx, cy);
-    const rx = avgR * 0.92;
-    const ry = avgR * 0.34;
+    const rx = avgR * 0.85;
+    const ry = avgR * 0.28;
     gl.uniform2f(this.us.uShadowRadius, rx, ry);
-    gl.uniform1f(this.us.uShadowOffsetY, avgR * 0.58);
-    let opacity = 0.32;
+    gl.uniform1f(this.us.uShadowOffsetY, avgR * 0.62);
+    let opacity = 0.24;
     if (opts && opts.inOven) opacity *= 0.6;
     gl.uniform1f(this.us.uOpacity, opacity);
 

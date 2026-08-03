@@ -7,8 +7,9 @@ import { Sound } from '../audio/sound.js';
 import { getBread } from './breads.js';
 
 const STORAGE_KEY = 'panforest-v1';
-const MAX_PER_KIND = 5;
+const MAX_TOTAL = 36; // 全体上限 (SPEC-GL 4)。超えたら最古を置換する。kind別上限は廃止。
 const PLACE_ANIM_SEC = 2.0;
+const SAVE_EVICT_ATTEMPTS = 24; // localStorage quota 超過時、最古から間引いて再試行する上限回数
 
 // 色調（SPEC 基調色）
 const COL = {
@@ -83,8 +84,10 @@ export class Forest {
     const kind = (bread && bread.forest && bread.forest.kind) || 'stone';
     if (!this.items[kind]) this.items[kind] = [];
     const list = this.items[kind];
-    list.push({ breadId, snapshot, placedAt: Date.now() });
-    while (list.length > MAX_PER_KIND) list.shift();
+    const entry = { breadId, snapshot, placedAt: Date.now() };
+    list.push(entry);
+    this._ensureImage(entry); // snapshot.image があれば Image のデコードをここで開始 (一度だけ生成)
+    this._enforceGlobalCap();
     safeSfx('place', { gain: 0.8 });
   }
 
@@ -95,15 +98,112 @@ export class Forest {
     return n;
   }
 
+  // 全体上限(MAX_TOTAL)を超えたら、kind をまたいで最古のものから間引く。
+  _enforceGlobalCap() {
+    let guard = 0;
+    while (this.count() > MAX_TOTAL && guard < 10000) {
+      if (!this._evictOldest()) break;
+      guard++;
+    }
+  }
+
+  // 全 kind を通じて最も古い(placedAt が最小の) 1個を取り除く。取り除けたら true。
+  _evictOldest() {
+    let oldestKind = null;
+    let oldestTime = Infinity;
+    for (const kind in this.items) {
+      const list = this.items[kind];
+      if (list.length && list[0].placedAt <= oldestTime) {
+        oldestTime = list[0].placedAt;
+        oldestKind = kind;
+      }
+    }
+    if (oldestKind == null) return false;
+    this.items[oldestKind].shift();
+    if (this.items[oldestKind].length === 0) delete this.items[oldestKind];
+    return true;
+  }
+
+  // ---- Image キャッシュ (snapshot.image 対応。SPEC-GL 4) ----
+
+  // entry (place/load 時のエントリ) について Image を一度だけ生成しキャッシュする。
+  // JSON.stringify(this.items) で保存されないよう enumerable:false で持たせる。
+  _ensureImage(entry) {
+    if (!entry || !entry.snapshot || !entry.snapshot.image) return null;
+    if (entry._img) return entry._img;
+    let img = null;
+    try {
+      if (typeof Image !== 'undefined') {
+        img = new Image();
+        img.src = entry.snapshot.image;
+      }
+    } catch (e) {
+      img = null;
+    }
+    if (img) {
+      try {
+        Object.defineProperty(entry, '_img', {
+          value: img, enumerable: false, configurable: true, writable: true,
+        });
+      } catch (e) {
+        entry._img = img; // defineProperty が使えない環境向けの保険 (保存時は image 側で無害)
+      }
+    }
+    return img;
+  }
+
   // ---- 保存/復元 ----
 
   save() {
     try {
       if (typeof localStorage === 'undefined' || !localStorage) return;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.items));
     } catch (e) {
-      // 保存できなくてもゲームは続行
+      return;
     }
+
+    if (this._trySave(this.items)) return;
+
+    // quota 超過(setItem throw): 最古のパンから間引いて再試行する。
+    for (let i = 0; i < SAVE_EVICT_ATTEMPTS && this.count() > 0; i++) {
+      if (!this._evictOldest()) break;
+      if (this._trySave(this.items)) return;
+    }
+
+    // それでも駄目なら image を捨てて保存する (in-memory の this.items は変更しない)。
+    const stripped = {};
+    for (const kind in this.items) {
+      stripped[kind] = this.items[kind].map((e) => ({
+        breadId: e.breadId,
+        placedAt: e.placedAt,
+        snapshot: this._snapshotWithoutImage(e.snapshot),
+      }));
+    }
+    this._trySave(stripped);
+  }
+
+  _trySave(dataObj) {
+    let json;
+    try {
+      json = JSON.stringify(dataObj);
+    } catch (e) {
+      return false;
+    }
+    try {
+      localStorage.setItem(STORAGE_KEY, json);
+      return true;
+    } catch (e) {
+      return false; // quota 超過など
+    }
+  }
+
+  _snapshotWithoutImage(snap) {
+    if (!snap || !snap.image) return snap;
+    const copy = {};
+    for (const k in snap) {
+      if (k === 'image' || k === 'imageW' || k === 'imageH') continue;
+      copy[k] = snap[k];
+    }
+    return copy;
   }
 
   load() {
@@ -119,14 +219,18 @@ export class Forest {
         if (!Array.isArray(list)) continue;
         cleaned[kind] = list
           .filter((it) => it && typeof it.breadId === 'string' && it.snapshot)
-          .slice(-MAX_PER_KIND)
           .map((it) => ({
             breadId: it.breadId,
+            // image 無しの旧形式 snapshot もそのまま読める (後方互換)
             snapshot: it.snapshot,
             placedAt: 0, // 復元時は落下演出をスキップ（十分昔とみなす）
           }));
       }
       this.items = cleaned;
+      this._enforceGlobalCap(); // 全体上限36を復元後にも適用
+      for (const kind in this.items) {
+        for (const entry of this.items[kind]) this._ensureImage(entry);
+      }
     } catch (e) {
       // 壊れたデータは黙って捨てる
       this.items = {};
@@ -178,15 +282,39 @@ export class Forest {
 
     const scale = baseScale * (0.9 + 0.2 * ((i * 0.37) % 1)) * (0.85 + 0.15 * fallProgress);
 
-    try {
-      renderSnapshot(ctx, entry.snapshot, x, y, scale, t);
-    } catch (e) {
-      // render.js 未実装/エラー時も森全体は落ちない
+    // snapshot.image があり decode 済みなら drawImage、無ければ従来の renderSnapshot。
+    const img = this._ensureImage(entry);
+    if (img && img.complete && img.naturalWidth > 0) {
+      try {
+        this._drawSnapshotImage(ctx, entry.snapshot, img, x, y, scale, t);
+      } catch (e) {
+        try { renderSnapshot(ctx, entry.snapshot, x, y, scale, t); } catch (e2) { /* noop */ }
+      }
+    } else {
+      try {
+        renderSnapshot(ctx, entry.snapshot, x, y, scale, t);
+      } catch (e) {
+        // render.js 未実装/エラー時も森全体は落ちない
+      }
     }
 
     this._drawDecoration(ctx, kind, x, y + bob, zr, scale, t, i);
 
     if (sparkle > 0.02) this._drawSparkle(ctx, x, y, zr * (0.7 + 0.6 * scale), sparkle, t, i);
+  }
+
+  // snap.image (GL キャプチャの PNG dataURL) を drawImage で描く。
+  // snap.imageW/imageH は実寸(CSS px)で保存されているため、renderSnapshot と同じく
+  // scale だけ掛けて縮小する。呼吸の微スケールも renderSnapshot と同じ式で適用する。
+  _drawSnapshotImage(ctx, snap, img, x, y, scale, t) {
+    const bw = (typeof snap.imageW === 'number' && snap.imageW > 0) ? snap.imageW : (img.naturalWidth || 64);
+    const bh = (typeof snap.imageH === 'number' && snap.imageH > 0) ? snap.imageH : (img.naturalHeight || 64);
+    const air = typeof snap.air === 'number' ? clamp(snap.air, 0, 1) : 0.3;
+    const seed = ((Math.abs(x) * 13 + Math.abs(y) * 7) % 1000) / 1000;
+    const breathe = 1 + Math.sin(t * 1.1 + seed * Math.PI * 2) * 0.006 * (0.3 + air);
+    const dw = Math.max(1, bw * scale * breathe);
+    const dh = Math.max(1, bh * scale * breathe);
+    ctx.drawImage(img, x - dw / 2, y - dh / 2, dw, dh);
   }
 
   _drawSparkle(ctx, x, y, r, amount, t, seed) {

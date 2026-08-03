@@ -1,6 +1,11 @@
-// js/main.js — Agent F
+// js/main.js — Agent L (WebGL 2.5D 描画刷新の統合。元 Agent F の状態機械を維持)
 // 状態機械 + ゲームループ + 全モジュールの結線。
-// SPEC.md に書かれた export 名・シグネチャだけを信頼して結線する。
+// SPEC.md / SPEC-GL.md に書かれた export 名・シグネチャだけを信頼して結線する。
+//
+// canvas 3枚構成 (SPEC-GL): #bg(2D遠景/オーブン暖色/森) → #game(WebGL生地。失敗時2Dフォールバック) → #fx(2Dパーティクル、最前面。GestureController接続)。
+// js/gl/mesh.js・js/gl/glrenderer.js・js/fx/particles.js は他エージェントが並行実装中のため
+// 動的 import + try/catch で結線し、無い/失敗する場合は従来の 2D 単一パイプライン (renderDough) へ
+// フォールバックする。URLパラメータ ?force2d=1 で強制的に2Dフォールバックにできる。
 
 import { DoughModel } from './dough/model.js';
 import { renderDough } from './dough/render.js';
@@ -15,10 +20,35 @@ import { HUD } from './ui/hud.js';
 // 状態
 // ---------------------------------------------------------------------
 
-let canvas, ctx;
+// canvas 3枚 (#bg / #game / #fx) とそれぞれの 2D コンテキスト。
+// #game は WebGL 有効時は gameCtx を使わず glr/mesh 経由で描く。
+let bgCanvas, bgCtx;
+let gameCanvas, gameCtx; // gameCtx は 2D フォールバック時のみ使用
+let fxCanvas, fxCtx;
+
 let W = window.innerWidth, H = window.innerHeight, dpr = 1;
 let R0 = Math.min(W, H) * 0.26;
 let originalCenter = { x: W / 2, y: H * 0.45 };
+
+// --- WebGL パイプライン (Agent J: mesh.js / Agent K: glrenderer.js) ---
+let glEnabled = false; // GL 初期化に成功したか (__game.gl で公開)
+let glr = null;        // GLDoughRenderer インスタンス
+let mesh = null;       // DoughMesh インスタンス
+const FORCE_2D = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get('force2d') === '1';
+  } catch (e) {
+    return false;
+  }
+})();
+
+// --- FX パーティクル (Agent M: js/fx/particles.js) ---
+let fx = null;
+let fxEmitTimer = 0; // steam/oilbubble の間欠発生タイマー
+
+// 焼成完了フレームでの生地キャプチャ (森へ運ぶ画像)
+let captureOnNextRender = false;
+let bakedSnapshotImage = null; // { url, w, h } | null
 
 let hud = null;
 let gestures = null;
@@ -83,6 +113,12 @@ function sfxTap() {
   sfx('tap', { gain: 0.4 });
 }
 
+// FxSystem (Agent M, js/fx/particles.js) への発火。未実装/失敗時は何もしない。
+function emitFx(name, x, y, opts) {
+  if (!fx) return;
+  try { fx.emit(name, x, y, opts || {}); } catch (e) { /* FX 失敗でもゲームは続行 */ }
+}
+
 function currentBread() {
   return getBread(currentBreadId) || BREADS[0];
 }
@@ -117,6 +153,10 @@ function selectBread(breadId) {
   fermentElapsed = 0;
   cookStage = null;
 
+  // 新しい生地に切り替えたら、前の生地の焼成キャプチャ待ちは破棄する
+  captureOnNextRender = false;
+  bakedSnapshotImage = null;
+
   if (hud) {
     hud.setCurrentBread(currentBreadId);
     hud.setStage('shape');
@@ -139,6 +179,10 @@ function finishCooking() {
   if (hud) hud.setStage('done');
   sfx('sparkle', { gain: 0.5 });
   if (hud) hud.celebrate();
+  // 焼成完了フレームで glr.render 直後に captureRegion する (SPEC-GL 3)。
+  // フォールバック(2D)時は image 無しのまま従来動作。
+  bakedSnapshotImage = null;
+  captureOnNextRender = glEnabled;
 }
 
 function onCoverPressed() {
@@ -179,6 +223,12 @@ function placeToForest() {
   if (!dough) return;
   let snap = null;
   try { snap = dough.snapshot(); } catch (e) { snap = null; }
+  if (snap && bakedSnapshotImage && bakedSnapshotImage.url) {
+    // 焼成完了フレームで捕えた GL レンダリング画像を森のスナップショットへ添付する。
+    snap.image = bakedSnapshotImage.url;
+    snap.imageW = bakedSnapshotImage.w;
+    snap.imageH = bakedSnapshotImage.h;
+  }
   if (snap && forest) {
     try { forest.place(currentBreadId, snap); } catch (e) { /* noop */ }
     try { forest.save(); } catch (e) { /* noop */ }
@@ -245,10 +295,14 @@ function onGesture(evt) {
       if (stage === 'shape' || stage === 'done') {
         try { dough.poke(evt.x, evt.y, stage === 'done' ? 0.35 : 0.6); } catch (e) {}
         sfx('squish', { gain: 0.5 });
+        emitFx('poff', evt.x, evt.y);
       }
       if (stage === 'shape') {
         dragOrigin.x = evt.x; dragOrigin.y = evt.y;
-        draggingFromDough = tool === 'hand' && dist(evt.x, evt.y, dough.center.x, dough.center.y) <= R0 * 1.3;
+        // バグ修正(機能QA): tool が piping/pattern でもオーブンへのドラッグ判定に到達できるよう、
+        // ツール種別に関わらず「生地中心付近から掴んだか」だけで判定する。
+        // (絞り器のpressHold注入・模様描きの stroke とは別チャンネルの判定なので共存できる)
+        draggingFromDough = dist(evt.x, evt.y, dough.center.x, dough.center.y) <= R0 * 1.3;
         if (tool === 'hand' && bread.presetId === 'donut' &&
             dist(evt.x, evt.y, dough.center.x, dough.center.y) < R0 * 0.35) {
           holePressActive = true;
@@ -297,6 +351,7 @@ function onGesture(evt) {
       if (stage !== 'shape') break;
       try { dough.knead(evt.x, evt.y, evt.intensity); } catch (e) {}
       sfx('squish', { gain: 0.6 });
+      emitFx('flour', evt.x, evt.y);
       break;
     }
     case 'fold': {
@@ -388,6 +443,28 @@ function update(dt) {
         finishCooking();
       }
     }
+
+    // FX 結線: steaming→steam / frying→oilbubble (SPEC-GL 3)。
+    // stages.js の dough.bubbles は 2D フォールバック(renderDough)が既に描くため、
+    // 二重演出を避けて GL 有効時のみ FX パーティクルで補う。
+    if (fx && glEnabled && stage === 'cook' && dough) {
+      const method = currentBread().method;
+      if (method === 'steam' || method === 'fry') {
+        fxEmitTimer -= dt;
+        if (fxEmitTimer <= 0) {
+          if (method === 'steam') {
+            emitFx('steam', dough.center.x, dough.center.y - R0 * 0.55);
+            fxEmitTimer = 0.22 + Math.random() * 0.18;
+          } else {
+            const ang = Math.random() * Math.PI * 2;
+            const ex = dough.center.x + Math.cos(ang) * R0 * 0.85;
+            const ey = dough.center.y + Math.sin(ang) * R0 * 0.5;
+            emitFx('oilbubble', ex, ey);
+            fxEmitTimer = 0.09 + Math.random() * 0.08;
+          }
+        }
+      }
+    }
   } else if (mode === 'forest') {
     if (forestAutoReturn) {
       forestTimer -= dt;
@@ -396,12 +473,17 @@ function update(dt) {
       }
     }
   }
+
+  if (fx) {
+    try { fx.update(dt); } catch (e) { /* FX 失敗でもゲームは続行 */ }
+  }
 }
 
 // ---------------------------------------------------------------------
 // 描画
 // ---------------------------------------------------------------------
 
+// オーブン暖色ビネットは #bg (2D) 側に描く (SPEC-GL: 「#bg … オーブン暖色ビネット」)。
 function drawOvenWindow(t) {
   if (!hud) return;
   const oz = hud.getOvenZone();
@@ -409,24 +491,43 @@ function drawOvenWindow(t) {
   const cx = oz.x + oz.w / 2;
   const cy = oz.y + oz.h / 2;
   const r = Math.max(oz.w, oz.h) * 1.4;
-  const g = ctx.createRadialGradient(cx, cy, r * 0.08, cx, cy, r);
+  const g = bgCtx.createRadialGradient(cx, cy, r * 0.08, cx, cy, r);
   g.addColorStop(0, 'rgba(255,176,90,0.32)');
   g.addColorStop(1, 'rgba(255,176,90,0)');
-  ctx.save();
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-  ctx.restore();
+  bgCtx.save();
+  bgCtx.fillStyle = g;
+  bgCtx.fillRect(0, 0, W, H);
+  bgCtx.restore();
+}
+
+// 生地の輪郭バウンディングボックス (+ 余白20%) を CSS px で計算。captureRegion 用。
+function computeDoughCaptureBox(d) {
+  let maxR = (d && d.R0) || R0 || 100;
+  if (d && Array.isArray(d.points)) {
+    for (let i = 0; i < d.points.length; i++) {
+      const pt = d.points[i];
+      if (!pt) continue;
+      const rr = Math.hypot((pt.x || 0) - d.center.x, (pt.y || 0) - d.center.y);
+      if (rr > maxR) maxR = rr;
+    }
+  }
+  const size = Math.max(4, maxR * 2 * 1.2); // 余白20%
+  return { cx: d.center.x, cy: d.center.y, w: size, h: size };
 }
 
 function render(t) {
-  ctx.clearRect(0, 0, W, H);
-
   if (mode === 'forest') {
-    try { forest.render(ctx, W, H, t); } catch (e) {}
+    // 森ビュー: bg に forest.render。GL/フォールバックの生地canvasは非表示にする。
+    if (gameCanvas) gameCanvas.style.visibility = 'hidden';
+    if (fxCtx) fxCtx.clearRect(0, 0, W, H);
+    bgCtx.clearRect(0, 0, W, H);
+    try { forest.render(bgCtx, W, H, t); } catch (e) {}
     return;
   }
+  if (gameCanvas) gameCanvas.style.visibility = 'visible';
 
-  try { forest.renderBackdrop(ctx, W, H, t); } catch (e) {}
+  bgCtx.clearRect(0, 0, W, H);
+  try { forest.renderBackdrop(bgCtx, W, H, t); } catch (e) {}
 
   if (stage === 'cook') {
     try { drawOvenWindow(t); } catch (e) {}
@@ -434,13 +535,45 @@ function render(t) {
 
   if (dough) {
     const method = currentBread().method;
-    try {
-      renderDough(ctx, dough, t, {
-        frying: stage === 'cook' && method === 'fry',
-        steaming: stage === 'cook' && method === 'steam',
-        inOven: stage === 'cook' && method === 'bake',
-      });
-    } catch (e) { /* 描画失敗でもループは止めない */ }
+    const opts = {
+      frying: stage === 'cook' && method === 'fry',
+      steaming: stage === 'cook' && method === 'steam',
+      inOven: stage === 'cook' && method === 'bake',
+    };
+
+    if (glEnabled && glr && mesh) {
+      try {
+        mesh.update(dough, t);
+        glr.render(dough, mesh, t, opts);
+
+        // 焼成完了フレーム: glr.render 直後に同期でキャプチャする (SPEC-GL 3)。
+        if (captureOnNextRender) {
+          captureOnNextRender = false;
+          try {
+            const box = computeDoughCaptureBox(dough);
+            const cap = glr.captureRegion(box.cx, box.cy, box.w, box.h);
+            if (cap && cap.url) {
+              // 実寸(CSS px)で保存し、森側では scale だけで縮小する (render.js の方式に合わせる)。
+              bakedSnapshotImage = { url: cap.url, w: box.w, h: box.h };
+            }
+          } catch (e) { /* キャプチャ失敗時は image 無しの従来動作にフォールバック */ }
+        }
+      } catch (e) {
+        // GL 描画が実行時に破綻した場合も、以後は 2D フォールバックへ切り替えてゲームを止めない。
+        glEnabled = false;
+        try { gameCtx = gameCanvas.getContext('2d'); } catch (e2) { gameCtx = null; }
+        if (gameCtx) sizeCanvas2D(gameCanvas, gameCtx, W, H, dpr);
+      }
+    } else if (gameCtx) {
+      try { renderDough(gameCtx, dough, t, opts); } catch (e) { /* 描画失敗でもループは止めない */ }
+    }
+  }
+
+  if (fxCtx) {
+    fxCtx.clearRect(0, 0, W, H);
+    if (fx) {
+      try { fx.render(fxCtx); } catch (e) { /* FX 描画失敗でもループは止めない */ }
+    }
   }
 }
 
@@ -463,6 +596,16 @@ function loop(now) {
   }
 }
 
+// CSS ピクセル座標で統一するため dpr 分だけ setTransform した 2D canvas を張り直す。
+function sizeCanvas2D(cv, cctx, w, h, ratio) {
+  if (!cv) return;
+  cv.width = Math.max(1, Math.round(w * ratio));
+  cv.height = Math.max(1, Math.round(h * ratio));
+  cv.style.width = w + 'px';
+  cv.style.height = h + 'px';
+  if (cctx) cctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+}
+
 function resize() {
   W = window.innerWidth;
   H = window.innerHeight;
@@ -470,11 +613,14 @@ function resize() {
   R0 = Math.min(W, H) * 0.26;
   originalCenter = { x: W / 2, y: H * 0.45 };
 
-  canvas.width = Math.max(1, Math.round(W * dpr));
-  canvas.height = Math.max(1, Math.round(H * dpr));
-  canvas.style.width = W + 'px';
-  canvas.style.height = H + 'px';
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  sizeCanvas2D(bgCanvas, bgCtx, W, H, dpr);
+  sizeCanvas2D(fxCanvas, fxCtx, W, H, dpr);
+
+  if (glEnabled && glr) {
+    try { glr.resize(W, H, dpr); } catch (e) { /* リサイズ失敗はフレーム描画側の try/catch で吸収 */ }
+  } else {
+    sizeCanvas2D(gameCanvas, gameCtx, W, H, dpr);
+  }
 
   if (dough && stage !== 'cook') {
     dough.center.x = originalCenter.x;
@@ -494,12 +640,63 @@ function onVisibilityChange() {
 }
 
 // ---------------------------------------------------------------------
+// GL / FX 初期化 (並行実装モジュール。無い/失敗する場合は必ずフォールバックする)
+// ---------------------------------------------------------------------
+
+// GL 初期化: js/gl/mesh.js + js/gl/glrenderer.js を動的 import。
+// ファイルが存在しない・import が失敗する・コンストラクタが throw する、
+// いずれの場合も 2D フォールバック (gameCtx) へ切り替える。
+async function initRenderer() {
+  if (!FORCE_2D) {
+    try {
+      const [meshMod, glMod] = await Promise.all([
+        import('./gl/mesh.js'),
+        import('./gl/glrenderer.js'),
+      ]);
+      const DoughMesh = meshMod && meshMod.DoughMesh;
+      const GLDoughRenderer = glMod && glMod.GLDoughRenderer;
+      if (typeof DoughMesh !== 'function' || typeof GLDoughRenderer !== 'function') {
+        throw new Error('gl module missing expected export');
+      }
+      glr = new GLDoughRenderer(gameCanvas);
+      mesh = new DoughMesh(26, 64);
+      glEnabled = true;
+    } catch (e) {
+      glr = null;
+      mesh = null;
+      glEnabled = false;
+    }
+  }
+  if (!glEnabled) {
+    try { gameCtx = gameCanvas.getContext('2d'); } catch (e) { gameCtx = null; }
+  }
+}
+
+// FX パーティクル: js/fx/particles.js を動的 import。無くても遊べる (演出が無いだけ)。
+async function initFx() {
+  try {
+    const fxMod = await import('./fx/particles.js');
+    const FxSystem = fxMod && fxMod.FxSystem;
+    if (typeof FxSystem !== 'function') throw new Error('fx module missing expected export');
+    fx = new FxSystem();
+  } catch (e) {
+    fx = null;
+  }
+}
+
+// ---------------------------------------------------------------------
 // 起動
 // ---------------------------------------------------------------------
 
-function boot() {
-  canvas = document.getElementById('game');
-  ctx = canvas.getContext('2d');
+async function boot() {
+  bgCanvas = document.getElementById('bg');
+  gameCanvas = document.getElementById('game');
+  fxCanvas = document.getElementById('fx');
+
+  bgCtx = bgCanvas.getContext('2d');
+  fxCtx = fxCanvas.getContext('2d');
+  // gameCtx は initRenderer() が GL 失敗時にのみ生成する
+  // (先に 2d コンテキストを確定させると同一 canvas から webgl が取得できなくなるため)。
 
   forest = new Forest();
   try { forest.load(); } catch (e) { /* 初回は何もない */ }
@@ -516,13 +713,19 @@ function boot() {
   });
   hud.setBreads(BREADS);
 
-  resize();
-
-  gestures = new GestureController(canvas, onGesture);
-  canvas.addEventListener('pointerdown', onCanvasPointerDown);
+  // GestureController は最前面の #fx へ接続する (SPEC-GL: pointer はここに落ちる)。
+  gestures = new GestureController(fxCanvas, onGesture);
+  fxCanvas.addEventListener('pointerdown', onCanvasPointerDown);
   // HUDボタン等、canvas以外への最初のタップでも音を初期化できるようにする
   // （SPEC: 「最初のユーザー操作で呼ばれる」。1度発火したら自動で外れる）。
   document.addEventListener('pointerdown', ensureSoundInit, { once: true, capture: true });
+
+  // GL/FX の初期化を待ってから最初のリサイズ/描画を行う。ローカル同一オリジンの
+  // 動的 import は高速なため、「起動から1秒以内に触れる」目標には影響しない。
+  try { await initRenderer(); } catch (e) { glEnabled = false; }
+  try { await initFx(); } catch (e) { fx = null; }
+
+  resize();
 
   selectBread('shokupan');
 
@@ -543,6 +746,7 @@ function boot() {
     get currentBreadId() { return currentBreadId; },
     get forest() { return forest; },
     get hud() { return hud; },
+    get gl() { return glEnabled; },
   };
 }
 

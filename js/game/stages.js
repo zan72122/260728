@@ -142,6 +142,7 @@ export class CookStage {
     this._dingPlayed = false;
 
     const p = dough.p || {};
+    this._startBakeColor = typeof p.bakeColor === 'number' ? p.bakeColor : 0;
     this._startCrustHardness = p.crustHardness || 0;
     this._startSoftness = typeof p.softness === 'number' ? p.softness : 0.6;
     this._startElasticity = typeof p.elasticity === 'number' ? p.elasticity : 0.3;
@@ -218,6 +219,9 @@ export class CookStage {
     p.air = clamp01(this._startAir + 0.35 * frac);
     p.ferment = clamp01(this._startFerment + 0.25 * frac);
     p.temperature = clamp01(0.5 + 0.5 * frac);
+    // バグ修正(機能QA): 蒸しパンも bakeColor を進めないと焼き上がりの色変化が起きない。
+    // 蒸し物は焦がさず「ほんのり色づく」程度に留めるため、0→0.35 までに抑える。
+    p.bakeColor = clamp01(this._startBakeColor + 0.35 * frac);
 
     // 花が開くように表面が少し割れる
     if (typeof this.dough.crackAmount === 'number') {
