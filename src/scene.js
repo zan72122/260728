@@ -220,6 +220,21 @@ export class SceneEnv {
   // The tower's upright pillars stand on dry deck outside the pool basin;
   // each board reaches inward from the pillars so its far end lands exactly
   // on the platform's `tip` from constants (which sits over the water).
+  //
+  // NOTE on the camera angle: the game camera sits on the +X side and looks
+  // mostly along -X (see cameraFX.js `lookAt` targets around x=-1..-1.3),
+  // so world-X is close to the camera's view/depth axis, not the on-screen
+  // horizontal. A *thin round* shape whose long axis runs along X (the old
+  // CapsuleGeometry boards, and the old rung box that was long in X instead
+  // of Z) gets foreshortened almost end-on into an unreadable diagonal
+  // blob/streak — that was the "diagonal floating pills" / "scattered
+  // debris" bug. The fix keeps the boards' required long axis along X (tips
+  // must land exactly on PLATFORMS[i].tip, pillars must stay outside the
+  // pool on the X axis) but gives them a flat, WIDE (in Z) plank cross
+  // section instead of a thin round one, so they still read clearly as toy
+  // diving boards even when viewed close to end-on. The ladder rungs are
+  // fixed to run along Z (the axis that actually spans between the two
+  // pillars) instead of X.
   _buildTower() {
     const group = new THREE.Group();
     group.name = 'divingTower';
@@ -230,14 +245,17 @@ export class SceneEnv {
     const ladderMat = new THREE.MeshStandardMaterial({ color: 0xffd23f, roughness: 0.5 });
 
     const BOARD_LEN = 2.6; // total physical length of each board, incl. caps
+    const BOARD_THICK = 0.24; // flat vertical thickness of the plank
+    const BOARD_WIDTH = 1.0; // wide sideways so it reads as a board, not a pole
     const tipX = PLATFORMS[0].tip.x; // all tips share the same x (-3.4)
     const PILLAR_X = tipX - BOARD_LEN; // dry deck, outside POOL.RADIUS
+    const PILLAR_DZ = 0.55; // half-gap between the two rail pillars
 
     // Two chunky rounded pillars supporting all boards, from the ground up
     // to just above the highest board.
     const topHeight = PLATFORMS[PLATFORMS.length - 1].height + 0.6;
     const pillarGeo = new THREE.CapsuleGeometry(0.22, topHeight, 4, 8);
-    const offsets = [-0.55, 0.55];
+    const offsets = [-PILLAR_DZ, PILLAR_DZ];
     for (const dz of offsets) {
       const pillar = new THREE.Mesh(pillarGeo, pillarMat);
       pillar.position.set(PILLAR_X, topHeight / 2, dz);
@@ -247,8 +265,12 @@ export class SceneEnv {
     }
 
     // Ladder rungs climbing between the two pillars (cheap: InstancedMesh).
+    // Each rung must be long along Z (the axis that separates the two rail
+    // pillars) and thin along X/Y — the previous version had this backwards
+    // (long along X), which made every rung foreshorten into a tiny scattered
+    // speck instead of a horizontal step.
     const rungCount = 12;
-    const rungGeo = new THREE.BoxGeometry(1.1, 0.06, 0.08);
+    const rungGeo = new THREE.BoxGeometry(0.07, 0.06, PILLAR_DZ * 2 - 0.1);
     const rungs = new THREE.InstancedMesh(rungGeo, ladderMat, rungCount);
     rungs.castShadow = false;
     const m = new THREE.Matrix4();
@@ -266,24 +288,41 @@ export class SceneEnv {
       const color = boardColors[p.id] ?? 0xffffff;
       const boardGroup = new THREE.Group();
       boardGroup.name = `board-${p.id}`;
-
-      // Capsule cylinder length + 2*radius === BOARD_LEN when rotated flat.
       const boardMat = new THREE.MeshStandardMaterial({ color, roughness: 0.45 });
-      const boardGeo = new THREE.CapsuleGeometry(0.34, BOARD_LEN - 0.68, 4, 10);
+
+      // Flat wide plank: BoxGeometry's local X is already the length axis,
+      // so no rotation is needed (avoids re-introducing an axis mixup).
+      // The straight box covers the middle stretch; a rounded cap sits at
+      // each end so the *outer surface* of the tip cap — not just its
+      // center — lands exactly on the platform tip, matching the contract.
+      const capR = BOARD_WIDTH / 2;
+      const boardLenMid = BOARD_LEN - 2 * capR;
+      const boardGeo = new THREE.BoxGeometry(boardLenMid, BOARD_THICK, BOARD_WIDTH);
       const board = new THREE.Mesh(boardGeo, boardMat);
-      board.rotation.z = Math.PI / 2; // capsule axis becomes X (horizontal)
-      // Center the board so its far end lands exactly on the platform tip.
+      // Center the board between the two end caps (see below).
       board.position.set(p.tip.x - BOARD_LEN / 2, p.height, p.tip.z);
       board.castShadow = true;
       board.receiveShadow = true;
       boardGroup.add(board);
 
-      // Small rounded knob at the tip end (cute toddler-toy detail, also
-      // reads as a visual marker for where the toy will hover).
-      const knobGeo = new THREE.SphereGeometry(0.3, 10, 8);
-      const knob = new THREE.Mesh(knobGeo, boardMat);
-      knob.position.set(p.tip.x, p.height + 0.02, p.tip.z);
-      boardGroup.add(knob);
+      // Rounded cap at the tip end (cute toddler-toy detail, also reads as
+      // a visual marker for where the toy will hover) — flattened so it
+      // continues the plank's profile instead of reading as a stray ball.
+      // Its outer edge (center - capR) lands exactly on p.tip.x.
+      const tipCapGeo = new THREE.SphereGeometry(capR, 12, 8);
+      const tipCap = new THREE.Mesh(tipCapGeo, boardMat);
+      tipCap.scale.set(1, BOARD_THICK / BOARD_WIDTH, 1);
+      tipCap.position.set(p.tip.x - capR, p.height, p.tip.z);
+      tipCap.castShadow = true;
+      boardGroup.add(tipCap);
+
+      // Matching rounded cap at the pillar end, so the plank reads as one
+      // continuous rounded board from rail to water.
+      const railCap = new THREE.Mesh(tipCapGeo, boardMat);
+      railCap.scale.set(1, BOARD_THICK / BOARD_WIDTH, 1);
+      railCap.position.set(PILLAR_X + capR, p.height, p.tip.z);
+      railCap.castShadow = true;
+      boardGroup.add(railCap);
 
       group.add(boardGroup);
 
