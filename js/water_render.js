@@ -6,6 +6,10 @@
 // ============================================================
 "use strict";
 
+// 半透明のふち継ぎ目対策: 点を整数pxへスナップする (となり同士でぴったり
+// おなじ境界線になるようにし、アンチエイリアスの半端カバー率をなくす)
+function snapPt(p) { return { px: Math.round(p.px), py: Math.round(p.py) }; }
+
 const IsoWater = {
   // 対角線 s 上の全セルの水を描く
   drawDiagonal(ctx, view, s, now) {
@@ -47,8 +51,14 @@ const IsoWater = {
       const exposedS = wS < e; // W-S辺 側 (手前左)
 
       const [N, E, S, W] = Iso.cellCorners(view, x, y, surf);
+      // 半透明どうしの継ぎ目対策: となりも水のときは同じ辺をとなり同士べつべつに
+      // アンチエイリアスして塗ることになり、境界の1pxがどちらの塗りも
+      // 半端なカバー率になって色が濃く/薄くずれて見える。ぬりのパスの頂点を
+      // 整数pxへスナップして両側の形をぴったりそろえ、境界のあいまいな
+      // 半端カバー率のピクセルが出ないようにする(となり同士で同じ位置に丸まる)。
+      const fN = snapPt(N), fE = snapPt(E), fS = snapPt(S), fW = snapPt(W);
       ctx.fillStyle = rgba(c, alpha, lum);
-      this.roundedDiamond(ctx, N, E, S, W, view.cs * 0.4, exposedN, exposedE, exposedS, exposedW);
+      this.roundedDiamond(ctx, fN, fE, fS, fW, view.cs * 0.4, exposedN, exposedE, exposedS, exposedW);
       ctx.fill();
 
       // 奥側 (N-E, N-W辺) の露出には白い細ハイライト

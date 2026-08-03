@@ -47,7 +47,7 @@ const Render = {
         break;
       }
       case T_ROCK:
-        c = h > 5.6 ? PAL.snow : mixRGB(PAL.rock, PAL.rockHigh, clamp((h - 4.2) / 1.6, 0, 1));
+        c = h > 5.8 ? PAL.snow : mixRGB(PAL.rock, PAL.rockHigh, clamp((h - 4.6) / 1.4, 0, 1));
         break;
       case T_RIVER: c = PAL.riverbed; break;
       case T_DITCH: c = PAL.ditch; break;
@@ -224,6 +224,11 @@ const Render = {
     const eh = view.eh, cs = view.cs;
     const bot1 = { px: top1.px, py: top1.py + drop * eh };
     const bot2 = { px: top2.px, py: top2.py + drop * eh };
+    // 上面ひし形との境界: 別ポリゴンどうしのAAで生じる1px未満のすきま/濃いふちを消すため、
+    // 壁の上ふちだけ わずかに上(上面がわ)へ重ねてから描く(重なりは上面の不透明色で隠れる)
+    const OL = 0.75;
+    const etop1 = { px: top1.px, py: top1.py - OL };
+    const etop2 = { px: top2.px, py: top2.py - OL };
     // ちいさな段差は上面色を暗くした色、おおきな段差は土/石/堤防の壁色へブレンド
     const wk = clamp((drop - 0.5) / 0.8, 0, 1);
     const soil = this.wallColor(i);
@@ -236,16 +241,16 @@ const Render = {
 
     // 縦グラデの近似 (2色 fill): 下地を暗色でぬり、上がわだけ明色をかさねる
     ctx.fillStyle = darkStyle;
-    this.wallPath(ctx, top1, top2, bot1, bot2);
+    this.wallPath(ctx, etop1, etop2, bot1, bot2);
     ctx.fill();
     ctx.strokeStyle = darkStyle; ctx.lineWidth = 1; ctx.stroke(); // となりとのすじ消し
     ctx.fillStyle = lightStyle;
-    this.wallStrip(ctx, top1, top2, bot1, bot2, 0, 0.55);
+    this.wallStrip(ctx, etop1, etop2, bot1, bot2, 0, 0.55);
     ctx.fill();
 
     if (isLeftFace && World.stairs[i] && drop > 0.6) {
       // たかだいには かいだん (左面のみ)
-      this.drawStairsFace(ctx, top1, top2, bot1, bot2);
+      this.drawStairsFace(ctx, etop1, etop2, bot1, bot2);
     } else if (drop > 0.8 && type !== T_LEVEE) {
       // 地層のよこ線
       const n = Math.min(4, Math.floor((drop * eh) / (cs * 0.4)));
@@ -322,12 +327,21 @@ const Render = {
       ctx.fill();
     }
 
+    // S角 (x+1,y+1) は右面/左面の両方の遠い端であり、斜め隣セルの高さもここで
+    // 顔をだす。まっすぐ hR / hL だけで壁の底を決めると、斜め隣がさらに低い
+    // ときに三角形のすきまができて奥の地形が透けてしまうので、既に壁が立つ
+    // 場合はその角の高さもふまえて底をふかくし、すきまをふさぐ。
+    const hDiag = inGrid(x + 1, y + 1) ? World.h[idx(x + 1, y + 1)] : 0;
     // 右面 (+x側)
     const hR = inGrid(x + 1, y) ? World.h[idx(x + 1, y)] : 0;
-    this.drawWallFace(ctx, view, i, E, S, h - hR, 0.72, c, false, type);
+    let dropR = h - hR;
+    if (dropR > 0.02) dropR = Math.max(dropR, h - hDiag);
+    this.drawWallFace(ctx, view, i, E, S, dropR, 0.72, c, false, type);
     // 左面 (+y側)
     const hL = inGrid(x, y + 1) ? World.h[idx(x, y + 1)] : 0;
-    this.drawWallFace(ctx, view, i, W, S, h - hL, 0.86, c, true, type);
+    let dropL = h - hL;
+    if (dropL > 0.02) dropL = Math.max(dropL, h - hDiag);
+    this.drawWallFace(ctx, view, i, W, S, dropL, 0.86, c, true, type);
   },
 
   // ---------- 対角線 s に属するオブジェクト ----------
