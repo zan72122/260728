@@ -6,7 +6,7 @@
 // contract this file must honor.
 import * as THREE from 'three';
 import { createToyMesh, deformToy } from './toys.js';
-import { hashInts } from './rng.js';
+import { hashInts, mulberry32 } from './rng.js';
 import { G, POOL } from './constants.js';
 
 // ---------------------------------------------------------------------------
@@ -26,6 +26,41 @@ const HELD_SPRING_C = 24;
 const SQUASH_SPRING_K = 130;
 const SQUASH_SPRING_C = 13;
 const FADE_RATE = 2.2; // scale units / second while culling the oldest body
+
+// ---------------------------------------------------------------------------
+// Mega ("そらのだい" sky-platform) tunables — docs/CONTRACTS-MEGA.md "M4 —
+// giant toys + physics". Every mega-related code path below is gated on
+// `def.mega` (or an explicit body flag set only for mega bodies), so none of
+// this can change a single number for the 8 normal toys — the non-mega
+// branch of every touched function is the exact original code.
+// ---------------------------------------------------------------------------
+const MEGA_TERMINAL_VY = 18;         // m/s, downward fall-speed cap (air drag)
+const MEGA_AIM_ASSIST_RADIUS = 0.55; // * WATER_RADIUS — giants need center room
+const MEGA_EXPIRE_SECONDS = 8;       // giants fade+remove ~8s after settling
+
+// giantjelly split-on-impact ("jelly rain") — fragments are clones of the
+// NORMAL 'jelly' ToyDef (mirrors TOY_ORDER's local-pinning approach: this
+// module only depends on createToyMesh/deformToy from toys.js, plus this
+// locally-pinned copy of the normal jelly def's fields, contract docs/
+// CONTRACTS.md "The 8 toys" + toys.js's own tuning).
+const JELLY_FRAGMENT_DEF_BASE = {
+  id: 'jelly', name: 'ゼリーボール', emoji: '🍮', shape: 'sphere',
+  density: 1.05, softness: 1, bounciness: 0.9, color: 0xff8fc7,
+};
+const JELLY_FRAGMENT_COUNT = 6;
+const JELLY_FRAGMENT_MIN_R = 0.35;
+const JELLY_FRAGMENT_MAX_R = 0.5;
+const JELLY_FRAGMENT_MIN_SPEED = 4;
+const JELLY_FRAGMENT_MAX_SPEED = 7;
+
+// giantbeach deep-submerge + spring-back-resurface tunables.
+const MEGA_BEACH_MAX_DEPTH = 2.2;    // m below y=0 it's allowed to punch down to
+const MEGA_BUOY_SOFT_DEPTH = 0.5;    // m — below this, normal-strength buoyancy
+const MEGA_BUOY_SPRING_K = 40;       // extra accel per meter beyond soft depth
+const MEGA_BUOY_ACCEL_CAP = G * 3;   // mega floaters get a stronger spring cap
+const MEGA_HOP_MIN_VY = 1.0;
+const MEGA_HOP_MAX_VY = 5.0;
+const MEGA_HOP_DEPTH_GAIN = 1.8;     // vy-per-meter-of-submersion scale
 
 // Fixed toy order for the deterministic `seed` formula's `toyIndex` term.
 // This mirrors the contract's own "The 8 toys" listing (ids fixed by
@@ -52,9 +87,13 @@ export class Physics {
   // valid `body.mesh`, and the caller is expected to add that mesh to its
   // own scene right after spawnToy() returns. removeBody() defensively
   // checks `mesh.parent` before removing, so both modes stay safe.
-  constructor({ scene, getWaterHeight } = {}) {
+  constructor({ scene, getWaterHeight, getSloshOffset } = {}) {
     this.scene = scene || null;
     this.getWaterHeight = getWaterHeight || null;
+    // Optional, mega-only: additive slosh offset for floating giants, wired
+    // by M3/M5 the same way getWaterHeight is (guarded — absent in all
+    // existing non-mega instantiations, so this is a pure no-op until wired).
+    this.getSloshOffset = getSloshOffset || null;
 
     this.onImpact = null;
     this.onResurface = null;
@@ -74,6 +113,7 @@ export class Physics {
     this._tmpQb = new THREE.Quaternion();
     this._tmpQc = new THREE.Quaternion();
     this._tmpVec2 = new THREE.Vector2();
+    this._tmpFragPos = new THREE.Vector3(); // giantjelly fragment spawn scratch
     this._removalScratch = [];
   }
 
@@ -114,6 +154,10 @@ export class Physics {
       _drift: null,
       _floatBase: null,
       _floatYaw: 0,
+      // Mega-only bookkeeping (harmless no-ops for the 8 normal toys):
+      _pendingRemoval: false,  // giantjelly: removed the instant it splits
+      _settledAt: null,        // mega: this._time when it reached sunk/floating
+      _maxSubmergeDepth: 0,    // mega: deepest -pos.y reached while inwater
     };
     this.bodies.push(body);
     if (this.onState) this.onState(body, 'held');
@@ -177,18 +221,55 @@ export class Physics {
     return (vy + Math.sqrt(disc)) / G;
   }
 
+  // Same idea, but for mega bodies: the plain ballistic formula above
+  // ignores the terminal-velocity air drag applied in _stepFlying, which
+  // makes the actual fall take noticeably LONGER (capped descent speed)
+  // than a drag-free estimate — using the drag-free time would under-count
+  // flight time and let the (unchanged) horizontal velocity carry a mega
+  // body's landing point past the aim-assist ring. Numerically integrates
+  // the exact same vertical ODE _stepFlying uses (horizontal motion is
+  // undamped/decoupled from this, so only the vertical component matters
+  // for timing) to get an accurate crossing time.
+  _timeToGroundMega(y0, vy0) {
+    const k = G / (MEGA_TERMINAL_VY * MEGA_TERMINAL_VY);
+    const dt = 0.02;
+    let y = y0, vy = vy0, t = 0;
+    for (let i = 0; i < 4000; i++) { // 80s safety ceiling
+      if (vy < 0) {
+        vy += (-G + k * vy * vy) * dt;
+      } else {
+        vy -= G * dt;
+      }
+      const prevY = y;
+      y += vy * dt;
+      t += dt;
+      if (prevY > 0 && y <= 0 && vy < 0) {
+        const denom = prevY - y;
+        const frac = denom > 1e-6 ? clamp(prevY / denom, 0, 1) : 0;
+        return t - dt * (1 - frac);
+      }
+    }
+    return -1;
+  }
+
   _applyAimAssist(body) {
     const pos = body.pos, vel = body.vel;
     const hSpeed = Math.hypot(vel.x, vel.z);
     // A tap-then-release with (near) no horizontal movement is a pure drop —
     // leave it completely alone (it already lands in water from the tip).
     if (hSpeed < 0.02) return;
-    const t = this._timeToGround(pos.y, vel.y);
+    const t = body.def.mega ? this._timeToGroundMega(pos.y, vel.y)
+                             : this._timeToGround(pos.y, vel.y);
     if (!(t > 0) || !isFinite(t)) return;
     const landX = pos.x + vel.x * t;
     const landZ = pos.z + vel.z * t;
     const dist = Math.hypot(landX, landZ);
-    const maxR = 0.82 * POOL.WATER_RADIUS * AIM_ASSIST_MARGIN;
+    // Mega/sky drops get a tighter ring — giants need center room — applied
+    // purely off def.mega, regardless of which platform released them.
+    // Non-mega bodies take the exact original 0.82 ring untouched.
+    const baseR = body.def.mega ? MEGA_AIM_ASSIST_RADIUS * POOL.WATER_RADIUS
+                                 : 0.82 * POOL.WATER_RADIUS;
+    const maxR = baseR * AIM_ASSIST_MARGIN;
     if (dist > maxR && dist > 1e-5) {
       // Retarget (not just rescale) the horizontal velocity so the SAME
       // ballistic time-of-flight lands exactly on the assist ring, on the
@@ -245,7 +326,13 @@ export class Physics {
     const removal = this._removalScratch;
     removal.length = 0;
 
-    for (let i = 0; i < this.bodies.length; i++) {
+    // Cache the pre-step body count: giantjelly fragment spawning (below)
+    // appends new 'flying' bodies to this.bodies mid-loop. Capping the loop
+    // bound here means a freshly-spawned fragment gets its first integration
+    // step next update() call, not this one — existing code never appended
+    // bodies mid-_step, so this is a no-op for every other path.
+    const n = this.bodies.length;
+    for (let i = 0; i < n; i++) {
       const body = this.bodies[i];
       switch (body.state) {
         case 'held': this._stepHeld(body, dt); break;
@@ -256,6 +343,24 @@ export class Physics {
       }
 
       this._stepSoftDeform(body, dt);
+
+      if (body._pendingRemoval) {
+        // giantjelly: emitted its mega impact and split into fragments this
+        // same substep — remove it now (reuses the existing post-loop
+        // removal pass so the bodies[] iteration above stays untouched).
+        removal.push(body);
+        continue;
+      }
+
+      // Mega-only auto-expiry: giants fade+remove ~8s after they settle
+      // (sunk on the floor, or floating), reusing the exact same fade-then-
+      // remove mechanism as _maybeCullOldest below. Zero effect on any body
+      // whose def.mega is falsy.
+      if (body.def.mega && !body._fading && body._settledAt !== null &&
+          (body.state === 'sunk' || body.state === 'floating') &&
+          this._time - body._settledAt > MEGA_EXPIRE_SECONDS) {
+        body._fading = true;
+      }
 
       if (body._fading) {
         body._fadeScale = Math.max(0, body._fadeScale - dt * FADE_RATE);
@@ -295,11 +400,21 @@ export class Physics {
   // -- flying: ballistic + tumbling, detects y=0 downward crossing ------------
 
   _stepFlying(body, dt) {
-    const pos = body.pos, vel = body.vel;
+    const pos = body.pos, vel = body.vel, def = body.def;
     this._tmpPrevPos.copy(pos);
     const prevY = pos.y;
 
-    vel.y -= G * dt;
+    if (def.mega && vel.y < 0) {
+      // Terminal velocity: quadratic air drag smoothly approaching
+      // MEGA_TERMINAL_VY as the fall speed grows, instead of gravity
+      // integrating unbounded. Derived from dv/dt = -g + k*v^2 with k chosen
+      // so the accel is exactly zero at v == -MEGA_TERMINAL_VY (the classic
+      // terminal-velocity ODE) — asymptotic, never a hard clamp/snap.
+      const k = G / (MEGA_TERMINAL_VY * MEGA_TERMINAL_VY);
+      vel.y += (-G + k * vel.y * vel.y) * dt;
+    } else {
+      vel.y -= G * dt;
+    }
     pos.addScaledVector(vel, dt);
     this._applyAngularIntegration(body, dt);
 
@@ -430,6 +545,17 @@ export class Physics {
       isSecondary,
     };
 
+    // Mega spec extension (docs/CONTRACTS-MEGA.md "Shared definitions"):
+    // adds nothing for non-mega defs, so every field/shape above stays
+    // bit-identical to today for the 8 normal toys. Secondary re-entries of
+    // a mega body (giantbeach's resurface hop) are explicitly excluded —
+    // contract: "its re-entry is a normal-path secondary impact", i.e. main
+    // must route it through the NORMAL splash pipeline, not megasplash.
+    if (def.mega && !isSecondary) {
+      spec.mega = true;
+      spec.megaScale = def.radius / 0.35;
+    }
+
     if (def.softness > 0) {
       body._squash = clamp01(energy * (0.6 + def.softness * 0.6));
       body._squashVel = -body._squash * 6;
@@ -440,6 +566,43 @@ export class Physics {
 
     this._setState(body, 'inwater');
     if (this.onImpact) this.onImpact(spec);
+
+    // giantjelly: splits into 6 normal-jelly fragments on impact ("jelly
+    // rain") — emit the mega spec first (above), THEN remove this giant body
+    // and spawn the fragments so re-entries are ordinary secondary impacts
+    // through the existing pipeline.
+    if (def.mega && def.id === 'giantjelly') {
+      this._spawnJellyFragments(spec, spec.point);
+      body._pendingRemoval = true;
+    }
+  }
+
+  // -- giantjelly split: 6 seeded fragments launched outward+up ---------------
+
+  _spawnJellyFragments(spec, origin) {
+    const rand = mulberry32(spec.seed);
+    for (let i = 0; i < JELLY_FRAGMENT_COUNT; i++) {
+      const r = JELLY_FRAGMENT_MIN_R + rand() * (JELLY_FRAGMENT_MAX_R - JELLY_FRAGMENT_MIN_R);
+      const fragDef = Object.assign({}, JELLY_FRAGMENT_DEF_BASE, { radius: r });
+
+      // Evenly spaced ring around the impact point (a shallow launch cone),
+      // with seeded jitter so the 6 fragments don't look perfectly regular.
+      const slice = (Math.PI * 2) / JELLY_FRAGMENT_COUNT;
+      const angle = i * slice + (rand() - 0.5) * slice * 0.6;
+      const speed = JELLY_FRAGMENT_MIN_SPEED + rand() * (JELLY_FRAGMENT_MAX_SPEED - JELLY_FRAGMENT_MIN_SPEED);
+      const elevation = 0.5 + rand() * 0.35; // ~29-49deg above horizontal
+      const horizSpeed = Math.cos(elevation) * speed;
+      const vy = Math.sin(elevation) * speed;
+      const vx = Math.cos(angle) * horizSpeed;
+      const vz = Math.sin(angle) * horizSpeed;
+
+      this._tmpFragPos.set(origin.x, Math.max(origin.y, 0.05), origin.z);
+      const frag = this.spawnToy(fragDef, this._tmpFragPos);
+      frag.vel.set(vx, vy, vz);
+      frag._pendingSecondary = true; // re-entry fires isSecondary through the
+                                      // existing _handleWaterEntry pipeline
+      this._setState(frag, 'flying');
+    }
   }
 
   // -- inwater: buoyancy + drag, floor settle, upward-crossing resurface -------
@@ -448,8 +611,26 @@ export class Physics {
     const pos = body.pos, vel = body.vel, def = body.def;
     const prevY = pos.y;
 
+    // Only a genuine floater (density < 1) gets the mega deep-submerge +
+    // spring-back treatment — contract: "giantbeach: allowed to submerge
+    // deeper...". giantheavy is mega but a SINKER (density 2.6); it must
+    // fall through to the exact original clamp/behavior below, unmodified.
+    const isMegaFloater = def.mega && def.density < 1;
+
     let buoyAccel = (1 / def.density - 1) * G * BUOY_DAMPING;
-    buoyAccel = clamp(buoyAccel, -BUOY_ACCEL_CAP, BUOY_ACCEL_CAP);
+    if (isMegaFloater) {
+      // Allowed to punch down deeper than the normal cap before the
+      // buoyancy spring fights back hard — a true progressive spring (extra
+      // restoring accel proportional to depth beyond MEGA_BUOY_SOFT_DEPTH),
+      // capped higher so the resurface reads as a strong "spring back"
+      // rather than a gentle bob-up.
+      const depth = Math.max(0, -pos.y);
+      const over = Math.max(0, depth - MEGA_BUOY_SOFT_DEPTH);
+      buoyAccel += over * MEGA_BUOY_SPRING_K;
+      buoyAccel = clamp(buoyAccel, -MEGA_BUOY_ACCEL_CAP, MEGA_BUOY_ACCEL_CAP);
+    } else {
+      buoyAccel = clamp(buoyAccel, -BUOY_ACCEL_CAP, BUOY_ACCEL_CAP);
+    }
     vel.y += buoyAccel * dt;
 
     // Quadratic drag, applied as a stable implicit (division-based) update so
@@ -465,6 +646,25 @@ export class Physics {
     pos.addScaledVector(vel, dt);
     body.angVel.multiplyScalar(Math.max(0, 1 - 6 * dt));
 
+    if (isMegaFloater) {
+      // Soft depth clamp (contract: "down to ~2.2m") + track the deepest
+      // submersion reached, used to scale the resurface hop below. This
+      // floater never touches the true pool floor (POOL.DEPTH is always
+      // deeper than MEGA_BEACH_MAX_DEPTH), so it skips the radius-based
+      // floor-rest check entirely below — it only ever springs back up.
+      if (pos.y < -MEGA_BEACH_MAX_DEPTH) {
+        pos.y = -MEGA_BEACH_MAX_DEPTH;
+        if (vel.y < 0) vel.y = 0;
+      }
+      const depthNow = Math.max(0, -pos.y);
+      if (depthNow > body._maxSubmergeDepth) body._maxSubmergeDepth = depthNow;
+
+      if (prevY < 0 && pos.y >= 0 && vel.y > 0) {
+        this._handleResurface(body);
+      }
+      return;
+    }
+
     const floorY = -POOL.DEPTH + def.radius;
     if (pos.y <= floorY) {
       pos.y = floorY;
@@ -473,6 +673,7 @@ export class Physics {
       vel.z *= 0.6;
       if (vel.length() < 0.06) {
         vel.set(0, 0, 0);
+        if (def.mega) body._settledAt = this._time;
         this._setState(body, 'sunk');
       }
       return;
@@ -491,9 +692,22 @@ export class Physics {
     if (eligibleHop) {
       body._hasHopped = true;
       body._pendingSecondary = true;
-      body.vel.y = Math.max(body.vel.y * 0.8, 1.0);
-      body.vel.x *= 0.4;
-      body.vel.z *= 0.4;
+      if (def.mega) {
+        // Contract: "on upward y=0 crossing: onResurface AND a special big
+        // hop" — unlike the normal-toy hop (which only calls onResurface
+        // once it settles into floating), mega fires onResurface right here
+        // too, then a hop scaled by how deep it had punched down.
+        if (this.onResurface) this.onResurface(body.pos.clone(), def);
+        const depth = body._maxSubmergeDepth || 0;
+        const hopVy = clamp(MEGA_HOP_MIN_VY + depth * MEGA_HOP_DEPTH_GAIN, MEGA_HOP_MIN_VY, MEGA_HOP_MAX_VY);
+        body.vel.y = hopVy;
+        body.vel.x *= 0.4;
+        body.vel.z *= 0.4;
+      } else {
+        body.vel.y = Math.max(body.vel.y * 0.8, 1.0);
+        body.vel.x *= 0.4;
+        body.vel.z *= 0.4;
+      }
       this._setState(body, 'flying');
       return;
     }
@@ -505,6 +719,7 @@ export class Physics {
 
   _beginFloating(body) {
     this._setState(body, 'floating');
+    if (body.def.mega) body._settledAt = this._time;
     if (!body._floatBase) body._floatBase = new THREE.Quaternion();
     body._floatBase.copy(body.quat);
     body._floatYaw = 0;
@@ -532,7 +747,12 @@ export class Physics {
       body._drift.vz *= -0.6;
     }
 
-    const wh = this.getWaterHeight ? this.getWaterHeight(pos.x, pos.z) : 0;
+    let wh = this.getWaterHeight ? this.getWaterHeight(pos.x, pos.z) : 0;
+    // Floating giants additionally bob with the pool's sloshing (mega-only,
+    // guarded — a pure no-op until M3/M5 wire getSloshOffset).
+    if (def.mega && this.getSloshOffset) {
+      wh += this.getSloshOffset(pos.x, pos.z);
+    }
     pos.y += (wh - pos.y) * Math.min(1, 5 * dt);
 
     // Gentle rock + slow spin, recomputed fresh from absolute time each

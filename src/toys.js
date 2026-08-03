@@ -20,6 +20,35 @@ export const TOYS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Mega ("そらのだい" sky-platform) giant toy defs — docs/CONTRACTS-MEGA.md
+// "M4 — giant toys + physics". Appended AFTER the 8 normal toys so the
+// existing TOYS array/ids/order used by the normal toy-button row and by
+// physics.js's TOY_ORDER pinning are completely untouched. `mega: true`
+// flags these for physics.js's mega-only code paths; `sky: true` flags them
+// so input.js can show them only while in sky mode. Visually they are the
+// scaled-up siblings of their normal counterparts (same colors/materials),
+// reusing the existing sphere mesh builders below — nothing new to render.
+// ---------------------------------------------------------------------------
+export const MEGA_TOYS = [
+  {
+    id: 'giantheavy', name: 'おおきい おもいボール', emoji: '🎳',
+    shape: 'sphere', radius: 1.1, density: 2.6, softness: 0, bounciness: 0.15,
+    color: 0x1c1c2e, mega: true, sky: true,
+  },
+  {
+    id: 'giantjelly', name: 'おおきい ゼリーボール', emoji: '🍮',
+    shape: 'sphere', radius: 1.25, density: 1.05, softness: 1, bounciness: 0.9,
+    color: 0xff8fc7, mega: true, sky: true,
+  },
+  {
+    id: 'giantbeach', name: 'おおきい ビーチボール', emoji: '🏖',
+    shape: 'sphere', radius: 1.5, density: 0.05, softness: 0, bounciness: 0.6,
+    color: 0xff5252, mega: true, sky: true,
+  },
+];
+TOYS.push(...MEGA_TOYS);
+
+// ---------------------------------------------------------------------------
 // Canvas texture cache — every texture is generated exactly once (lazily,
 // on first use) and reused by all mesh instances of that toy.
 // ---------------------------------------------------------------------------
@@ -330,6 +359,14 @@ const BUILDERS = {
   sponge: buildSponge,
   ring: buildRing,
   jelly: buildJelly,
+  // Mega giants: same builders as their normal siblings — each builder reads
+  // its geometry/UV-mapped-texture sizing from `def.radius`/`def.color`, so
+  // passing a giant def through it "just works" (seam ring, finger-hole dot
+  // texture, and rainbow stripe texture are all UV-space, not world-space,
+  // so they scale up cleanly with no seam/dot/stripe distortion).
+  giantheavy: buildHeavyball,
+  giantjelly: buildJelly,
+  giantbeach: buildBeachball,
 };
 
 // createToyMesh(def) -> THREE.Object3D, procedural + cheap (<=3 draw calls),

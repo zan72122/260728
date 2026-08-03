@@ -13,3 +13,5 @@ export const PLATFORMS = [
   { id: 'mid',  height: 4.4, tip: { x: -3.4, y: 4.4, z: 0 } },
   { id: 'high', height: 7.2, tip: { x: -3.4, y: 7.2, z: 0 } },
 ];
+
+export const SKY = { id: 'sky', height: 26.0, drop: { x: -1.2, y: 26.0, z: 0 } };
