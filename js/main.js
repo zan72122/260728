@@ -418,8 +418,20 @@ function startCooking(method) {
   try { cookStage = new CookStage(dough, method); } catch (e) { cookStage = null; return; }
   stage = 'cook';
   grabbing = false;
-  if (hud) hud.setStage('cook');
+  if (hud) {
+    hud.setStage('cook');
+    // バグ修正(監督QA 結線バグ1): 🔥タップ経路(flyToOven)は endFerment() を経由せず
+    // fermentStage を直接終わらせるため、そこでしか呼ばれない hud.coverOff() が
+    // 呼ばれず布が画面に残り続けていた。焼成開始時は経路によらずここで必ず布を
+    // 閉じる(coverOff は布が既に隠れていても安全に呼べる)。
+    hud.coverOff();
+  }
   if (guide) guide.setCurrent('cook');
+  // バグ修正(監督QA 結線バグ3・軽微): 焼成が始まったらゴーストハンドの実演(cook解禁の
+  // drag実演など)を止める。焼成中は演出を出さない。
+  if (ghost && ghost.active) {
+    try { ghost.stop(); } catch (e) { /* noop */ }
+  }
 }
 
 function finishCooking() {
@@ -446,6 +458,10 @@ function onCoverPressed() {
     stage = 'ferment';
     if (hud) { hud.setStage('ferment'); hud.coverOn(); }
     if (guide) guide.setCurrent('rest');
+    // バグ修正(監督QA 結線バグ3・軽微): 発酵中はゴーストハンドの実演を出さない。
+    if (ghost && ghost.active) {
+      try { ghost.stop(); } catch (e) { /* noop */ }
+    }
   } else if (stage === 'ferment') {
     endFerment();
   }
