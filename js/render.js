@@ -141,72 +141,6 @@ const Render = {
     if (Input.cursor) this.drawCursor(ctx, v, now);
   },
 
-  // ---------- 背景: つくえ + トレイ ----------
-  drawTable(ctx, v) {
-    ctx.fillStyle = PAL.wood1;
-    ctx.fillRect(0, 0, v.w, v.h);
-    ctx.fillStyle = PAL.wood2;
-    for (let i = 0; i < 6; i++) {
-      const yy = (i + 0.5) * v.h / 6 + Math.sin(i * 5) * 8;
-      ctx.fillRect(0, yy, v.w, 2.5);
-    }
-    ctx.fillStyle = "rgba(255,255,255,.06)";
-    ctx.fillRect(0, 0, v.w, v.h * 0.25);
-  },
-
-  // 角丸ポリゴンのパスを begin する (fill/stroke は呼び出し側)
-  roundedPolyPath(ctx, pts, r) {
-    const n = pts.length;
-    ctx.beginPath();
-    for (let i = 0; i < n; i++) {
-      const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n];
-      const d1x = p1.px - p0.px, d1y = p1.py - p0.py, len1 = Math.hypot(d1x, d1y) || 1;
-      const d2x = p2.px - p1.px, d2y = p2.py - p1.py, len2 = Math.hypot(d2x, d2y) || 1;
-      const rr2 = Math.min(r, len1 * 0.45, len2 * 0.45);
-      const a = { px: p1.px - d1x / len1 * rr2, py: p1.py - d1y / len1 * rr2 };
-      const b = { px: p1.px + d2x / len2 * rr2, py: p1.py + d2y / len2 * rr2 };
-      if (i === 0) ctx.moveTo(a.px, a.py); else ctx.lineTo(a.px, a.py);
-      ctx.quadraticCurveTo(p1.px, p1.py, b.px, b.py);
-    }
-    ctx.closePath();
-  },
-
-  // マップのひし形にそった、角丸ひし形の白い盤
-  drawTray(ctx, v) {
-    const GW = CFG.GW, GH = CFG.GH;
-    const N0 = Iso.project(v, 0, 0, 0);
-    const E0 = Iso.project(v, GW, 0, 0);
-    const S0 = Iso.project(v, GW, GH, 0);
-    const W0 = Iso.project(v, 0, GH, 0);
-    const padXY = v.cs * 0.9;
-    const padTop = padXY + CFG.MAX_H * v.eh + padXY * 0.6; // 山の高さぶんの余白
-    const outer = [
-      { px: N0.px, py: N0.py - padTop },
-      { px: E0.px + padXY, py: E0.py },
-      { px: S0.px, py: S0.py + padXY },
-      { px: W0.px - padXY, py: W0.py },
-    ];
-    ctx.save();
-    ctx.shadowColor = PAL.trayShadow;
-    ctx.shadowBlur = v.cs * 1.4;
-    ctx.shadowOffsetY = v.cs * 0.5;
-    ctx.fillStyle = PAL.trayEdge;
-    this.roundedPolyPath(ctx, outer, v.cs * 1.3);
-    ctx.fill();
-    ctx.restore();
-
-    const inset = v.cs * 0.28;
-    const inner = [
-      { px: N0.px, py: N0.py - (padTop - inset) },
-      { px: E0.px + (padXY - inset), py: E0.py },
-      { px: S0.px, py: S0.py + (padXY - inset) },
-      { px: W0.px - (padXY - inset), py: W0.py },
-    ];
-    ctx.fillStyle = PAL.tray;
-    this.roundedPolyPath(ctx, inner, v.cs * 1.0);
-    ctx.fill();
-  },
-
   // ---------- 面をつくる小物 ----------
   wallPath(ctx, top1, top2, bot1, bot2) {
     ctx.beginPath();
@@ -358,24 +292,31 @@ const Render = {
     // 顔をだす。まっすぐ hR / hL だけで壁の底を決めると、斜め隣がさらに低い
     // ときに三角形のすきまができて奥の地形が透けてしまうので、既に壁が立つ
     // 場合はその角の高さもふまえて底をふかくし、すきまをふさぐ。
-    const hDiag = inGrid(x + 1, y + 1) ? World.h[idx(x + 1, y + 1)] : 0;
+    // なお、隣がグリッド外 or アクティブ範囲外(=画面に映らない)のときは
+    // 自分の高さをそのまま使って drop=0 にし、無駄な外向きの壁を立てない。
+    const diagActive = inGrid(x + 1, y + 1) && Iso.isActive(idx(x + 1, y + 1));
+    const hDiag = diagActive ? World.h[idx(x + 1, y + 1)] : h;
     // 右面 (+x側)
-    const hR = inGrid(x + 1, y) ? World.h[idx(x + 1, y)] : 0;
+    const rActive = inGrid(x + 1, y) && Iso.isActive(idx(x + 1, y));
+    const hR = rActive ? World.h[idx(x + 1, y)] : h;
     let dropR = h - hR;
     if (dropR > 0.02) dropR = Math.max(dropR, h - hDiag);
     this.drawWallFace(ctx, view, i, E, S, dropR, 0.72, c, false, type);
     // 左面 (+y側)
-    const hL = inGrid(x, y + 1) ? World.h[idx(x, y + 1)] : 0;
+    const lActive = inGrid(x, y + 1) && Iso.isActive(idx(x, y + 1));
+    const hL = lActive ? World.h[idx(x, y + 1)] : h;
     let dropL = h - hL;
     if (dropL > 0.02) dropL = Math.max(dropL, h - hDiag);
     this.drawWallFace(ctx, view, i, W, S, dropL, 0.86, c, true, type);
   },
 
   // ---------- 対角線 s に属するオブジェクト ----------
+  // (Iso.isActive でないセルの建物・木・花・湧き水は画面に映らないので描かない)
   drawObjectsForS(ctx, view, s, now) {
     // 建物 (2x2 の手前角のとき)
     for (const b of World.buildings) {
       if (s !== b.x + b.y + 2) continue;
+      if (!Iso.isActive(idx(b.x, b.y))) continue;
       const hh = World.h[idx(b.x, b.y)];
       const p = Iso.project(view, b.x + 1, b.y + 1.4, hh);
       drawBuildingObj(ctx, b, p.px, p.py, view.cs, now);
@@ -384,6 +325,7 @@ const Render = {
     for (const t of World.trees) {
       if (s !== Math.floor(t.x) + Math.floor(t.y)) continue;
       const i = idx(clamp(Math.floor(t.x), 0, CFG.GW - 1), clamp(Math.floor(t.y), 0, CFG.GH - 1));
+      if (!Iso.isActive(i)) continue;
       const p = Iso.project(view, t.x + 0.5, t.y + 0.7, World.h[i]);
       drawTreeObj(ctx, t, p.px, p.py, view.cs, now);
     }
@@ -391,6 +333,7 @@ const Render = {
     for (const f of World.flowers) {
       if (s !== Math.floor(f.x) + Math.floor(f.y)) continue;
       const i = idx(clamp(Math.floor(f.x), 0, CFG.GW - 1), clamp(Math.floor(f.y), 0, CFG.GH - 1));
+      if (!Iso.isActive(i)) continue;
       if (Water.w[i] > 0.08) continue;
       const p = Iso.project(view, f.x, f.y, World.h[i]);
       drawFlowerObj(ctx, f, p.px, p.py, view.cs);
@@ -399,6 +342,7 @@ const Render = {
     for (const sp of World.springs) {
       if (s !== Math.floor(sp.x) + Math.floor(sp.y)) continue;
       const i = idx(clamp(Math.floor(sp.x), 0, CFG.GW - 1), clamp(Math.floor(sp.y), 0, CFG.GH - 1));
+      if (!Iso.isActive(i)) continue;
       const p = Iso.project(view, sp.x + 0.5, sp.y + 0.4, World.h[i] + Water.w[i]);
       const ph = 0.5 + 0.5 * Math.sin(now * 0.005);
       ctx.globalAlpha = 0.5 + ph * 0.4;
