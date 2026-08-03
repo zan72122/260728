@@ -5,83 +5,122 @@
 
 const Icons = (function () {
 
-  function ground(ctx, s, color) {
-    ctx.fillStyle = color || "#b0de86";
-    rr(ctx, s * 0.06, s * 0.62, s * 0.88, s * 0.3, s * 0.1);
+  // ひし形ブロック(上面+右面+左面)を描く。col は [r,g,b] 配列。
+  // 上面 1.0 / 左面 0.86 / 右面 0.72 の明るさ (新アイソメ画面と同じ配分)。
+  // 4隅の座標 {N,E,S,W} を返し、呼び出し側の装飾に使う。
+  function isoBlock(ctx, cx, cy, tw, bh, col) {
+    const hw = tw / 2, hh = tw / 4;
+    const N = { x: cx, y: cy - hh }, E = { x: cx + hw, y: cy },
+          S = { x: cx, y: cy + hh }, W = { x: cx - hw, y: cy };
+    // 右面 (もっと暗い)
+    ctx.fillStyle = rgb(col, 0.72);
+    ctx.beginPath();
+    ctx.moveTo(E.x, E.y); ctx.lineTo(S.x, S.y);
+    ctx.lineTo(S.x, S.y + bh); ctx.lineTo(E.x, E.y + bh);
+    ctx.closePath(); ctx.fill();
+    // 左面 (すこし暗い)
+    ctx.fillStyle = rgb(col, 0.86);
+    ctx.beginPath();
+    ctx.moveTo(W.x, W.y); ctx.lineTo(S.x, S.y);
+    ctx.lineTo(S.x, S.y + bh); ctx.lineTo(W.x, W.y + bh);
+    ctx.closePath(); ctx.fill();
+    // 上面 (いちばん明るい)
+    ctx.fillStyle = rgb(col, 1.0);
+    ctx.beginPath();
+    ctx.moveTo(N.x, N.y); ctx.lineTo(E.x, E.y); ctx.lineTo(S.x, S.y); ctx.lineTo(W.x, W.y);
+    ctx.closePath(); ctx.fill();
+    return { N, E, S, W, hw, hh };
+  }
+
+  // ブロックの真下に、地面へのアイソメ影 (2:1) を落とす
+  function blockShadow(ctx, cx, cy, tw, bh) {
+    ctx.fillStyle = "rgba(90,65,35,.16)";
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + tw / 4 + bh + tw * 0.03, tw * 0.44, tw * 0.22, 0, 0, 7);
     ctx.fill();
   }
 
   const painters = {
     mountain(ctx, s) {
-      ground(ctx, s);
+      // くさのブロックに とんがった ゆきやま が のっているミニチュア
+      const cx = s * 0.5, cy = s * 0.4, tw = s * 0.76, bh = s * 0.4;
+      blockShadow(ctx, cx, cy, tw, bh);
+      isoBlock(ctx, cx, cy, tw, bh, PAL.grassHigh);
       ctx.fillStyle = "#8cc874";
       ctx.beginPath();
-      ctx.moveTo(s * 0.12, s * 0.72);
-      ctx.quadraticCurveTo(s * 0.5, s * -0.12, s * 0.88, s * 0.72);
+      ctx.moveTo(cx - tw * 0.34, cy - s * 0.01);
+      ctx.lineTo(cx, cy - s * 0.38);
+      ctx.lineTo(cx + tw * 0.34, cy - s * 0.01);
       ctx.closePath(); ctx.fill();
       ctx.fillStyle = "#e4d8c4";
       ctx.beginPath();
-      ctx.moveTo(s * 0.36, s * 0.30);
-      ctx.quadraticCurveTo(s * 0.5, s * 0.06, s * 0.64, s * 0.30);
-      ctx.quadraticCurveTo(s * 0.5, s * 0.40, s * 0.36, s * 0.30);
+      ctx.moveTo(cx - tw * 0.13, cy - s * 0.15);
+      ctx.lineTo(cx, cy - s * 0.38);
+      ctx.lineTo(cx + tw * 0.13, cy - s * 0.15);
+      ctx.quadraticCurveTo(cx, cy - s * 0.22, cx - tw * 0.13, cy - s * 0.15);
       ctx.closePath(); ctx.fill();
     },
     ditch(ctx, s) {
-      // じめんのブロックに U字のみぞ + ちょっとの水
-      ctx.fillStyle = "#b0de86";
-      rr(ctx, s * 0.06, s * 0.3, s * 0.88, s * 0.55, s * 0.12); ctx.fill();
+      // くさのブロックの 上面に U字のみぞ + ちょっとの水
+      const cx = s * 0.5, cy = s * 0.4, tw = s * 0.78, bh = s * 0.36;
+      blockShadow(ctx, cx, cy, tw, bh);
+      isoBlock(ctx, cx, cy, tw, bh, PAL.grass);
       ctx.fillStyle = "#8a6d4a";
       ctx.beginPath();
-      ctx.moveTo(s * 0.32, s * 0.3);
-      ctx.lineTo(s * 0.32, s * 0.62);
-      ctx.quadraticCurveTo(s * 0.5, s * 0.75, s * 0.68, s * 0.62);
-      ctx.lineTo(s * 0.68, s * 0.3);
+      ctx.moveTo(cx - tw * 0.16, cy - s * 0.06);
+      ctx.lineTo(cx - tw * 0.03, cy + s * 0.12);
+      ctx.quadraticCurveTo(cx, cy + s * 0.19, cx + tw * 0.16, cy + s * 0.04);
+      ctx.lineTo(cx + tw * 0.28, cy - s * 0.1);
+      ctx.lineTo(cx + tw * 0.1, cy - s * 0.22);
       ctx.closePath(); ctx.fill();
       ctx.fillStyle = "#7fd4ee";
       ctx.beginPath();
-      ctx.moveTo(s * 0.36, s * 0.52);
-      ctx.lineTo(s * 0.64, s * 0.52);
-      ctx.quadraticCurveTo(s * 0.5, s * 0.7, s * 0.36, s * 0.52);
+      ctx.moveTo(cx - tw * 0.06, cy + s * 0.01);
+      ctx.quadraticCurveTo(cx + tw * 0.02, cy + s * 0.1, cx + tw * 0.14, cy + s * 0.01);
+      ctx.quadraticCurveTo(cx + tw * 0.02, cy - s * 0.05, cx - tw * 0.06, cy + s * 0.01);
       ctx.closePath(); ctx.fill();
     },
     river(ctx, s) {
-      ground(ctx, s, "#b0de86");
-      ctx.fillStyle = "#b0de86";
-      rr(ctx, s * 0.06, s * 0.1, s * 0.88, s * 0.8, s * 0.14); ctx.fill();
+      // くさのブロックの 上面を くねくね かわ が よこぎる
+      const cx = s * 0.5, cy = s * 0.4, tw = s * 0.8, bh = s * 0.36;
+      blockShadow(ctx, cx, cy, tw, bh);
+      isoBlock(ctx, cx, cy, tw, bh, PAL.grass);
       ctx.strokeStyle = "#5fc3e6";
-      ctx.lineWidth = s * 0.2;
+      ctx.lineWidth = s * 0.14;
       ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.moveTo(s * 0.3, s * 0.08);
-      ctx.bezierCurveTo(s * 0.75, s * 0.3, s * 0.25, s * 0.6, s * 0.68, s * 0.9);
+      ctx.moveTo(cx - tw * 0.02, cy - s * 0.19);
+      ctx.bezierCurveTo(cx + tw * 0.32, cy - s * 0.07, cx - tw * 0.28, cy + s * 0.03, cx + tw * 0.05, cy + s * 0.19);
       ctx.stroke();
       ctx.strokeStyle = "rgba(255,255,255,.6)";
-      ctx.lineWidth = s * 0.05;
+      ctx.lineWidth = s * 0.04;
       ctx.beginPath();
-      ctx.moveTo(s * 0.33, s * 0.14);
-      ctx.bezierCurveTo(s * 0.72, s * 0.32, s * 0.28, s * 0.6, s * 0.65, s * 0.85);
+      ctx.moveTo(cx, cy - s * 0.17);
+      ctx.bezierCurveTo(cx + tw * 0.3, cy - s * 0.06, cx - tw * 0.25, cy + s * 0.03, cx + tw * 0.04, cy + s * 0.17);
       ctx.stroke();
     },
     levee(ctx, s) {
-      // 波をとめる白いかべ
+      // 波をとめる 白いかべの ブロック (うみがわに なみ、りくがわに くさ)
+      const cx = s * 0.52, cy = s * 0.4, tw = s * 0.6, bh = s * 0.46;
       ctx.fillStyle = "#7fd4ee";
       ctx.beginPath();
-      ctx.moveTo(s * 0.04, s * 0.9);
-      ctx.lineTo(s * 0.04, s * 0.5);
-      ctx.quadraticCurveTo(s * 0.18, s * 0.32, s * 0.3, s * 0.5);
-      ctx.lineTo(s * 0.3, s * 0.9);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = "#eeeeec";
-      rr(ctx, s * 0.38, s * 0.18, s * 0.26, s * 0.72, s * 0.08); ctx.fill();
-      ctx.strokeStyle = "#c8c8cc"; ctx.lineWidth = s * 0.035;
-      for (let i = 1; i < 4; i++) {
+      ctx.ellipse(cx - tw * 0.66, cy + s * 0.12, tw * 0.34, tw * 0.17, 0, 0, 7);
+      ctx.fill();
+      blockShadow(ctx, cx, cy, tw, bh);
+      const c = isoBlock(ctx, cx, cy, tw, bh, PAL.levee);
+      // いしがき もよう (右面によこすじ)
+      ctx.strokeStyle = "rgba(140,140,150,.4)"; ctx.lineWidth = s * 0.018;
+      for (let k = 1; k < 3; k++) {
+        const t = k / 3;
         ctx.beginPath();
-        ctx.moveTo(s * 0.38, s * (0.18 + i * 0.18));
-        ctx.lineTo(s * 0.64, s * (0.18 + i * 0.18));
+        ctx.moveTo(lerp(c.E.x, c.S.x, t), lerp(c.E.y, c.S.y, t));
+        ctx.lineTo(lerp(c.E.x, c.S.x, t), lerp(c.E.y, c.S.y, t) + bh);
         ctx.stroke();
       }
       ctx.fillStyle = "#b0de86";
-      rr(ctx, s * 0.7, s * 0.62, s * 0.26, s * 0.28, s * 0.08); ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(cx + tw * 0.78, cy + s * 0.14, tw * 0.24, tw * 0.12, 0, 0, 7);
+      ctx.fill();
     },
     building(ctx, s) { painters.house(ctx, s); },
     house(ctx, s) {
@@ -129,19 +168,26 @@ const Icons = (function () {
       rr(ctx, s * 0.54, s * 0.62, s * 0.16, s * 0.26, s * 0.04); ctx.fill();
     },
     plateau(ctx, s) {
-      ground(ctx, s);
-      // たいらな おか + かいだん
-      ctx.fillStyle = "#d6b88a";
-      rr(ctx, s * 0.16, s * 0.3, s * 0.68, s * 0.5, s * 0.06); ctx.fill();
-      ctx.fillStyle = "#9ed67e";
-      rr(ctx, s * 0.12, s * 0.18, s * 0.76, s * 0.2, s * 0.09); ctx.fill();
-      ctx.fillStyle = "#e8d9b8";
-      for (let i = 0; i < 3; i++) {
-        ctx.fillRect(s * (0.42 + i * 0.02), s * (0.38 + i * 0.16), s * (0.16 - i * 0.0), s * 0.12);
+      // たいらな おかの ブロック + 右面に かいだん
+      const cx = s * 0.5, cy = s * 0.38, tw = s * 0.78, bh = s * 0.42;
+      blockShadow(ctx, cx, cy, tw, bh);
+      const c = isoBlock(ctx, cx, cy, tw, bh, PAL.plat);
+      // 右面に かいだん (しましま)
+      const steps = 3;
+      for (let k = 0; k < steps; k++) {
+        const t0 = k / steps, t1 = (k + 1) / steps;
+        ctx.fillStyle = k % 2 ? "#d9c69c" : "#efe3c4";
+        ctx.beginPath();
+        ctx.moveTo(lerp(c.E.x, c.S.x, t0), lerp(c.E.y, c.S.y, t0));
+        ctx.lineTo(lerp(c.E.x, c.S.x, t1), lerp(c.E.y, c.S.y, t1));
+        ctx.lineTo(lerp(c.E.x, c.S.x, t1), lerp(c.E.y, c.S.y, t1) + bh);
+        ctx.lineTo(lerp(c.E.x, c.S.x, t0), lerp(c.E.y, c.S.y, t0) + bh);
+        ctx.closePath(); ctx.fill();
       }
+      // 上面に お花
       ctx.fillStyle = "#ff9db8";
-      ctx.beginPath(); ctx.arc(s * 0.26, s * 0.24, s * 0.045, 0, 7); ctx.fill();
-      ctx.beginPath(); ctx.arc(s * 0.72, s * 0.26, s * 0.045, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx - tw * 0.2, cy - s * 0.02, s * 0.045, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx + tw * 0.18, cy + s * 0.02, s * 0.045, 0, 7); ctx.fill();
     },
     water(ctx, s) {
       // ピンクのじょうろ
