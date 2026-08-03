@@ -335,12 +335,15 @@ body{
 
 /* =====================================================================
    Agent P: js/ui/guide.js — 進行バー（GuideBar）
-   「今ここ・次はこれ」が一目で分かる誘導UI。既存HUD（左上パン/右列/右下
-   オーブン）と重ならないよう、トップ行の下に独立した帯として配置する。
+   「今ここ・次はこれ」が一目で分かる誘導UI。既存HUD（左上のパンボタン /
+   右列の道具ボタン）は最大 5 個積み上がることがあり top:14px から縦に
+   長く伸びる（実測 bottom ≈230px 通常・最大 ≈382px）。GuideBar はその
+   通常時の下端より下（top ≈234px）に置き、かつ横幅を極力絞ることで、
+   右列がもっとも伸びる稀なケースでもほぼ重ならないようにしている。
    ===================================================================== */
 .gd-bar{
   position:fixed;
-  top: calc(96px + var(--safe-t));
+  top: calc(234px + var(--safe-t));
   left:50%;
   transform: translateX(-50%);
   z-index:12;
@@ -357,13 +360,13 @@ body{
   pointer-events:none;
   background: rgba(255,255,255,0.62);
   border-radius:999px;
-  padding: 10px 18px;
+  padding: 6px;
   box-shadow: var(--shadow);
 }
 
 .gd-line{
   position:absolute;
-  left:34px; right:34px; top:50%;
+  left:32px; right:32px; top:50%;
   height:6px;
   transform: translateY(-50%);
   border-radius:3px;
@@ -372,7 +375,7 @@ body{
 
 .gd-line-fill{
   position:absolute;
-  left:34px; right:34px; top:50%;
+  left:32px; right:32px; top:50%;
   height:6px;
   border-radius:3px;
   background: linear-gradient(90deg, var(--pink-deep), var(--cream));
@@ -386,20 +389,20 @@ body{
   position:relative;
   display:flex;
   align-items:center;
-  gap:16px;
+  gap:6px;
   pointer-events:none;
 }
 
 .gd-step{
   pointer-events:auto;
   position:relative;
-  width:56px; height:56px; min-width:56px; min-height:56px;
+  width:52px; height:52px; min-width:52px; min-height:52px;
   border-radius:50%;
   border:none;
   display:flex;
   align-items:center;
   justify-content:center;
-  font-size:28px;
+  font-size:26px;
   line-height:1;
   background:#fff;
   box-shadow: var(--shadow);
@@ -413,7 +416,7 @@ body{
 
 .gd-step-glow{
   position:absolute;
-  inset:-11px;
+  inset:-9px;
   border-radius:50%;
   background: radial-gradient(circle, rgba(255,255,255,0.95), rgba(255,236,190,0) 70%);
   opacity:0;
@@ -502,9 +505,7 @@ body{
 }
 
 @media (max-width: 380px){
-  .gd-bar{ top: calc(84px + var(--safe-t)); }
-  .gd-track{ padding:8px 12px; }
-  .gd-steps{ gap:10px; }
-  .gd-step{ width:52px; height:52px; min-width:52px; min-height:52px; font-size:24px; }
-  .gd-line, .gd-line-fill{ left:26px; right:26px; }
+  .gd-bar{ top: calc(222px + var(--safe-t)); }
+  .gd-steps{ gap:4px; }
+  .gd-line, .gd-line-fill{ left:30px; right:30px; }
 }
