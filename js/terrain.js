@@ -13,6 +13,7 @@ const World = {
   springs: [],                // 湧き水 {x, y, rate}
   variant: "free",            // マップの種類
   undoStack: [],
+  terrainRev: 0,               // 地形(h/type)が変わるたびに増える。render.js のセルいろキャッシュの無効化に使う
 };
 
 function idx(x, y) { return y * CFG.GW + x; }
@@ -142,15 +143,45 @@ function genMap(variant) {
   World.trees = [];
   World.flowers = [];
 
-  // 山なみ: 画面上端の帯に3〜5個、よこ方向(u)にばらけさせて置く
+  // 山なみ: addMound は中心の高さ(inland式の下地 + amp)ぶんだけ画面上へ
+  // 持ち上がって見える(project の -h*eh)。中心をそのまま画面上端ちかくに置くと
+  // 頂上が y<0 にはみ出て見えなくなるので、頂上のスクリーンy(=peakFy*sh)が
+  // 画面高さ8〜16%になるよう、中心を頂上の高さぶん手前(画面下)へずらして置く。
+  // (h*eh は中心の高さに依存し、中心の高さは置き場所[inland]に依存するので、
+  //  数回の反復で収束させる)
+  function mountainCenterFy(fx, peakFy, amp) {
+    let fy = peakFy;
+    for (let iter = 0; iter < 4; iter++) {
+      const [cx0, cy0] = screenPt(fx, fy, 3);
+      const d = cx0 + cy0, u = cx0 - cy0;
+      const inland = Math.max(0, (coastD(u) - d) / SCALE);
+      const hPeak = 1.18 + inland * 0.062 + amp;
+      fy = peakFy + (hPeak * view.eh) / sh;
+    }
+    return fy;
+  }
+
+  // 山なみ本体: 画面上端の帯に3〜5個、よこ方向(u)にばらけさせて置く。
+  // 峰(頂上)が画面高さ8〜16%あたりに見えるようにする。
   const mtCount = 3 + Math.floor(rand() * 3);
   for (let m = 0; m < mtCount; m++) {
     const fx = 0.10 + (m + 0.5) / mtCount * 0.80 + (rand() - 0.5) * 0.06;
-    const fy = 0.02 + rand() * 0.15;
-    const [cx, cy] = screenPt(fx, fy, 6);
     const r = (3.6 + rand() * 1.6) * SCALE;
     const amp = 1.7 + rand() * 1.0;
+    const peakFy = 0.08 + rand() * 0.08;
+    const fy = mountainCenterFy(fx, peakFy, amp);
+    const [cx, cy] = screenPt(fx, fy, 6);
     addMound(h, cx, cy, r, amp);
+  }
+
+  // 画面上端の左右のかど(平らな草地のままだと山なみが途切れて見える)にも
+  // 小さめの丘を置き、上辺ぜんたいが山なみとして読めるようにする。
+  for (const fxCorner of [0.045, 0.955]) {
+    const cornerAmp = 1.0 + rand() * 0.5;
+    const cornerPeakFy = 0.03 + rand() * 0.05;
+    const cornerFy = mountainCenterFy(fxCorner, cornerPeakFy, cornerAmp);
+    const [ccx, ccy] = screenPt(fxCorner, cornerFy, 3);
+    addMound(h, ccx, ccy, (2.4 + rand() * 0.8) * SCALE, cornerAmp);
   }
 
   // 川: 山の帯から海岸へ。u ≈ 画面右寄り1/3を基準に sin で蛇行しながら d を下る
@@ -269,6 +300,7 @@ function genMap(variant) {
     if (buildingAt(x, y)) continue;
     World.flowers.push({ x: x + rand(), y: y + rand(), c: Math.floor(rand() * 3) });
   }
+  World.terrainRev++;
 }
 
 // ---------- 建物 ----------
@@ -288,6 +320,7 @@ function flattenUnder(x, y) {
   for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
     if (inGrid(x + dx, y + dy)) World.h[idx(x + dx, y + dy)] = avg;
   }
+  World.terrainRev++;
 }
 function buildingAt(x, y) {
   for (const b of World.buildings) {
@@ -305,6 +338,7 @@ function inBuildingFootprint(x, y) {
 // 地形ツール適用後、建物の下がふたたび平らになるよう整える(次善策)
 function flattenBuildings() {
   for (const b of World.buildings) flattenUnder(b.x, b.y);
+  World.terrainRev++;
 }
 // (x,y) まわり3x3の baseH の最小値。掘削の床をこれで決めると、
 // セルごとの初期ノイズに引きずられず溝の底がなめらかにつながる。
@@ -334,6 +368,7 @@ function popUndo() {
   if (!s) return false;
   World.h = s.h; World.type = s.type; World.stairs = s.stairs;
   World.buildings = s.buildings; World.springs = s.springs; World.trees = s.trees;
+  World.terrainRev++;
   return true;
 }
 
@@ -356,6 +391,7 @@ function toolMountain(fx, fy, dt) {
     }
   }
   flattenBuildings();
+  World.terrainRev++;
 }
 
 // みぞ: 指でなぞって ほそいへこみ
@@ -375,6 +411,7 @@ function toolDitch(fx, fy) {
     }
   }
   flattenBuildings();
+  World.terrainRev++;
 }
 
 // かわ: ひろめに ほって みずいろの かわらに
@@ -394,6 +431,7 @@ function toolRiver(fx, fy) {
     }
   }
   flattenBuildings();
+  World.terrainRev++;
 }
 
 // ていぼう: ほそくて たかい かべ
@@ -404,10 +442,13 @@ function toolLevee(fx, fy) {
   const i = idx(x, y);
   if (World.seaMask[i] && World.baseH[i] < 0.5) return; // 沖には作れない
   if (World.type[i] === T_LEVEE) return;                // 二重に高くしない
-  // ひとなぞりで しっかりした かべが立つ (いちばん大きな波より高く)
-  World.h[i] = Math.min(CFG.MAX_H, Math.max(CFG.SEA_LEVEL + 2.0, Math.max(World.baseH[i], World.h[i]) + 2.2));
+  // ひとなぞりで しっかりした かべが立つ (海沿いはいちばん大きな波(水面最大2.7)より高い3.2を維持、
+  // 山裾など高地では baseH+2.2 だと不自然に高い塔になるので +1.2 の控えめな壁にとどめる)
+  const wallTop = Math.max(CFG.SEA_LEVEL + 2.2, Math.max(World.baseH[i], World.h[i]) + 1.2);
+  World.h[i] = Math.min(CFG.MAX_H, wallTop);
   World.type[i] = T_LEVEE;
   flattenBuildings();
+  World.terrainRev++;
 }
 
 // たかだい: たいらな おか + かいだん
@@ -434,6 +475,7 @@ function toolPlateau(fx, fy) {
     }
   }
   flattenBuildings();
+  World.terrainRev++;
 }
 
 // けしゴム: さいしょの じめんに もどす + ものを けす
@@ -458,4 +500,5 @@ function toolEraser(fx, fy) {
   }
   World.trees = World.trees.filter(t => Math.hypot(t.x - fx, t.y - fy) > r);
   World.springs = World.springs.filter(s => Math.hypot(s.x - fx, s.y - fy) > r);
+  World.terrainRev++;
 }

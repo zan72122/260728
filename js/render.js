@@ -20,6 +20,20 @@ const Render = {
 
   _activeSRange: null, // { sMin, sMax }: アクティブセルが存在する対角線 s の範囲 (resize で更新)
 
+  // ---------- セルいろキャッシュ (パフォーマンス) ----------
+  // 毎フレーム・毎セルで topColor()/壁いろのブレンド計算をやり直すと重いので、
+  // 地形が変わった(World.terrainRev が動いた)ときと resize(アクティブ範囲・視点が
+  // 変わる)のときだけ全セル再計算し、fillStyle の文字列と壁の drop(段差)を
+  // キャッシュしておく。毎フレームの drawCell はパス生成+キャッシュ済み
+  // fillStyle で塗るだけにする。ぬれあと(Water.wet)だけは動的なので、
+  // キャッシュ色の上に半透明オーバーレイを1回 fill する。
+  _cacheRev: -1,
+  _cacheDirty: true,
+  topFill: null,          // string[]: セル上面のいろ (ぬれ抜き・静的)
+  wallRDark: null, wallRLight: null,   // string[]: 右面 (E-S) の暗色/明色
+  wallLDark: null, wallLLight: null,   // string[]: 左面 (W-S) の暗色/明色
+  wallDropR: null, wallDropL: null,    // Float32Array: 右面/左面の段差 (drop)
+
   init(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
@@ -33,6 +47,73 @@ const Render = {
     this.canvas.height = Math.max(2, Math.round(st.height * this.dpr));
     this.view = Iso.fitView(st.width, st.height, 18); // fitView が Iso.active も更新する
     this.computeActiveSRange();
+    // アクティブ範囲(隣がインアクティブかどうか=壁を描くか)が変わりうるので、
+    // 地形いろキャッシュも作り直す(terrainRev が動いていなくても)。
+    this._cacheDirty = true;
+  },
+
+  // World.terrainRev / resize フラグを見て、必要なときだけセルいろキャッシュを作り直す
+  ensureCache() {
+    if (!World.h) return; // まだ地形が生成されていない (Render.init 直後の1回だけ)
+    if (!this._cacheDirty && this._cacheRev === World.terrainRev) return;
+    this.rebuildCache();
+    this._cacheRev = World.terrainRev;
+    this._cacheDirty = false;
+  },
+
+  rebuildCache() {
+    const GW = CFG.GW, GH = CFG.GH, N = GW * GH;
+    if (!this.topFill || this.topFill.length !== N) {
+      this.topFill = new Array(N);
+      this.wallRDark = new Array(N); this.wallRLight = new Array(N);
+      this.wallLDark = new Array(N); this.wallLLight = new Array(N);
+      this.wallDropR = new Float32Array(N);
+      this.wallDropL = new Float32Array(N);
+    }
+    for (let y = 0; y < GH; y++) {
+      for (let x = 0; x < GW; x++) {
+        const i = idx(x, y);
+        const h = World.h[i];
+        const c = this.topColor(i, x, y); // 静的ないろ (ぬれ抜き)
+        this.topFill[i] = "rgb(" + (c[0] | 0) + "," + (c[1] | 0) + "," + (c[2] | 0) + ")";
+
+        // S角(x+1,y+1)は右面/左面の両方の遠い端。斜め隣がさらに低いときの
+        // すきま消しは drawCell と同じロジックをここで前もって計算しておく。
+        const diagActive = inGrid(x + 1, y + 1) && Iso.isActive(idx(x + 1, y + 1));
+        const hDiag = diagActive ? World.h[idx(x + 1, y + 1)] : h;
+
+        const rActive = inGrid(x + 1, y) && Iso.isActive(idx(x + 1, y));
+        const hR = rActive ? World.h[idx(x + 1, y)] : h;
+        let dropR = h - hR;
+        if (dropR > 0.02) dropR = Math.max(dropR, h - hDiag);
+        this.wallDropR[i] = dropR;
+        const shadesR = this.wallShades(i, c, dropR, 0.72);
+        this.wallRDark[i] = shadesR[0]; this.wallRLight[i] = shadesR[1];
+
+        const lActive = inGrid(x, y + 1) && Iso.isActive(idx(x, y + 1));
+        const hL = lActive ? World.h[idx(x, y + 1)] : h;
+        let dropL = h - hL;
+        if (dropL > 0.02) dropL = Math.max(dropL, h - hDiag);
+        this.wallDropL[i] = dropL;
+        const shadesL = this.wallShades(i, c, dropL, 0.86);
+        this.wallLDark[i] = shadesL[0]; this.wallLLight[i] = shadesL[1];
+      }
+    }
+  },
+
+  // 壁の暗色/明色 fillStyle 文字列を計算する (topColor.wallColor のブレンドぶん)
+  wallShades(i, c, drop, mult) {
+    if (drop <= 0.02) return [null, null];
+    const wk = clamp((drop - 0.5) / 0.8, 0, 1);
+    const soil = this.wallColor(i);
+    const baseC = [c[0] * mult, c[1] * mult, c[2] * mult];
+    const wc = mixRGB(baseC, soil, wk);
+    const dark = [wc[0] * 0.88, wc[1] * 0.88, wc[2] * 0.88];
+    const light = [Math.min(255, wc[0] * 1.12), Math.min(255, wc[1] * 1.12), Math.min(255, wc[2] * 1.12)];
+    return [
+      "rgb(" + (dark[0] | 0) + "," + (dark[1] | 0) + "," + (dark[2] | 0) + ")",
+      "rgb(" + (light[0] | 0) + "," + (light[1] | 0) + "," + (light[2] | 0) + ")",
+    ];
   },
 
   // Iso.active を1回だけ走査して、アクティブセルが存在する対角線 s の範囲を求める
@@ -107,6 +188,7 @@ const Render = {
     const ctx = this.ctx;
     const v = this.view;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.ensureCache();
 
     // 保険の下地: 机・トレイは廃止し、画面ぜんたいを淡い色でぬるだけ
     // (通常はアクティブセルの地形で全て覆われるので見えない)
@@ -180,9 +262,9 @@ const Render = {
 
   // 段差の面 (右面 or 左面) をひとつ描く
   //   top1-top2: 上面の共有辺 (右面なら E-S、左面なら W-S)
-  //   drop: となりとの高さの差、mult: 面の明度 (右0.72 / 左0.86)
-  //   c: セル上面の色 (ぬれ反映ずみ)、isLeftFace: 階段を描いてよいか
-  drawWallFace(ctx, view, i, top1, top2, drop, mult, c, isLeftFace, type) {
+  //   drop: となりとの高さの差
+  //   darkStyle/lightStyle: 事前計算ずみの fillStyle (rebuildCache でキャッシュ)。isLeftFace: 階段を描いてよいか
+  drawWallFace(ctx, view, i, top1, top2, drop, darkStyle, lightStyle, isLeftFace, type) {
     if (drop <= 0.02) return;
     const eh = view.eh, cs = view.cs;
     const bot1 = { px: top1.px, py: top1.py + drop * eh };
@@ -192,15 +274,6 @@ const Render = {
     const OL = 0.75;
     const etop1 = { px: top1.px, py: top1.py - OL };
     const etop2 = { px: top2.px, py: top2.py - OL };
-    // ちいさな段差は上面色を暗くした色、おおきな段差は土/石/堤防の壁色へブレンド
-    const wk = clamp((drop - 0.5) / 0.8, 0, 1);
-    const soil = this.wallColor(i);
-    const baseC = [c[0] * mult, c[1] * mult, c[2] * mult];
-    const wc = mixRGB(baseC, soil, wk);
-    const dark = [wc[0] * 0.88, wc[1] * 0.88, wc[2] * 0.88];
-    const light = [Math.min(255, wc[0] * 1.12), Math.min(255, wc[1] * 1.12), Math.min(255, wc[2] * 1.12)];
-    const darkStyle = "rgb(" + (dark[0] | 0) + "," + (dark[1] | 0) + "," + (dark[2] | 0) + ")";
-    const lightStyle = "rgb(" + (light[0] | 0) + "," + (light[1] | 0) + "," + (light[2] | 0) + ")";
 
     // 縦グラデの近似 (2色 fill): 下地を暗色でぬり、上がわだけ明色をかさねる
     ctx.fillStyle = darkStyle;
@@ -250,20 +323,24 @@ const Render = {
     const i = idx(x, y);
     const h = World.h[i];
     const [N, E, S, W] = Iso.cellCorners(view, x, y, h);
-    let c = this.topColor(i, x, y);
-    // ぬれあと: すこし濃く、あおっぽく
-    const wet = Water.wet[i];
-    if (wet > 0.03 && Water.w[i] < 0.02 && !World.seaMask[i]) {
-      const k = wet * 0.35;
-      c = [lerp(c[0], c[0] * 0.62, k), lerp(c[1], c[1] * 0.72, k), lerp(c[2], c[2] * 0.86 + 30, k)];
-    }
-    const topFill = "rgb(" + (c[0] | 0) + "," + (c[1] | 0) + "," + (c[2] | 0) + ")";
+    const topFill = this.topFill[i]; // キャッシュ済み (地形が変わるまで再計算しない)
     ctx.fillStyle = topFill;
     ctx.beginPath();
     ctx.moveTo(N.px, N.py); ctx.lineTo(E.px, E.py); ctx.lineTo(S.px, S.py); ctx.lineTo(W.px, W.py);
     ctx.closePath();
     ctx.fill();
     ctx.strokeStyle = topFill; ctx.lineWidth = 1; ctx.stroke(); // となりとのすじ消し
+
+    // ぬれあと: いろを混ぜ直さず、キャッシュ色の上に半透明の青系オーバーレイを1回 fill する
+    const wet = Water.wet[i];
+    if (wet > 0.03 && Water.w[i] < 0.02 && !World.seaMask[i]) {
+      const a = Math.min(0.4, wet * 0.32);
+      ctx.fillStyle = "rgba(25,55,95," + a.toFixed(3) + ")";
+      ctx.beginPath();
+      ctx.moveTo(N.px, N.py); ctx.lineTo(E.px, E.py); ctx.lineTo(S.px, S.py); ctx.lineTo(W.px, W.py);
+      ctx.closePath();
+      ctx.fill();
+    }
 
     const type = World.type[i];
     if (type === T_LEVEE) {
@@ -290,26 +367,10 @@ const Render = {
       ctx.fill();
     }
 
-    // S角 (x+1,y+1) は右面/左面の両方の遠い端であり、斜め隣セルの高さもここで
-    // 顔をだす。まっすぐ hR / hL だけで壁の底を決めると、斜め隣がさらに低い
-    // ときに三角形のすきまができて奥の地形が透けてしまうので、既に壁が立つ
-    // 場合はその角の高さもふまえて底をふかくし、すきまをふさぐ。
-    // なお、隣がグリッド外 or アクティブ範囲外(=画面に映らない)のときは
-    // 自分の高さをそのまま使って drop=0 にし、無駄な外向きの壁を立てない。
-    const diagActive = inGrid(x + 1, y + 1) && Iso.isActive(idx(x + 1, y + 1));
-    const hDiag = diagActive ? World.h[idx(x + 1, y + 1)] : h;
-    // 右面 (+x側)
-    const rActive = inGrid(x + 1, y) && Iso.isActive(idx(x + 1, y));
-    const hR = rActive ? World.h[idx(x + 1, y)] : h;
-    let dropR = h - hR;
-    if (dropR > 0.02) dropR = Math.max(dropR, h - hDiag);
-    this.drawWallFace(ctx, view, i, E, S, dropR, 0.72, c, false, type);
-    // 左面 (+y側)
-    const lActive = inGrid(x, y + 1) && Iso.isActive(idx(x, y + 1));
-    const hL = lActive ? World.h[idx(x, y + 1)] : h;
-    let dropL = h - hL;
-    if (dropL > 0.02) dropL = Math.max(dropL, h - hDiag);
-    this.drawWallFace(ctx, view, i, W, S, dropL, 0.86, c, true, type);
+    // 右面 (+x側)・左面 (+y側): drop と壁いろは rebuildCache でキャッシュ済み
+    // (S角(x+1,y+1)をふまえたすきま消し・アクティブ判定もキャッシュ計算時に反映ずみ)
+    this.drawWallFace(ctx, view, i, E, S, this.wallDropR[i], this.wallRDark[i], this.wallRLight[i], false, type);
+    this.drawWallFace(ctx, view, i, W, S, this.wallDropL[i], this.wallLDark[i], this.wallLLight[i], true, type);
   },
 
   // ---------- 対角線 s に属するオブジェクト ----------
