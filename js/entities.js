@@ -141,10 +141,10 @@ function drawSchool(ctx, px, py, s, wet, now) {
 
 function drawBuildingObj(ctx, b, px, py, cs, now) {
   const s = cs * 1.05;
-  // 足もとの影
+  // 足もとの影 (アイソメ比 2:1 のひし形グリッドに合わせる)
   ctx.fillStyle = "rgba(110,80,40,.18)";
   ctx.beginPath();
-  ctx.ellipse(px, py + cs * 0.06, s * 1.1, s * 0.3, 0, 0, 7);
+  ctx.ellipse(px, py + cs * 0.1, s * 0.82, s * 0.41, 0, 0, 7);
   ctx.fill();
   const bounce = b.happy > 0 ? Math.abs(Math.sin(now * 0.012)) * -cs * 0.18 * Math.min(1, b.happy) : 0;
   if (b.kind === "house") drawHouse(ctx, px, py + bounce, s, b.wet);
@@ -193,8 +193,9 @@ function drawDropShape(ctx, x, y, r, color) {
 function drawTreeObj(ctx, t, px, py, cs, now) {
   const s = cs * t.s;
   const sway = Math.sin(now * 0.0012 + t.ph) * s * 0.05;
+  // 足もとの影 (アイソメ比 2:1)
   ctx.fillStyle = "rgba(110,80,40,.16)";
-  ctx.beginPath(); ctx.ellipse(px, py + cs * 0.04, s * 0.55, s * 0.18, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(px, py + cs * 0.06, s * 0.44, s * 0.22, 0, 0, 7); ctx.fill();
   ctx.fillStyle = "#a9825d";
   ctx.fillRect(px - s * 0.09, py - s * 0.72, s * 0.18, s * 0.75);
   const g1 = "#79c46b", g2 = "#95d783";
@@ -210,6 +211,9 @@ function drawTreeObj(ctx, t, px, py, cs, now) {
 const FLOWER_COLORS = ["#ff9db8", "#ffd93b", "#ffffff"];
 function drawFlowerObj(ctx, f, px, py, cs) {
   const s = cs * 0.16;
+  // 足もとの ちいさな影 (アイソメ比 2:1) で接地感を出す
+  ctx.fillStyle = "rgba(110,80,40,.14)";
+  ctx.beginPath(); ctx.ellipse(px, py + cs * 0.02, s * 0.5, s * 0.25, 0, 0, 7); ctx.fill();
   ctx.strokeStyle = "#7fb069"; ctx.lineWidth = Math.max(1, s * 0.3);
   ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py - s * 1.6); ctx.stroke();
   ctx.fillStyle = FLOWER_COLORS[f.c];

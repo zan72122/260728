@@ -283,20 +283,20 @@ const Modes = {
   // ---------- おだいのマーカー (まもる場所を やさしく示す) ----------
   drawQuestMarkers(ctx, view, now) {
     if (!this.quest || this.questState !== "edit") return;
-    const { ox, oy, cs, rs, eh } = view;
+    const cs = view.cs;
     const pulse = 0.6 + 0.4 * Math.sin(now * 0.004);
     ctx.save();
     if (this.quest.marker === "buildings") {
       for (const b of World.buildings) {
         const i = idx(b.x, b.y);
-        const px = ox + (b.x + 1) * cs;
-        const py = oy + (b.y + 1) * rs - World.h[i] * eh;
+        const p = Iso.project(view, b.x + 1, b.y + 1, World.h[i]);
+        const rx = cs * 1.9, ry = rx * 0.5;
         ctx.strokeStyle = "rgba(255,200,60," + (0.5 + pulse * 0.4) + ")";
         ctx.lineWidth = Math.max(2, cs * 0.14);
         ctx.setLineDash([cs * 0.35, cs * 0.28]);
         ctx.lineDashOffset = -now * 0.008;
         ctx.beginPath();
-        ctx.ellipse(px, py - rs * 0.4, cs * 1.9, cs * 1.5, 0, 0, 7);
+        ctx.ellipse(p.px, p.py - cs * 0.4, rx, ry, 0, 0, 7);
         ctx.stroke();
       }
     } else if (this.quest.marker === "plateau") {
@@ -307,24 +307,26 @@ const Modes = {
       if (n) {
         const cx2 = sx / n + 0.5, cy2 = sy / n + 0.5;
         const i = idx(Math.round(cx2), Math.round(cy2));
-        const px = ox + cx2 * cs, py = oy + cy2 * rs - World.h[i] * eh;
+        const p = Iso.project(view, cx2, cy2, World.h[i]);
+        const rx = cs * 3.4, ry = rx * 0.5;
         ctx.strokeStyle = "rgba(255,200,60," + (0.5 + pulse * 0.4) + ")";
         ctx.lineWidth = Math.max(2, cs * 0.14);
         ctx.setLineDash([cs * 0.35, cs * 0.28]);
         ctx.lineDashOffset = -now * 0.008;
         ctx.beginPath();
-        ctx.ellipse(px, py, cs * 3.4, cs * 2.4, 0, 0, 7);
+        ctx.ellipse(p.px, p.py, rx, ry, 0, 0, 7);
         ctx.stroke();
       }
     } else if (this.quest.marker === "spring") {
       const s = World.springs[0];
       if (s) {
         const i = idx(Math.round(s.x), Math.round(s.y));
-        const px = ox + (s.x + 0.5) * cs, py = oy + (s.y + 0.5) * rs - World.h[i] * eh;
+        const p = Iso.project(view, s.x + 0.5, s.y + 0.5, World.h[i]);
+        const rx = cs * 1.6 * (1 + pulse * 0.2), ry = rx * 0.5;
         ctx.strokeStyle = "rgba(110,205,240," + (0.5 + pulse * 0.4) + ")";
         ctx.lineWidth = Math.max(2, cs * 0.14);
         ctx.beginPath();
-        ctx.ellipse(px, py, cs * 1.6 * (1 + pulse * 0.2), cs * 1.1 * (1 + pulse * 0.2), 0, 0, 7);
+        ctx.ellipse(p.px, p.py, rx, ry, 0, 0, 7);
         ctx.stroke();
       }
     }
