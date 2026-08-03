@@ -68,28 +68,49 @@ function smoothDampVec3(vec, velVec, target, smoothTime, dt) {
 }
 
 // Fixed 3/4 azimuth offset (around the pool, toward +Z) applied to the
-// default camera position in BOTH framings. The diving boards' long axis
+// followFlight/splashView camera positions. The diving boards' long axis
 // runs along world X (see scene.js), so a camera sitting right on the +X
 // axis sees them end-on (reads as a short pad). Swinging the camera this
 // many degrees off the +X axis — while still looking back toward the
 // tower/pool center — puts the boards in 3/4 perspective with their full
 // length visible, without disturbing framing (pool + all 3 boards still
-// fit) or any slow-mo/dip/shake behavior below. All view modes (idle,
-// followFlight, splashView) share this same azimuth so the camera never
-// feels like it "jumps around" the pool between modes.
+// fit) or any slow-mo/dip/shake behavior below. followFlight and splashView
+// share this same azimuth so the camera never feels like it "jumps around"
+// the pool between those two modes (idle uses its own wider azimuth, see
+// IDLE_AZIMUTH_DEG below — the two only differ because the idle view has a
+// held-toy-occlusion problem the flight/splash views don't).
 const CAMERA_AZIMUTH_DEG = 25;
 const CAMERA_AZIMUTH_RAD = (CAMERA_AZIMUTH_DEG * Math.PI) / 180;
 const COS_AZ = Math.cos(CAMERA_AZIMUTH_RAD);
 const SIN_AZ = Math.sin(CAMERA_AZIMUTH_RAD);
 
-// Rotate a base (x, z) camera offset onto the fixed azimuth, keeping its
-// original distance from the pool center (y untouched by caller). Only used
-// from handleResize (infrequent) — per-frame mode code below uses the
-// module-level COS_AZ/SIN_AZ constants directly to avoid allocating a
-// fresh object every frame.
-function withAzimuth(x, z) {
+// IDLE-VIEW-ONLY azimuth (S5 integration fix, docs/CONTRACTS-RABBIT.md
+// verification "rabbit visible ... holding the dark ball overhead"):
+// rabbit.js's pawAnchor sits ~0.5m along +X (toward the camera) from the
+// rabbit's own stance, per its own x/z-matches-tip contract requirement, and
+// the held heavyball's real-world radius (0.35m) is large enough that at
+// CAMERA_AZIMUTH_DEG (25°, tuned for followFlight/splashView) the ball's
+// silhouette falls almost entirely along the same camera ray as the rabbit's
+// body — nearly 95% of that 0.5m offset projects to screen DEPTH, not
+// visible lateral/vertical separation, so the ball fully eclipses the
+// rabbit in the idle view regardless of distance or elevation (verified
+// empirically: raising camera height alone does not help, since the
+// rabbit/ball offset is almost purely horizontal, not vertical). Widening
+// the azimuth rotates the idle camera further around toward the boards'
+// SIDE, converting more of that horizontal offset into visible separation
+// (verified: readable rabbit-beside-ball at 80°) while, in practice, the
+// boards remain just as readable (their long axis is still on-screen at a
+// generous angle, not end-on) — see docs/CONTRACTS-RABBIT.md Verification.
+// Deliberately kept SEPARATE from CAMERA_AZIMUTH_RAD (only used below) so
+// followFlight/splashView's already-tuned framing is untouched; the two
+// modes swinging to a different azimuth during their eased transitions
+// (returnToTower/followFlight seed from the camera's actual current pose)
+// reads as a normal cinematic dolly, not a snap.
+const IDLE_AZIMUTH_DEG = 68;
+const IDLE_AZIMUTH_RAD = (IDLE_AZIMUTH_DEG * Math.PI) / 180;
+function withIdleAzimuth(x, z) {
   const r = Math.hypot(x, z);
-  return { x: r * Math.cos(CAMERA_AZIMUTH_RAD), z: r * Math.sin(CAMERA_AZIMUTH_RAD) };
+  return { x: r * Math.cos(IDLE_AZIMUTH_RAD), z: r * Math.sin(IDLE_AZIMUTH_RAD) };
 }
 
 // Impact timeline constants (seconds / timeScale units). Unchanged from the
@@ -287,12 +308,15 @@ export class CameraFX {
     const a = smoothstep(t);
     this._portraitAmount = a;
 
-    // Landscape: closer, cinematic, 3/4 angle from +X (see CAMERA_AZIMUTH_DEG).
-    const lpAz = withAzimuth(9.0, 3.0);
+    // Landscape: closer, cinematic, wide angle from +X (see IDLE_AZIMUTH_DEG
+    // — idle framing uses its own, wider azimuth than followFlight/
+    // splashView so the held toy doesn't eclipse the rabbit; see that
+    // constant's comment for why).
+    const lpAz = withIdleAzimuth(9.0, 3.0);
     this._land = { x: lpAz.x, y: 3.8, z: lpAz.z, fov: 44, lx: -1.0, ly: 1.6, lz: 0 };
     // Portrait: pulled back & higher/steeper so tower + pool both fit and
     // the water surface fills the lower ~2/3 of the frame; same fixed azimuth.
-    const ppAz = withAzimuth(10.5, 1.8);
+    const ppAz = withIdleAzimuth(10.5, 1.8);
     this._port = { x: ppAz.x, y: 7.6, z: ppAz.z, fov: 60, lx: -1.3, ly: 0.4, lz: 0 };
 
     this.camera.fov = lerp(this._land.fov, this._port.fov, a);

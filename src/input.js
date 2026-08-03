@@ -691,6 +691,28 @@ export class InputController {
               }
             }
             this._pulseBoard(id);
+          } else if (state === 'ready') {
+            // Contract (docs/CONTRACTS-RABBIT.md, input.js AIM & THROW +
+            // Verification): "tiny drag or plain tap = near-zero straight
+            // drop". A quick tap that hits no board still needs to commit a
+            // throw — without this branch a tap that missed every board did
+            // nothing at all (no aim was ever begun, since aiming only
+            // starts once the pointer crosses MOVE_THRESHOLD).
+            if (this.gameflow && typeof this.gameflow.commitThrow === 'function') {
+              this._tmpVel.set(0, 0, 0);
+              try {
+                this.gameflow.commitThrow(this._tmpVel);
+              } catch (err) {
+                console.error(err);
+              }
+            }
+            if (this.audio && typeof this.audio.onRelease === 'function') {
+              try {
+                this.audio.onRelease(this.currentToyDef);
+              } catch (err) {
+                console.error(err);
+              }
+            }
           }
         }
       }

@@ -196,9 +196,27 @@ export class GameFlow {
     }
   }
 
+  // Look up a platform's tip Vector3 by id (via the optional platformsRef;
+  // falls back to a reasonable default so this never throws).
+  _tipVec3For(id) {
+    const platforms = this._platformsRef;
+    if (Array.isArray(platforms)) {
+      for (let i = 0; i < platforms.length; i++) {
+        if (platforms[i].id === id) return platforms[i].tip;
+      }
+    }
+    return { x: -3.4, y: 4.4, z: 0 };
+  }
+
   _climb(id, onDone) {
     if (!this.rabbit || typeof this.rabbit.climbTo !== 'function') {
       this.currentPlatformId = id;
+      // CONTRACT GAP fix: cameraFX.setIdleView is otherwise never called by
+      // anyone after construction/returnToTower, so a board tap that moves
+      // the rabbit WITHOUT ever throwing (no flight/splashView/return in
+      // between) would leave the idle camera framed on the OLD platform
+      // forever. Re-frame here too, mirroring the real-rabbit path below.
+      safeCall(this.cameraFX, 'setIdleView', this._tipVec3For(id));
       onDone();
       return;
     }
@@ -208,6 +226,10 @@ export class GameFlow {
       finished = true;
       this._clearWatchdog();
       this.currentPlatformId = id;
+      // See CONTRACT GAP note above: only GameFlow knows when a platform
+      // change (without an accompanying throw) should re-frame the idle
+      // camera — nothing else calls setIdleView for this case.
+      safeCall(this.cameraFX, 'setIdleView', this._tipVec3For(id));
       onDone();
     };
     this._armWatchdog(TIMEOUT_S, finish);
@@ -423,13 +445,7 @@ export class GameFlow {
   }
 
   _currentTipVec3() {
-    const platforms = this._platformsRef;
-    if (Array.isArray(platforms)) {
-      for (let i = 0; i < platforms.length; i++) {
-        if (platforms[i].id === this.currentPlatformId) return platforms[i].tip;
-      }
-    }
-    return { x: -3.4, y: 4.4, z: 0 };
+    return this._tipVec3For(this.currentPlatformId);
   }
 
   // main may optionally supply sceneEnv.platforms so returnToTower gets a
