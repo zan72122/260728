@@ -149,9 +149,11 @@
   }
 
   function boot() {
+    // Render.init が Iso.fitView で Render.view を確定し、genMap はそれを読むため
+    // Render.init → genMap → waterInit の順で呼ぶ(FULLSCREEN_SPEC §5)。
+    Render.init(document.getElementById("game"));
     genMap("free");
     waterInit();
-    Render.init(document.getElementById("game"));
     Mascot.init(document.getElementById("mascot"));
     Input.init(document.getElementById("game"));
     drawTitleArt();

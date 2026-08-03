@@ -14,7 +14,9 @@ const Render = {
   view: { ox: 0, oy: 0, tw: 20, th: 10, eh: 6, cs: 10, w: 0, h: 0 },
   dpr: 1,
   fish: { t: -3, x: 8, y: 26, wait: 5 },   // ときどきはねる さかな
-  _boatCell: null, _boatMapRef: null,      // ふねの位置 (World.h の参照でキャッシュ有効性を判定)
+  // ふねの位置と選定候補リスト。World.h の参照(マップ再生成) or view の参照
+  // (resize で fitView がアクティブ範囲を更新) が変わったら選びなおす
+  _boatCell: null, _boatMapRef: null, _boatViewRef: null, _seaActiveList: null,
 
   _activeSRange: null, // { sMin, sMax }: アクティブセルが存在する対角線 s の範囲 (resize で更新)
 
@@ -352,53 +354,63 @@ const Render = {
   },
 
   // ---------- 海の生きもの ----------
-  // 手前寄りのふかい海セルをえらぶ (マップ再生成で World.h の参照が変わったら選びなおす)
-  pickBoatCell() {
-    const GW = CFG.GW, GH = CFG.GH;
-    let best = null, bestScore = -Infinity;
+  // seaMask かつ Iso.isActive (画面に映る) のセルだけを候補にし、画面したほど・
+  // ふかい(h が低い)ほど高スコアになるよう並べる。マップ再生成 (World.h の参照
+  // が変わる) だけでなく、resize (fitView 再計算でアクティブ範囲が変わる) でも
+  // 選びなおさないと、ふねが画面外に取り残されることがあるので view も見る。
+  buildSeaActiveList() {
+    const GW = CFG.GW, GH = CFG.GH, v = this.view;
+    const list = [];
     for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
       const i = idx(x, y);
-      if (!World.seaMask[i]) continue;
-      const score = y * 2 - World.h[i] * 4; // てまえ(y大)ほど、ふかい(h小)ほど高スコア
-      if (score > bestScore) { bestScore = score; best = { x, y }; }
+      if (!World.seaMask[i] || !Iso.isActive(i)) continue;
+      const p = Iso.project(v, x + 0.5, y + 0.5, World.h[i]);
+      const score = p.py - World.h[i] * v.eh * 2; // 画面したほど・ふかいほど高スコア
+      list.push({ x, y, score });
     }
-    return best;
+    list.sort((a, b) => b.score - a.score);
+    return list;
   },
 
   drawSeaLife(ctx, view, now) {
-    const GW = CFG.GW, GH = CFG.GH;
-    if (this._boatMapRef !== World.h) {
+    if (this._boatMapRef !== World.h || this._boatViewRef !== view) {
       this._boatMapRef = World.h;
-      this._boatCell = this.pickBoatCell();
+      this._boatViewRef = view;
+      this._seaActiveList = this.buildSeaActiveList();
+      // ふねは画面下部のふかい海(スコア最上位)
+      this._boatCell = this._seaActiveList.length ? this._seaActiveList[0] : null;
     }
     // ふね
     if (this._boatCell) {
       const bi = idx(this._boatCell.x, this._boatCell.y);
-      if (World.seaMask[bi]) {
+      if (World.seaMask[bi] && Iso.isActive(bi)) {
         const surf = World.h[bi] + Water.w[bi];
         const p = Iso.project(view, this._boatCell.x + 0.5, this._boatCell.y + 0.5, surf);
         drawBoat(ctx, p.px, p.py, view.cs * 0.9, now);
       }
     }
-    // さかなのジャンプ
+    // さかなのジャンプ (画面下部よりの候補から抽選)
     const f = this.fish;
+    const list = this._seaActiveList;
     if (f.t < 0) {
       f.t = 0;
       f.wait = 4 + Math.random() * 6;
-      for (let tries = 0; tries < 20; tries++) {
-        const x = 2 + Math.floor(Math.random() * (GW - 4));
-        const y = GH - 2 - Math.floor(Math.random() * 4);
-        if (World.seaMask[idx(x, y)]) { f.x = x; f.y = y; break; }
+      if (list && list.length) {
+        const n = Math.max(1, Math.floor(list.length * 0.6));
+        const pick = list[Math.floor(Math.random() * n)];
+        f.x = pick.x; f.y = pick.y;
       }
     }
     f.t += 1 / 60;
     if (f.t > f.wait && f.t < f.wait + 1.1) {
-      const ph = (f.t - f.wait) / 1.1;
-      const i = idx(Math.round(f.x), Math.round(f.y));
-      const surf = World.h[i] + Water.w[i];
-      const p = Iso.project(view, f.x + 0.5, f.y + 0.5, surf);
-      drawFish(ctx, p.px, p.py, view.cs * 0.8, ph);
-      if (ph < 0.08 || ph > 0.92) Particles.splash(f.x, f.y, surf);
+      const i = idx(clamp(Math.round(f.x), 0, CFG.GW - 1), clamp(Math.round(f.y), 0, CFG.GH - 1));
+      if (World.seaMask[i] && Iso.isActive(i)) {
+        const ph = (f.t - f.wait) / 1.1;
+        const surf = World.h[i] + Water.w[i];
+        const p = Iso.project(view, f.x + 0.5, f.y + 0.5, surf);
+        drawFish(ctx, p.px, p.py, view.cs * 0.8, ph);
+        if (ph < 0.08 || ph > 0.92) Particles.splash(f.x, f.y, surf);
+      }
     } else if (f.t >= f.wait + 1.1) {
       f.t = -1;
     }

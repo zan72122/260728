@@ -13,20 +13,45 @@ html, body {
 }
 #app {
   position: absolute; inset: 0;
-  display: flex; flex-direction: column;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
-/* ---------- top bar ---------- */
-#topbar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px 2px;
-  flex: 0 0 auto;
+/* ---------- stage (画面いっぱいのジオラマ + フローティングUI) ---------- */
+#stage { position: absolute; inset: 0; overflow: hidden; }
+#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+
+/* 額縁のような ごく薄い内側の影。操作には反応しない。 */
+#vignette {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  box-shadow:
+    inset 0 0 12vmin rgba(90,60,20,.18),
+    inset 0 0 3vmin rgba(60,40,15,.12);
 }
-#mascot { width: 60px; height: 60px; }
+
+/* ---------- 左上/右上の浮きボタン群 ----------
+   コンテナ自体は pointer-events:none。ボタンだけ auto にすることで、
+   ボタンの隙間のタッチは下の地形(canvas)まで届く。 */
+.overlayGroup {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  display: flex; align-items: center; gap: 8px;
+}
+#topLeft {
+  top: calc(env(safe-area-inset-top) + 10px);
+  left: calc(env(safe-area-inset-left) + 10px);
+  flex-wrap: wrap;
+  max-width: calc(100vw - 20px);
+}
+#topRight {
+  top: calc(env(safe-area-inset-top) + 10px);
+  right: calc(env(safe-area-inset-right) + 10px);
+}
+#mascot { width: 48px; height: 48px; pointer-events: none; }
 #modeButtons { display: flex; gap: 8px; }
-.spacer { flex: 1; }
 .modeBtn, .cmdBtn {
+  pointer-events: auto;
   border: none; background: #fffdf6;
   border-radius: 18px;
   box-shadow: 0 3px 0 #dcc9a5, 0 5px 10px rgba(150,110,60,.15);
@@ -35,10 +60,11 @@ html, body {
   min-width: 58px; min-height: 54px;
   transition: transform .08s;
 }
-.modeBtn canvas { width: 34px; height: 34px; }
-.cmdBtn canvas { width: 36px; height: 36px; }
+.modeBtn canvas { width: 34px; height: 34px; pointer-events: none; }
+.cmdBtn canvas { width: 36px; height: 36px; pointer-events: none; }
 .modeBtn span {
   font-size: 10px; color: #8a6d4a; font-weight: bold; letter-spacing: .05em;
+  pointer-events: none;
 }
 .modeBtn.active {
   background: #ffe9a8;
@@ -46,10 +72,12 @@ html, body {
 }
 .modeBtn:active, .cmdBtn:active, .tool:active, .subBtn:active, .compareBtn:active { transform: scale(.92); }
 
-/* せまい画面 (iPhone) では上部バーをつめる */
+/* せまい画面 (iPhone) では左上/右上のボタン群をつめる */
 @media (max-width: 480px) {
-  #topbar { gap: 4px; padding: 4px 6px 2px; }
-  #mascot { width: 46px; height: 46px; }
+  .overlayGroup { gap: 4px; }
+  #topLeft { top: calc(env(safe-area-inset-top) + 6px); left: calc(env(safe-area-inset-left) + 6px); }
+  #topRight { top: calc(env(safe-area-inset-top) + 6px); right: calc(env(safe-area-inset-right) + 6px); }
+  #mascot { width: 38px; height: 38px; }
   #modeButtons { gap: 4px; }
   .modeBtn, .cmdBtn { min-width: 48px; min-height: 46px; border-radius: 14px; padding: 3px 4px 2px; }
   .modeBtn canvas { width: 26px; height: 26px; }
@@ -57,24 +85,24 @@ html, body {
   .modeBtn span { font-size: 8px; }
 }
 
-/* ---------- stage ---------- */
-#stage { position: relative; flex: 1 1 auto; min-height: 0; }
-#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
-
-/* ---------- toolbar ---------- */
+/* ---------- toolbar (下辺中央の浮きツール列。背景バーなし) ---------- */
 #toolbar {
-  flex: 0 0 auto;
+  position: absolute;
+  left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom) + 14px);
+  z-index: 20;
+  pointer-events: none;
   display: flex; gap: 8px;
-  padding: 8px 10px calc(8px);
+  max-width: calc(100vw - 12px);
+  padding: 0 6px;
   overflow-x: auto; overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
-  justify-content: flex-start;
   touch-action: pan-x;
 }
 #toolbar::-webkit-scrollbar { display: none; }
-@media (min-width: 760px) { #toolbar { justify-content: center; } }
 .tool {
+  pointer-events: auto;
   border: none; background: #fffdf6;
   border-radius: 20px;
   box-shadow: 0 4px 0 #dcc9a5, 0 6px 12px rgba(150,110,60,.15);
@@ -98,7 +126,7 @@ html, body {
    次のボタンが少し見切れることで「続きがある」ことがわかるようにする。
    タッチ領域は44px角以上を維持する。 */
 @media (max-width: 480px) {
-  #toolbar { gap: 6px; padding: 6px 6px 6px; }
+  #toolbar { gap: 6px; bottom: calc(env(safe-area-inset-bottom) + 8px); padding: 0 4px; }
   .tool {
     min-width: 56px;
     min-height: 44px;
@@ -109,15 +137,20 @@ html, body {
   .tool span { font-size: 9px; white-space: nowrap; }
 }
 
-/* ---------- sub palette (building kinds) ---------- */
+/* ---------- sub palette (building kinds) ----------
+   浮きツール列のすぐ上に置く。背景つきの塊なので pointer-events は
+   コンテナ込みで auto のままでよい(隙間が少なく実害がない)。 */
 #subPalette {
   position: absolute; left: 50%; transform: translateX(-50%);
-  bottom: 108px;
+  bottom: calc(env(safe-area-inset-bottom) + 108px);
   display: flex; gap: 10px;
   background: rgba(255,253,246,.95);
   padding: 8px 12px; border-radius: 24px;
   box-shadow: 0 6px 16px rgba(120,80,30,.25);
   z-index: 30;
+}
+@media (max-width: 480px) {
+  #subPalette { bottom: calc(env(safe-area-inset-bottom) + 80px); }
 }
 .subBtn {
   border: none; background: #fef3f5; border-radius: 18px;
@@ -129,9 +162,9 @@ html, body {
 .subBtn.active { background: #ffe0ea; box-shadow: 0 3px 0 #ef93ad; transform: translateY(-3px); }
 
 /* ---------- quest hud ---------- */
-#questHud { position: absolute; inset: 0; pointer-events: none; }
+#questHud { position: absolute; inset: 0; pointer-events: none; z-index: 15; }
 #questChip {
-  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  position: absolute; top: calc(env(safe-area-inset-top) + 10px); left: 50%; transform: translateX(-50%);
   background: rgba(255,253,246,.95);
   border-radius: 999px; padding: 6px 18px;
   font-size: 20px;
@@ -139,7 +172,9 @@ html, body {
   white-space: nowrap;
 }
 #btnGo {
-  position: absolute; right: 14px; bottom: 14px;
+  position: absolute;
+  right: calc(env(safe-area-inset-right) + 14px);
+  bottom: calc(env(safe-area-inset-bottom) + 108px);
   pointer-events: auto;
   border: none; background: #ffd93b;
   width: 84px; height: 84px; border-radius: 50%;
@@ -149,12 +184,23 @@ html, body {
 #btnGo canvas { width: 62px; height: 62px; }
 #btnGo:active { transform: scale(.9); }
 #btnGo.busy { opacity: .45; pointer-events: none; }
+@media (max-width: 480px) {
+  #btnGo { bottom: calc(env(safe-area-inset-bottom) + 80px); width: 66px; height: 66px; }
+  #btnGo canvas { width: 48px; height: 48px; }
+}
 
-/* ---------- compare hud ---------- */
+/* ---------- compare hud ----------
+   右上の もどす・リセット(#topRight)と重ならないよう、その下に置く。 */
 #compareHud {
-  position: absolute; right: 12px; top: 12px;
+  position: absolute;
+  right: calc(env(safe-area-inset-right) + 12px);
+  top: calc(env(safe-area-inset-top) + 78px);
   display: flex; flex-direction: column; gap: 10px;
   pointer-events: none;
+  z-index: 15;
+}
+@media (max-width: 480px) {
+  #compareHud { top: calc(env(safe-area-inset-top) + 64px); right: calc(env(safe-area-inset-right) + 8px); }
 }
 .compareBtn {
   pointer-events: auto;
