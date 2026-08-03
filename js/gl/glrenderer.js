@@ -78,6 +78,7 @@ uniform float uFillingAmount[12];
 uniform float uFillingGloss[12];
 uniform int uFillingCount;
 uniform vec3 uOpts; // inOven, frying, steaming (0/1)
+uniform float uHoleR; // ドーナツの穴半径(CSS px)。0なら穴なし。
 
 varying vec3 vNormal;
 varying vec4 vExtra;
@@ -111,6 +112,17 @@ float fbm(vec2 p) {
 }
 
 void main() {
+  // ドーナツの穴: メッシュ側(indices skip + annulus remap)だけでは
+  // 完全な透過にできない(このプログラムは常に alpha=1.0 で描いていたため)。
+  // 中心距離が穴半径未満のフラグメントは discard し、縁はごく薄い帯で
+  // アンチエイリアスする(=本当に背景が透けて見える穴になる)。
+  float distFromCenter = length(vLocalPos);
+  float holeAlpha = 1.0;
+  if (uHoleR > 0.0) {
+    holeAlpha = smoothstep(uHoleR * 0.80, uHoleR * 1.04, distFromCenter);
+    if (holeAlpha <= 0.001) discard;
+  }
+
   vec3 N = normalize(vNormal);
   vec3 L = normalize(uLightDir);
   vec3 V = vec3(0.0, 0.0, 1.0);
@@ -230,7 +242,8 @@ void main() {
   float lum = dot(lit, vec3(0.299, 0.587, 0.114));
   lit = mix(lit, vec3(lum) * 1.02, uOpts.z * 0.22);
 
-  gl_FragColor = vec4(clamp(lit, 0.0, 1.0), 1.0);
+  // premultipliedAlpha:true のコンテキスト向けに rgb をアルファで乗算して出力
+  gl_FragColor = vec4(clamp(lit, 0.0, 1.0) * holeAlpha, holeAlpha);
 }
 `;
 
@@ -353,7 +366,7 @@ export class GLDoughRenderer {
     const names = [
       'uResolution', 'uCenter', 'uZLift', 'uLightDir', 'uTime', 'uBake', 'uFerment',
       'uAir', 'uCrack', 'uToppingCrack', 'uBaseColor', 'uBakedColor', 'uSSS', 'uGloss',
-      'uFillingCount', 'uOpts',
+      'uFillingCount', 'uOpts', 'uHoleR',
     ];
     for (const n of names) this.u[n] = gl.getUniformLocation(this.prog, n);
     this.u.uFillings = [];
@@ -518,6 +531,7 @@ export class GLDoughRenderer {
     gl.uniform1f(this.u.uSSS, clamp01(p.crumbSoftness));
     gl.uniform1f(this.u.uGloss, clamp01(p.hydration != null ? p.hydration : 0.5));
     gl.uniform3f(this.u.uOpts, opts.inOven ? 1 : 0, opts.frying ? 1 : 0, opts.steaming ? 1 : 0);
+    gl.uniform1f(this.u.uHoleR, dough.holeR > 0 ? dough.holeR : 0);
 
     const fillings = dough.fillings;
     const fcount = fillings ? Math.min(fillings.length, MAX_FILLINGS) : 0;
