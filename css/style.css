@@ -93,6 +93,22 @@ html, body {
 }
 .tool.active span { color: #2b7a99; }
 
+/* せまい画面 (iPhone) ではツールバー(9個のツールボタン)もコンパクト化し、
+   390px幅でより多くのボタンが一度に見えるようにする。全部は入りきらないが、
+   次のボタンが少し見切れることで「続きがある」ことがわかるようにする。
+   タッチ領域は44px角以上を維持する。 */
+@media (max-width: 480px) {
+  #toolbar { gap: 6px; padding: 6px 6px 6px; }
+  .tool {
+    min-width: 56px;
+    min-height: 44px;
+    padding: 5px 4px 4px;
+    border-radius: 16px;
+  }
+  .tool canvas { width: 37px; height: 37px; }
+  .tool span { font-size: 9px; white-space: nowrap; }
+}
+
 /* ---------- sub palette (building kinds) ---------- */
 #subPalette {
   position: absolute; left: 50%; transform: translateX(-50%);
