@@ -11,7 +11,7 @@ import { mulberry32 } from './rng.js';
 
 // ---- tunables -------------------------------------------------------
 const MAX_SPLASHES = 4;      // ≥3 concurrent required; 4 gives headroom
-const CROWN_COLUMNS = 24;    // rim columns around the lathe ring
+const CROWN_COLUMNS = 32;    // rim columns around the lathe ring
 const CROWN_LIFE = 0.9;      // seconds (scaled) — rise/flare/fall
 const SHEET_LIFE = 0.6;      // seconds (scaled) — sheet fades out by then, peak ~0.25s
 const DROPLET_CAP = 300;
@@ -119,15 +119,42 @@ function layoutCrown(slot, spec) {
       dirWeight = 1 + obliqueAmt * (dot * 1.4);
       dirWeight = Math.max(0.15, dirWeight);
     }
-    const jitter = 0.75 + rng() * 0.5; // per-column height/width variance
+    // gentler per-column variance than before (was 0.75-1.25) — the raw
+    // silhouette is smoothed below, so we don't need huge raw jitter to
+    // still read as an irregular, organic (not perfectly circular) rim.
+    const jitter = 0.85 + rng() * 0.3;
     heights[i] = baseHeight * jitter * dirWeight;
-    const wJit = 0.85 + rng() * 0.3;
+    const wJit = 0.9 + rng() * 0.2;
     outerR[i] = baseWidth * wJit * (0.7 + 0.3 * dirWeight);
-    innerR[i] = Math.max(0.05, outerR[i] - wallThickness * (0.8 + rng() * 0.4));
     tipStretch[i] = 0.6 + rng() * 0.8; // rim tip elongation factor at peak
+  }
+  // Smooth the rim (circular moving-average, a couple of light passes) so
+  // neighbouring columns don't jump wildly — turns the spiky paper-cutout
+  // silhouette into soft, rounded lobes like real thick water, while still
+  // keeping an organic (non-circular) outline from the underlying jitter.
+  smoothCircular(heights, 2);
+  smoothCircular(outerR, 2);
+  smoothCircular(tipStretch, 2);
+  for (let i = 0; i < cols; i++) {
+    innerR[i] = Math.max(0.05, outerR[i] - wallThickness * (0.8 + rng() * 0.4));
   }
   slot.crownBaseHeight = baseHeight;
   slot.crownWallThickness = wallThickness;
+}
+
+// Circular moving-average smoothing (wraps around, in place) — rounds off
+// per-column jitter into soft lobes instead of sharp spikes.
+function smoothCircular(arr, passes) {
+  const n = arr.length;
+  const tmp = new Float32Array(n);
+  for (let p = 0; p < passes; p++) {
+    for (let i = 0; i < n; i++) {
+      const prev = arr[(i - 1 + n) % n];
+      const next = arr[(i + 1) % n];
+      tmp[i] = prev * 0.25 + arr[i] * 0.5 + next * 0.25;
+    }
+    arr.set(tmp);
+  }
 }
 
 // Write the crown geometry's position buffer for the current animation
@@ -170,10 +197,12 @@ function writeCrownColors(geo) {
   for (let i = 1; i < pos.length; i += 3) maxH = Math.max(maxH, pos[i]);
   for (let i = 0, c = 0; i < pos.length; i += 3, c += 3) {
     const t = Math.min(1, Math.max(0, pos[i + 1] / maxH));
-    // base: light aqua-white, rim: near-pure white
-    col[c + 0] = 0.72 + 0.28 * t;
-    col[c + 1] = 0.88 + 0.12 * t;
-    col[c + 2] = 0.97 + 0.03 * t;
+    // base: saturated blue-white (liquid, in-shadow), rim: bright near-pure
+    // white (catches the light) — stronger gradient reads as glossy/thick
+    // water instead of a flat matte cutout.
+    col[c + 0] = 0.52 + 0.46 * t;
+    col[c + 1] = 0.74 + 0.25 * t;
+    col[c + 2] = 0.94 + 0.06 * t;
   }
   geo.attributes.color.needsUpdate = true;
 }
@@ -249,12 +278,22 @@ export class SplashFX {
     this._nextSlot = 0;
 
     // ---- shared droplet InstancedMesh (all splashes draw from ONE pool) ----
-    const dropGeo = new THREE.IcosahedronGeometry(1, 0); // unit radius, scaled per-instance
+    // subdivision 1 (80 faces) so droplets read as small round beads of
+    // water rather than crystalline low-poly chunks; still cheap at 300
+    // instances (~24k tris for the whole pool).
+    const dropGeo = new THREE.IcosahedronGeometry(1, 1); // unit radius, scaled per-instance
+    // NOTE: do NOT set `vertexColors: true` here. This geometry has no
+    // 'color' attribute, but three.js still defines USE_COLOR from the
+    // material flag alone; the vertex shader then does `vColor *= color`
+    // against a missing attribute (which reads as black), zeroing vColor
+    // *before* it gets multiplied by instanceColor — every droplet renders
+    // solid black regardless of the instance color set below. instanceColor
+    // is picked up automatically (USE_INSTANCING_COLOR) without needing
+    // material.vertexColors at all, so just omit it.
     const dropMat = new THREE.MeshBasicMaterial({
-      color: 0xeaf9ff,
-      vertexColors: true,
+      color: 0xeaf9ff, // bright white with a slight blue tint
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.96,
       depthWrite: false,
     });
     this.dropletMesh = new THREE.InstancedMesh(dropGeo, dropMat, DROPLET_CAP);
@@ -424,7 +463,8 @@ export class SplashFX {
         let alpha;
         if (ct < 0.1) alpha = smooth01(ct / 0.1);
         else alpha = 1 - smooth01(clamp01((ct - 0.55) / 0.45));
-        slot.crownMat.opacity = Math.min(0.85, alpha * 0.75);
+        // slight transparency (glossy film, not solid paper): peak ~0.85
+        slot.crownMat.opacity = Math.min(0.9, alpha * 0.85);
       }
 
       // ---- sheet timeline (0..SHEET_LIFE) ----
@@ -437,7 +477,8 @@ export class SplashFX {
         const inner = Math.max(0.02, r * 0.55);
         rebuildRing(slot.sheetMesh.geometry, inner, r, slot.sheetScaleX, slot.sheetScaleZ);
         const alpha = st < 0.15 ? smooth01(st / 0.15) : 1 - smooth01(clamp01((st - 0.3) / 0.7));
-        slot.sheetMat.opacity = Math.min(0.55, alpha * 0.5);
+        // thin glossy film, not solid paper: keep it visibly translucent
+        slot.sheetMat.opacity = Math.min(0.42, alpha * 0.38);
       }
 
       // ---- mist timeline (quick puff, ~0.5s) ----
@@ -507,7 +548,16 @@ export class SplashFX {
       _scale.set(s, s * stretchY, s);
       _mat4.compose(_v0, _quat, _scale);
       mesh.setMatrixAt(writeIdx, _mat4);
-      _color.setRGB(0.86 + 0.14 * fade, 0.93 + 0.07 * fade, 1.0);
+      // per-droplet deterministic sparkle: a cheap index hash gives each
+      // droplet a slightly different brightness so the cluster reads as
+      // glinting water rather than a flat mass of identical chunks.
+      const hash = ((i * 2654435761) >>> 0) / 4294967295;
+      const sparkle = 0.92 + 0.14 * hash;
+      _color.setRGB(
+        Math.min(1, (0.82 + 0.18 * fade) * sparkle),
+        Math.min(1, (0.92 + 0.08 * fade) * sparkle),
+        1.0
+      );
       mesh.instanceColor.setXYZ(writeIdx, _color.r, _color.g, _color.b);
       writeIdx++;
       if (writeIdx >= cap) break;
