@@ -482,6 +482,16 @@ class JetInstance {
 
     this.rand = null; // macro rng (spec.seed ^ 0x9e3779b9)
     this.dropletRand = null; // droplet rng (spec.seed ^ 0x9e37), per contract
+
+    // Mega jet (M2, docs/CONTRACTS-MEGA.md) shares this exact pooled class —
+    // `mega`/`moundWidth`/`moundAmp` default to the plain-jet values below so
+    // a byte-for-byte-unchanged arm()/update() path is guaranteed whenever
+    // armMega() has never touched this instance (and is reset every arm()
+    // call too, since JET_POOL slots are round-robin shared between normal
+    // and mega triggers).
+    this.mega = false;
+    this.moundWidth = 0.07;
+    this.moundAmp = 0.5;
   }
 
   arm(spec, rand, dropletRand) {
@@ -489,6 +499,9 @@ class JetInstance {
     this.waitAge = 0;
     // t ≈ 0.30 + 0.15*energy after trigger, per contract.
     this.waitTime = 0.3 + 0.15 * spec.energy;
+    this.mega = false;
+    this.moundWidth = 0.07;
+    this.moundAmp = 0.5;
     this.point.copy(spec.point);
     this.mesh.position.set(spec.point.x, 0, spec.point.z);
     this.energy = spec.energy;
@@ -520,6 +533,70 @@ class JetInstance {
     this.mesh.visible = false;
   }
 
+  // armMega(spec, rand, dropletRand) — mega-parameterized reuse of the exact
+  // same jet system (docs/CONTRACTS-MEGA.md, M2): column diameter ≈
+  // 0.5*def.radius, height 6-8m, start delay ≈1.2s after trigger, pinch-off
+  // ≈3.0s ejecting 4-6 big satellite drops, wider base mound, bigger/longer
+  // bubbles. This is a SEPARATE method from arm() — arm()'s own body (and
+  // therefore the normal trigger() path) is untouched byte-for-byte; the
+  // handful of shared helpers below (_writeGeometry, _spawnJetBaseBubbles,
+  // _emitJetDroplets) only branch on `this.mega`/`jet.mega`, which is always
+  // `false` unless armMega() was the last thing to touch this pooled slot.
+  armMega(spec, rand, dropletRand) {
+    this.state = 'waiting';
+    this.waitAge = 0;
+    this.mega = true;
+    // ≈1.2s start delay after trigger, per contract.
+    this.waitTime = 1.15 + rand() * 0.1;
+    this.point.copy(spec.point);
+    this.mesh.position.set(spec.point.x, 0, spec.point.z);
+    this.energy = Math.max(spec.energy, 0.9); // mega bodies always read as near-max-energy jets
+    this.flatness = spec.flatness || 0;
+
+    // def.radius (giant toys: ~1.1-1.5m) — spec.size mirrors it per the
+    // ImpactSpec contract ("size: toy radius"); prefer spec.def.radius when
+    // present so a directly-hand-built test spec's `size` can't disagree.
+    const sizeRef = (spec.def && spec.def.radius) || spec.size || 1.1;
+
+    this.height = 6.0 + rand() * 2.0; // 6-8m, per contract
+    // Column diameter: the rendered base ring radius is
+    // baseRadius * jetShaftFactor(0) (=1.3, see JET_PROFILE). A literal
+    // 0.5*def.radius diameter (~0.55m for giantheavy) reads THINNER than an
+    // ordinary max-energy toy's own jet (~0.84m, see arm()'s baseRadius
+    // formula) — failing the "dwarfs the old jet" acceptance bar. Target a
+    // visible base diameter of ~1.0*def.radius instead (~1.1m for
+    // giantheavy) so the column unmistakably reads as bigger/thicker.
+    const targetBaseRadius = (0.5 * sizeRef) / jetShaftFactor(0);
+    this.baseRadius = Math.max(0.16, targetBaseRadius);
+
+    const overshoot = 1.04 + rand() * 0.08; // gentler overshoot than a normal jet (already very tall)
+    const apexHeight = Math.max(0.5, this.height * overshoot);
+    this.v0 = Math.sqrt(2 * G * apexHeight);
+    this.emergeDur = 0.22 + rand() * 0.12; // a column this size still "emerges" over a beat, not instantly
+    // Pinch-off ≈3.0s ABSOLUTE (i.e. activeAge ≈ 3.0 - waitTime ≈ 1.8s) —
+    // tie it directly to the absolute schedule rather than deriving it from
+    // apex time, so waitTime jitter can't drift the headline number.
+    this.pinchTime = Math.max(0.9, 3.0 - this.waitTime + (rand() - 0.5) * 0.2);
+    this.neckStartTime = this.pinchTime * (0.55 + rand() * 0.15);
+    this.severFrac = 0.82 + rand() * 0.08;
+    // Slower, heavier collapse than a normal jet — the shortened stub keeps
+    // raining down through the ⑤ mushroom-rain window (megasplash.js).
+    this.fallDuration = 1.0 + rand() * 0.35;
+
+    // Wider base mound (contract: "wider base mound").
+    this.moundWidth = 0.17;
+    this.moundAmp = 0.95;
+
+    this.rand = rand;
+    this.dropletRand = dropletRand;
+    this.severed = false;
+    this.pinchFired = false;
+    this.curTopY = 0;
+    this.ringWaveEnergy = 0;
+    this.foamPulse = 0;
+    this.mesh.visible = false;
+  }
+
   // spawnBaseBubbles(x, z, rand, count); dropletEmitFn(jetInstance, x, y, z, vAtPinch)
   update(dt, spawnBaseBubbles, dropletEmitFn) {
     if (this.state === 'idle') return;
@@ -534,7 +611,7 @@ class JetInstance {
         this.ringWaveEnergy = 1; // emergence mound/ring pulse
         this.foamPulse = 0.3;
         this.mesh.visible = this.height > 0.05;
-        if (this.mesh.visible) spawnBaseBubbles(this.point.x, this.point.z, this.rand, 3);
+        if (this.mesh.visible) spawnBaseBubbles(this.point.x, this.point.z, this.rand, this.mega ? 10 : 3);
       }
       return;
     }
@@ -554,24 +631,59 @@ class JetInstance {
 
     let topY;
     if (!this.severed) {
-      const ballisticY = Math.max(0, this.v0 * age - 0.5 * G * age * age);
       const emergeT = Math.min(1, age / this.emergeDur);
       const ee = emergeT * emergeT * (3 - 2 * emergeT); // smoothstep
-      topY = ballisticY * ee;
+      if (this.mega) {
+        // Mega jet: rise to (near) full height over the first half of the
+        // pre-pinch window, then HOLD near the peak (gentle bob) until
+        // pinch-off, rather than following a single ballistic parabola. At
+        // this game's G=12.5, a parabola tall enough to reach 6-8m has its
+        // natural apex around ~1.0-1.1s — well before the contract's
+        // ≈3.0s-absolute pinch time — so a plain ballistic curve would
+        // already be more than half-collapsed by the time it pinches off.
+        // Holding near the peak instead keeps the column reading as "tall
+        // and holding, then separates" for the whole 2/3/2 phases.
+        const riseEnd = Math.max(0.2, this.pinchTime * 0.5);
+        let baseTop;
+        if (age <= riseEnd) {
+          const rt = age / riseEnd;
+          const re = rt * rt * (3 - 2 * rt);
+          baseTop = this.height * re;
+        } else {
+          const bob = Math.sin((age - riseEnd) * 3.0) * this.height * 0.025;
+          baseTop = this.height + bob;
+        }
+        topY = baseTop * ee;
+      } else {
+        const ballisticY = Math.max(0, this.v0 * age - 0.5 * G * age * age);
+        topY = ballisticY * ee;
+      }
 
       if (age >= this.pinchTime) {
         // --- PINCH-OFF: tip volume detaches ---
         this.severed = true;
         this.pinchFired = true;
         const severTopY = topY * this.severFrac;
-        const vAtPinch = this.v0 - G * age;
+        let vAtPinch;
+        if (this.mega) {
+          // Solve for the initial post-pinch velocity that empties the
+          // (much taller) severed stub out over ~this.fallDuration, so the
+          // collapse reads as a proper multi-beat "melt back into the
+          // pool" instead of the plain v0-G*age estimate (which, this late
+          // past a shorter natural apex, would already be strongly
+          // negative and collapse in a fraction of a second).
+          const fd = Math.max(0.2, this.fallDuration);
+          vAtPinch = Math.max(0.2, (0.5 * G * fd * fd - severTopY) / fd);
+        } else {
+          vAtPinch = this.v0 - G * age;
+        }
         this.fallVelocity = Math.max(0.25, vAtPinch);
         this.severedTopY = severTopY;
         this.postPinchAge = 0;
         this.ringWaveEnergy = 1;
         this.foamPulse = 1;
         dropletEmitFn(this, this.point.x, topY, this.point.z, vAtPinch);
-        spawnBaseBubbles(this.point.x, this.point.z, this.dropletRand || this.rand, 2);
+        spawnBaseBubbles(this.point.x, this.point.z, this.dropletRand || this.rand, this.mega ? 8 : 2);
         topY = severTopY;
       }
     } else {
@@ -620,8 +732,11 @@ class JetInstance {
       let radius = baseR * jetShaftFactor(rt);
       // Ring-wave / mound bump low on the shaft, just above the base flare
       // (base "ring wave" pulse: emergence + a second pulse at pinch-off).
-      const waveEnv = Math.exp(-Math.pow((rt - 0.08) / 0.07, 2));
-      radius += baseR * 0.5 * mound * waveEnv;
+      // this.moundWidth/moundAmp default to the exact constants used here
+      // originally (0.07/0.5) so a plain arm()'d jet is unaffected; armMega()
+      // widens/raises them for the mega jet's "wider base mound" (contract).
+      const waveEnv = Math.exp(-Math.pow((rt - 0.08) / this.moundWidth, 2));
+      radius += baseR * this.moundAmp * mound * waveEnv;
       // Necking pinch: a traveling narrow band that deepens toward pinch-off.
       if (neckCenter >= 0) {
         const neckWidth = 0.1;
@@ -815,6 +930,26 @@ export class UnderwaterFX {
     jet.arm(spec, jetRand, dropletRand);
   }
 
+  // triggerMegaJet(spec) — docs/CONTRACTS-MEGA.md, M2: mega-parameterized
+  // reuse of the same pooled jet system (column diameter ≈ 0.5*def.radius,
+  // height 6-8m, start delay ≈1.2s, pinch-off ≈3.0s ejecting 4-6 big
+  // satellite drops, wider base mound, bigger/longer bubbles). Deliberately
+  // does NOT touch the air-cavity pool: per the "Mega impact routing" shared
+  // definition, underwater.trigger() is SKIPPED entirely for mega impacts
+  // (megasplash.js's own dome/flash/sheet own the impact-moment visuals);
+  // this method only arms the delayed hero column. Reuses the SAME jet pool
+  // as trigger() (rare enough in practice — one mega jet at a time per the
+  // "pool exactly 1 concurrent mega" rule — and JET_POOL=4 leaves headroom
+  // for any normal jets still finishing nearby).
+  triggerMegaJet(spec) {
+    const jetRand = mulberry32((spec.seed ^ 0x9e3779b9) >>> 0);
+    const dropletRand = mulberry32((spec.seed ^ 0x9e37) >>> 0);
+    const jet = this.jets[this._jetCursor];
+    this._jetCursor = (this._jetCursor + 1) % this.jets.length;
+    jet.armMega(spec, jetRand, dropletRand);
+    return jet;
+  }
+
   triggerResurface(pos, def) {
     // Small burst of ~8 bubbles at pos.
     for (let i = 0; i < 8; i++) {
@@ -867,23 +1002,32 @@ export class UnderwaterFX {
 
   // Base bubbles: a few small bubbles at jet emergence / pinch-off, reusing
   // the existing bubble system (per contract: "reuse of existing bubble
-  // system for a few base bubbles").
-  _spawnJetBaseBubbles(x, z, rand, count) {
+  // system for a few base bubbles"). `big` (falsy for every normal-jet call
+  // site) scales these up into the mega jet's "bigger/longer bubble output"
+  // (docs/CONTRACTS-MEGA.md, M2) — deeper spawn depth + larger scale means a
+  // longer rise time before they pop near the surface.
+  _spawnJetBaseBubbles(x, z, rand, count, big) {
     const r = rand || Math.random;
     for (let i = 0; i < count; i++) {
       const ang = r() * Math.PI * 2;
-      const rad = r() * 0.15;
-      const scale = 0.02 + r() * 0.025;
-      this.bubbles.spawn(x + Math.cos(ang) * rad, -0.03 - r() * 0.06, z + Math.sin(ang) * rad, scale, 0.3 + r() * 0.3, r);
+      const rad = r() * (big ? 0.4 : 0.15);
+      const scale = big ? 0.05 + r() * 0.08 : 0.02 + r() * 0.025;
+      const depth = big ? -0.15 - r() * 0.35 : -0.03 - r() * 0.06;
+      const speedY = big ? 0.5 + r() * 0.5 : 0.3 + r() * 0.3;
+      this.bubbles.spawn(x + Math.cos(ang) * rad, depth, z + Math.sin(ang) * rad, scale, speedY, r);
     }
   }
 
   // Pinch-off satellite droplets: routed to waterCtx.droplets.emit per the
   // droplets.js contract shape, guarded for absence (falls back to a local
-  // pool so the visual read survives even without R3's module).
+  // pool so the visual read survives even without R3's module). `jet.mega`
+  // (always false for a plain arm()'d jet) selects the mega jet's "4-6 big
+  // satellite drops" per docs/CONTRACTS-MEGA.md instead of the normal jet's
+  // 1-3 small ones — the non-mega branch below is untouched.
   _emitJetDroplets(jet, x, y, z, vAtPinch) {
     const rng = jet.dropletRand || Math.random;
-    const n = 1 + Math.floor(rng() * 3); // 1-3 satellite droplets
+    const mega = !!jet.mega;
+    const n = mega ? 4 + Math.floor(rng() * 3) : 1 + Math.floor(rng() * 3); // mega: 4-6, normal: 1-3
     const dc = this.waterCtx && this.waterCtx.droplets;
     if (dc && typeof dc.emit === 'function') {
       this._tmpVec.set(x, y, z);
@@ -891,21 +1035,21 @@ export class UnderwaterFX {
         origin: this._tmpVec.clone(),
         dir: this._tmpDir,
         count: n,
-        speed: [0.8, 1.8 + jet.energy * 1.4],
-        size: [0.02, 0.05],
-        spread: 0.4,
+        speed: mega ? [1.6, 3.4 + jet.energy * 1.6] : [0.8, 1.8 + jet.energy * 1.4],
+        size: mega ? [0.08, 0.17] : [0.02, 0.05],
+        spread: mega ? 0.5 : 0.4,
         rng,
         gravityScale: 1,
-        stretch: 1.15,
+        stretch: mega ? 1.3 : 1.15,
       });
     } else {
       for (let i = 0; i < n; i++) {
         const ang = rng() * Math.PI * 2;
-        const outSpeed = 0.3 + rng() * 0.8;
+        const outSpeed = mega ? 0.6 + rng() * 1.6 : 0.3 + rng() * 0.8;
         const vx = Math.cos(ang) * outSpeed * 0.4;
         const vz = Math.sin(ang) * outSpeed * 0.4;
-        const vy = Math.max(0.6, vAtPinch * 0.6) + rng() * 1.0;
-        const scale = 0.02 + rng() * 0.03;
+        const vy = Math.max(0.6, vAtPinch * 0.6) + rng() * (mega ? 2.0 : 1.0);
+        const scale = mega ? 0.08 + rng() * 0.09 : 0.02 + rng() * 0.03;
         this.fallbackDroplets.spawn(x, y, z, vx, vy, vz, scale);
       }
     }
@@ -954,7 +1098,7 @@ export class UnderwaterFX {
       if (j.state === 'idle') continue;
       j.update(
         dt,
-        (x, z, rand, count) => this._spawnJetBaseBubbles(x, z, rand, count),
+        (x, z, rand, count) => this._spawnJetBaseBubbles(x, z, rand, count, j.mega),
         (jetInst, x, y, z, vAtPinch) => this._emitJetDroplets(jetInst, x, y, z, vAtPinch)
       );
     }
