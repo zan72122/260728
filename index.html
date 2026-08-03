@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no" />
+<title>にじいろ ぽちゃん！しぶきラボ</title>
+<meta name="description" content="みずしぶき あそび - にじいろ ぽちゃん！しぶきラボ" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#4dd0e6" />
+<meta name="format-detection" content="telephone=no" />
+<style>
+  :root {
+    --sat: env(safe-area-inset-top, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+    background: linear-gradient(180deg, #7fd8ff 0%, #a6e9ff 35%, #ffe9a6 70%, #ffcf6b 100%);
+    font-family: 'Hiragino Maru Gothic ProN', 'Rounded Mplus 1c', 'Comic Sans MS', system-ui, sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  #app {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  #canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    -webkit-touch-callout: none;
+  }
+
+  #ui-layer {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  #title-splash {
+    position: fixed;
+    top: calc(var(--sat) + 14px);
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 50;
+    transition: opacity 0.7s ease-out, transform 0.7s ease-out;
+  }
+
+  #title-splash.fade-out {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.96);
+  }
+
+  #title-splash h1 {
+    margin: 0;
+    padding: 10px 26px;
+    font-size: clamp(20px, 5.5vw, 36px);
+    font-weight: 900;
+    color: #fff;
+    background: linear-gradient(135deg, #ff6ec7, #ffd93d 30%, #6bffb8 60%, #4dd0e6 90%);
+    border-radius: 999px;
+    box-shadow: 0 6px 18px rgba(0, 60, 90, 0.25), inset 0 2px 4px rgba(255, 255, 255, 0.6);
+    text-shadow: 0 2px 0 rgba(0, 70, 90, 0.35), 0 0 12px rgba(255, 255, 255, 0.4);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  #loading-fallback {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: #135a7a;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+  <div id="app">
+    <canvas id="canvas"></canvas>
+    <div id="loading-fallback">みずのじゅんび中…🌈</div>
+    <div id="ui-layer"></div>
+    <div id="title-splash"><h1>にじいろ ぽちゃん！しぶきラボ</h1></div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.js"
+    }
+  }
+  </script>
+
+  <script type="module" src="./src/main.js"></script>
+
+  <script>
+    // Fade the title out after ~2s without ever blocking touch/pointer input.
+    (function () {
+      var title = document.getElementById('title-splash');
+      if (!title) return;
+      setTimeout(function () {
+        title.classList.add('fade-out');
+        setTimeout(function () {
+          if (title && title.parentNode) title.parentNode.removeChild(title);
+        }, 800);
+      }, 2000);
+    })();
+  </script>
+</body>
+</html>
