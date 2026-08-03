@@ -1,20 +1,54 @@
-// src/input.js — H (input & UI)
-// Owns: bottom toy-picker bar, side platform-picker column, and all pointer
-// gesture handling for grabbing/dragging/throwing the currently held toy.
-// See docs/CONTRACTS.md "src/input.js — H" for the exact contract.
+// src/input.js — S4 (input & UI)
+// Owns: bottom toy-picker bar, board-tap platform selection, and the
+// aim-drag → dotted trajectory preview → throw gesture.
+// See docs/CONTRACTS-RABBIT.md "src/input.js — S4" (this file's contract)
+// and docs/CONTRACTS.md for the wider module map / GameFlow API this file
+// calls into. GameFlow (src/gameflow.js, owner S3) now owns ALL toy
+// spawn/grab/drag/release lifecycle and the board-select/climb workflow;
+// input.js never touches physics directly any more — it only turns
+// gestures into gameflow.* calls, plus renders its own aim preview and a
+// tiny visual pulse on a tapped board.
+//
+// Every gameflow.* call is typeof-guarded (per contract) so this file keeps
+// working even while S1/S2/S3 are still mid-rework in parallel.
 
 import * as THREE from 'three';
 import { TOYS } from './toys.js';
-import { PLATFORMS } from './constants.js';
+import { PLATFORMS, POOL, G } from './constants.js';
 
-// --- tunables -------------------------------------------------------------
-const RESPAWN_DELAY = 1.2;       // seconds between release and next toy spawn
-const DRAG_WINDOW_MS = 120;      // rolling buffer window for release velocity
-const MAX_RELEASE_SPEED = 9;     // m/s clamp on computed release velocity
-const THROW_SCALE = 1.5;         // amplifies a comfy flick into a nice arc
-const SCREEN_GRAB_RADIUS = 120;  // px, generous toddler-proof grab tolerance
-const SPHERE_TOLERANCE_MUL = 2.2; // multiplies toy radius for ray/sphere test
+// --- tunables ---------------------------------------------------------
+const MOVE_THRESHOLD = 12; // px — drag-vs-tap discriminator (also contract's aim-start gate)
+const TAP_MAX_MS = 250; // ms — quick-tap window for board selection
+const BOARD_TAP_WORLD_TOLERANCE = 0.9; // m — generous ray-to-tip distance tolerance
+const BOARD_TAP_SCREEN_RADIUS = 90; // px — screen-space fallback tolerance
 const PRESS_FEEDBACK_MS = 180;
+
+// Gesture → velocity mapping (screen px → world m/s). Kept in the same
+// spirit as the old drag-the-toy gesture math: right/left maps to a
+// camera-relative lateral axis, downward drag adds forward+down "throw"
+// power, upward drag adds loft, tiny movement stays near a straight drop.
+const MAX_RELEASE_SPEED = 9; // m/s clamp
+const PX_TO_MPS = 0.045; // px → m/s gesture scale
+const FORWARD_GAIN = 1.0;
+const LATERAL_GAIN = 0.85;
+const UP_GAIN = 0.9;
+const DOWN_BIAS = 0.3; // downward drags dip the arc slightly (plunge feel)
+
+// Trajectory preview.
+const PREVIEW_DOT_COUNT = 14;
+const PREVIEW_DOT_RADIUS = 0.055; // m
+const PREVIEW_RING_SCALE = 2.1; // landing dot is this many times bigger
+const POOL_CLAMP_FRACTION = 0.82; // matches Physics' own aim-assist radius
+
+// Board tap pulse feedback (real time, tiny UI feedback — not gameplay).
+const BOARD_PULSE_DURATION = 0.32; // s
+const BOARD_PULSE_SCALE = 0.08; // +8% at peak
+const BOARD_PULSE_COLOR = new THREE.Color(0xfff97a);
+
+// Auto-hide states (per contract): flight/splashView/windup hide the bar;
+// return/ready fade it back in.
+const HIDE_STATES = new Set(['flight', 'splashView', 'windup']);
+const SHOW_STATES = new Set(['return', 'ready']);
 
 const CSS_TEXT = `
 .h-toybar {
@@ -35,8 +69,11 @@ const CSS_TEXT = `
   z-index: 40;
   touch-action: pan-x;
   background: linear-gradient(to top, rgba(10,30,60,0.35), rgba(10,30,60,0));
+  opacity: 1;
+  transition: opacity 0.25s ease;
 }
 .h-toybar::-webkit-scrollbar { display: none; }
+.h-toybar.h-hidden { pointer-events: none; }
 
 .h-toybtn {
   flex: 0 0 auto;
@@ -71,110 +108,75 @@ const CSS_TEXT = `
   50% { transform: scale(1.28) translateY(-10px); }
 }
 
-.h-platformbar {
-  position: fixed;
-  left: calc(10px + env(safe-area-inset-left, 0px));
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column-reverse;
-  align-items: center;
-  gap: 14px;
-  z-index: 40;
-}
-
-.h-platbtn {
-  width: clamp(72px, 12vw, 92px);
-  border: 4px solid rgba(255,255,255,0.85);
-  border-radius: 20px;
-  background: linear-gradient(180deg, #ffd166, #f77f00);
-  box-shadow: 0 6px 14px rgba(0,0,0,.35);
-  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-  gap: 2px;
-  cursor: pointer;
-  padding: 6px 4px;
-  transition: transform .18s cubic-bezier(.34,1.56,.64,1);
-  -webkit-tap-highlight-color: transparent;
-  user-select: none;
-  touch-action: manipulation;
-  color: #3a2200;
-  font-weight: 700;
-}
-.h-platbtn-low { height: 76px; }
-.h-platbtn-mid { height: 104px; }
-.h-platbtn-high { height: 132px; }
-
-.h-platbtn-bar {
-  display: block;
-  width: 60%;
-  border-radius: 6px;
-  background: rgba(255,255,255,.6);
-}
-.h-platbtn-low .h-platbtn-bar { height: 18px; }
-.h-platbtn-mid .h-platbtn-bar { height: 34px; }
-.h-platbtn-high .h-platbtn-bar { height: 54px; }
-
-.h-platbtn-label { font-size: 13px; line-height: 1.15; text-align: center; }
-
-.h-platbtn.selected {
-  transform: scale(1.15);
-  border-color: #7cfc9a;
-  box-shadow: 0 8px 20px rgba(0,0,0,.4), 0 0 0 6px rgba(124,252,154,.35);
-}
-.h-platbtn.h-pressed { transform: scale(0.9); }
-
 @media (max-width: 480px), ((orientation: portrait) and (max-height: 600px)) {
   .h-toybtn { width: clamp(64px, 15vw, 84px); height: clamp(64px, 15vw, 84px); font-size: clamp(28px, 8vw, 38px); }
-  .h-platbtn { width: clamp(60px, 16vw, 78px); }
 }
 
 @media (orientation: landscape) and (max-height: 480px) {
   .h-toybar { padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); gap: 8px; }
   .h-toybtn { width: clamp(60px, 9vh, 80px); height: clamp(60px, 9vh, 80px); font-size: clamp(26px, 5vh, 34px); }
-  .h-platformbar { gap: 8px; }
-  .h-platbtn-low { height: 58px; }
-  .h-platbtn-mid { height: 78px; }
-  .h-platbtn-high { height: 98px; }
 }
 `;
 
 export class InputController {
-  constructor({ dom, getCamera, physics, sceneEnv, audio, onPlatformChange }) {
+  constructor({ dom, getCamera, physics, sceneEnv, audio, gameflow }) {
     this.dom = dom;
     this.getCamera = getCamera;
+    // Kept for the contract shape only — GameFlow owns all physics calls now
+    // (spawn/grab/dragTo/release). input.js never calls physics directly.
     this.physics = physics;
     this.sceneEnv = sceneEnv;
     this.audio = audio;
-    this.onPlatformChange = onPlatformChange || (() => {});
+    this.gameflow = gameflow || null;
 
-    // Public contract fields.
-    this.currentToyDef = TOYS.find((t) => t.id === 'heavyball') || TOYS[0];
-    this.currentPlatformId = 'mid';
+    // Fallbacks used only when gameflow is absent/incomplete (parallel dev,
+    // or the test harness) so currentToyDef/currentPlatformId always exist.
+    this._fallbackToyDef = TOYS.find((t) => t.id === 'heavyball') || TOYS[0];
+    this._fallbackPlatformId = 'mid';
 
-    // Internal state.
-    this._heldBody = null;
-    this._spawnTimer = 0;
-    this._draggingPointerId = null;
-    this._dragBuffer = [];
-    this._dragPlane = new THREE.Plane();
-    this._raycaster = new THREE.Raycaster();
+    // Single-pointer gesture state (first pointer wins).
+    this._activePointerId = null;
+    this._pointerStartX = 0;
+    this._pointerStartY = 0;
+    this._pointerStartT = 0;
+    this._pointerMoved = false;
+    this._aiming = false;
+
     this._audioUnlocked = false;
+    this._boardPulse = null; // { target, materials:[{mat,base}], baseScale:Vector3, t }
+    this._toyBarHidden = false;
 
-    // Pre-allocated scratch objects (avoid per-event allocations where easy).
+    // Pre-allocated scratch objects (avoid per-event allocations).
+    this._raycaster = new THREE.Raycaster();
     this._tmpNdc = new THREE.Vector2();
-    this._tmpDir = new THREE.Vector3();
+    this._tmpForward = new THREE.Vector3();
+    this._tmpRight = new THREE.Vector3();
     this._tmpProj = new THREE.Vector3();
-    this._tmpWorld = new THREE.Vector3();
+    this._tmpMatrix = new THREE.Matrix4();
+    this._tmpAnchor = new THREE.Vector3();
+    this._tmpVel = new THREE.Vector3();
 
     this._toyButtons = {};
-    this._platButtons = {};
 
     this._bindHandlers();
     this._buildUI();
+    this._buildTrajectoryPreview();
     this._bindPointerEvents();
+    this._subscribeGameflow();
+  }
 
-    // Vertical-slice default: a heavyball hovers at the mid platform tip.
-    this._spawnHeldToy();
+  // -- public contract fields (proxy GameFlow; keep existing so nothing
+  // else that reads these two properties breaks) --------------------------
+  get currentToyDef() {
+    if (this.gameflow && this.gameflow.currentToyDef) return this.gameflow.currentToyDef;
+    return this._fallbackToyDef;
+  }
+
+  get currentPlatformId() {
+    if (this.gameflow && typeof this.gameflow.currentPlatformId === 'string') {
+      return this.gameflow.currentPlatformId;
+    }
+    return this._fallbackPlatformId;
   }
 
   // -- setup ---------------------------------------------------------------
@@ -184,7 +186,8 @@ export class InputController {
     this._unlockAudioOnce = this._unlockAudioOnce.bind(this);
     this._onDomPointerDown = this._onDomPointerDown.bind(this);
     this._onDomPointerMove = this._onDomPointerMove.bind(this);
-    this._endDrag = this._endDrag.bind(this);
+    this._onDomPointerUp = this._onDomPointerUp.bind(this);
+    this._onDomPointerCancel = this._onDomPointerCancel.bind(this);
   }
 
   _buildUI() {
@@ -193,7 +196,8 @@ export class InputController {
     document.head.appendChild(style);
     this._styleEl = style;
 
-    // Bottom row: 8 big toy buttons.
+    // Bottom row: 8 big toy buttons. Same look/size/bounce as before —
+    // selecting one now just asks GameFlow for the swap.
     const toyBar = document.createElement('div');
     toyBar.className = 'h-toybar';
     TOYS.forEach((def) => {
@@ -216,33 +220,7 @@ export class InputController {
     document.body.appendChild(toyBar);
     this._toyBar = toyBar;
 
-    // Left column: 3 big platform buttons, visually increasing height.
-    const platBar = document.createElement('div');
-    platBar.className = 'h-platformbar';
-    const dotsFor = { low: '●', mid: '●●', high: '●●●' };
-    PLATFORMS.forEach((p) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = `h-platbtn h-platbtn-${p.id}`;
-      btn.setAttribute('aria-label', `platform ${p.id}`);
-      btn.dataset.platformId = p.id;
-      const dots = dotsFor[p.id] || '●';
-      btn.innerHTML =
-        '<span class="h-platbtn-bar"></span>' +
-        `<span class="h-platbtn-label">🪜<br>${dots}</span>`;
-      btn.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-        this._pressFeedback(btn);
-        this._selectPlatform(p.id);
-      });
-      platBar.appendChild(btn);
-      this._platButtons[p.id] = btn;
-    });
-    document.body.appendChild(platBar);
-    this._platBar = platBar;
-
     this._updateToySelectionUI();
-    this._updatePlatformSelectionUI();
   }
 
   _pressFeedback(btn) {
@@ -252,14 +230,9 @@ export class InputController {
   }
 
   _updateToySelectionUI() {
-    for (const id in this._toyButtons) {
-      this._toyButtons[id].classList.toggle('selected', id === this.currentToyDef.id);
-    }
-  }
-
-  _updatePlatformSelectionUI() {
-    for (const id in this._platButtons) {
-      this._platButtons[id].classList.toggle('selected', id === this.currentPlatformId);
+    const id = this.currentToyDef && this.currentToyDef.id;
+    for (const btnId in this._toyButtons) {
+      this._toyButtons[btnId].classList.toggle('selected', btnId === id);
     }
   }
 
@@ -272,69 +245,104 @@ export class InputController {
 
     this.dom.addEventListener('pointerdown', this._onDomPointerDown);
     this.dom.addEventListener('pointermove', this._onDomPointerMove);
-    this.dom.addEventListener('pointerup', this._endDrag);
-    this.dom.addEventListener('pointercancel', this._endDrag);
+    this.dom.addEventListener('pointerup', this._onDomPointerUp);
+    this.dom.addEventListener('pointercancel', this._onDomPointerCancel);
   }
 
   _unlockAudioOnce() {
     if (this._audioUnlocked) return;
     this._audioUnlocked = true;
     try {
-      this.audio.unlock();
+      if (this.audio) this.audio.unlock();
     } catch (err) {
       console.error(err);
     }
   }
 
-  // -- toy / platform selection --------------------------------------------
+  // -- GameFlow wiring -------------------------------------------------------
+
+  _subscribeGameflow() {
+    const gf = this.gameflow;
+    if (!gf) return;
+    // Chain any existing handler — onStateChange is a single callback slot
+    // on GameFlow, not a multi-listener event, so we must not clobber
+    // whatever main.js already hung there.
+    const prevHandler = typeof gf.onStateChange === 'function' ? gf.onStateChange : null;
+    gf.onStateChange = (state, prev) => {
+      if (prevHandler) {
+        try {
+          prevHandler(state, prev);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      this._onGameflowStateChange(state, prev);
+    };
+    // Apply whatever state GameFlow is already in (covers construction order
+    // races and the test harness setting state before wiring us up).
+    if (typeof gf.state === 'string') this._onGameflowStateChange(gf.state, null);
+  }
+
+  _onGameflowStateChange(state) {
+    if (HIDE_STATES.has(state)) {
+      this._setToyBarHidden(true);
+    } else if (SHOW_STATES.has(state)) {
+      this._setToyBarHidden(false);
+    }
+    // The throw is no longer being aimed once we leave 'ready' for any
+    // reason (windup starting, or anything else GameFlow decides).
+    if (this._aiming && state !== 'ready') {
+      this._cancelAim();
+    }
+  }
+
+  _setToyBarHidden(hidden) {
+    if (this._toyBarHidden === hidden) return;
+    this._toyBarHidden = hidden;
+    if (!this._toyBar) return;
+    this._toyBar.style.opacity = hidden ? '0' : '1';
+    this._toyBar.classList.toggle('h-hidden', hidden);
+  }
+
+  // -- toy selection --------------------------------------------------------
 
   _selectToy(def) {
-    this.currentToyDef = def;
-    this._replaceHeldToy();
+    if (this.gameflow && typeof this.gameflow.requestToy === 'function') {
+      try {
+        this.gameflow.requestToy(def);
+      } catch (err) {
+        console.error(err);
+      }
+    } else {
+      // No GameFlow yet (parallel dev / harness without one) — at least keep
+      // the UI locally consistent so the button row still behaves.
+      this._fallbackToyDef = def;
+    }
     this._updateToySelectionUI();
   }
 
-  _selectPlatform(id) {
-    this.currentPlatformId = id;
-    this._replaceHeldToy();
-    this._updatePlatformSelectionUI();
-    this.onPlatformChange(id);
-  }
+  // -- platform lookup helpers ------------------------------------------------
 
-  _replaceHeldToy() {
-    // Cancel any in-progress drag cleanly (shouldn't normally happen since
-    // UI buttons live outside the 3D view, but a second finger could do it).
-    if (this._draggingPointerId !== null) {
-      try {
-        this.dom.releasePointerCapture(this._draggingPointerId);
-      } catch (_) {
-        /* no-op */
-      }
-      this._draggingPointerId = null;
-      this._dragBuffer.length = 0;
+  _platformById(id) {
+    if (this.sceneEnv && Array.isArray(this.sceneEnv.platforms)) {
+      const p = this.sceneEnv.platforms.find((pp) => pp && pp.id === id);
+      if (p) return p;
     }
-    if (this._heldBody) {
-      this.physics.removeBody(this._heldBody);
-      this._heldBody = null;
-    }
-    this._spawnTimer = 0;
-    this._spawnHeldToy();
+    const c = PLATFORMS.find((pp) => pp.id === id);
+    if (!c) return null;
+    return { id: c.id, tip: new THREE.Vector3(c.tip.x, c.tip.y, c.tip.z), focus: null };
   }
 
-  _currentPlatform() {
-    return PLATFORMS.find((p) => p.id === this.currentPlatformId) || PLATFORMS[1];
+  _getPawAnchorPos(target) {
+    const out = target || new THREE.Vector3();
+    const body = this.gameflow && this.gameflow.heldBody;
+    if (body && body.pos) return out.copy(body.pos);
+    const plat = this._platformById(this.currentPlatformId);
+    if (plat && plat.tip) return out.copy(plat.tip);
+    return out.set(-3.4, 4.4, 0);
   }
 
-  _spawnHeldToy() {
-    const tip = this._currentPlatform().tip;
-    const pos = new THREE.Vector3(tip.x, tip.y, tip.z);
-    const body = this.physics.spawnToy(this.currentToyDef, pos);
-    this.physics.grab(body);
-    this._heldBody = body;
-    this._spawnTimer = 0;
-  }
-
-  // -- 3D pointer interaction ------------------------------------------------
+  // -- shared pointer utilities ------------------------------------------------
 
   _ndcFromClient(clientX, clientY) {
     const rect = this.dom.getBoundingClientRect();
@@ -345,143 +353,364 @@ export class InputController {
     return { ndc: this._tmpNdc, rect };
   }
 
-  _hitTestHeldToy(clientX, clientY, camera) {
-    const body = this._heldBody;
-    if (!body || !body.mesh) return false;
+  // -- board tap hit-test ------------------------------------------------------
+  // 1) recursive raycast against each platform's `focus` subtree (future-
+  //    proof — focus currently has no visible children, but other modules
+  //    may attach some later); 2) a generous ray-to-tip world-space distance
+  //    tolerance; 3) a screen-space fallback within ~90px of any board tip's
+  //    projected position, nearest wins.
+  _hitTestBoard(clientX, clientY, camera) {
+    if (!this.sceneEnv || !Array.isArray(this.sceneEnv.platforms)) return null;
     const { ndc, rect } = this._ndcFromClient(clientX, clientY);
     this._raycaster.setFromCamera(ndc, camera);
 
-    // 1) Direct hit against the toy's actual geometry.
-    if (this._raycaster.intersectObject(body.mesh, true).length > 0) return true;
+    let best = null; // { id, dist }
+    for (const p of this.sceneEnv.platforms) {
+      if (!p) continue;
+      if (p.focus) {
+        const hits = this._raycaster.intersectObject(p.focus, true);
+        if (hits.length > 0) {
+          const d = hits[0].distance;
+          if (!best || d < best.dist) best = { id: p.id, dist: d };
+          continue;
+        }
+      }
+      const pos = (p.focus && p.focus.position) || p.tip;
+      if (pos) {
+        const dist = this._raycaster.ray.distanceToPoint(pos);
+        if (dist <= BOARD_TAP_WORLD_TOLERANCE) {
+          if (!best || dist < best.dist) best = { id: p.id, dist };
+        }
+      }
+    }
+    if (best) return best.id;
 
-    // 2) Generous world-space sphere tolerance around the toy center.
-    const radius = Math.max((body.def && body.def.radius) || 0.3, 0.3);
-    const tol = radius * SPHERE_TOLERANCE_MUL;
-    const dist = this._raycaster.ray.distanceToPoint(body.mesh.position);
-    if (dist <= tol) return true;
-
-    // 3) Screen-space distance fallback — a toddler can't miss.
-    this._tmpProj.copy(body.mesh.position).project(camera);
-    const sx = (this._tmpProj.x * 0.5 + 0.5) * rect.width + rect.left;
-    const sy = (-this._tmpProj.y * 0.5 + 0.5) * rect.height + rect.top;
-    const dx = sx - clientX;
-    const dy = sy - clientY;
-    return dx * dx + dy * dy <= SCREEN_GRAB_RADIUS * SCREEN_GRAB_RADIUS;
+    // Screen-space fallback.
+    let bestScreen = null;
+    for (const p of this.sceneEnv.platforms) {
+      if (!p) continue;
+      const pos = (p.focus && p.focus.position) || p.tip;
+      if (!pos) continue;
+      this._tmpProj.copy(pos).project(camera);
+      const sx = (this._tmpProj.x * 0.5 + 0.5) * rect.width + rect.left;
+      const sy = (-this._tmpProj.y * 0.5 + 0.5) * rect.height + rect.top;
+      const dx = sx - clientX;
+      const dy = sy - clientY;
+      const d2 = dx * dx + dy * dy;
+      if (d2 <= BOARD_TAP_SCREEN_RADIUS * BOARD_TAP_SCREEN_RADIUS) {
+        if (!bestScreen || d2 < bestScreen.d2) bestScreen = { id: p.id, d2 };
+      }
+    }
+    return bestScreen ? bestScreen.id : null;
   }
 
-  _raycastToDragPlane(clientX, clientY, camera) {
-    const { ndc } = this._ndcFromClient(clientX, clientY);
-    this._raycaster.setFromCamera(ndc, camera);
-    const hit = this._raycaster.ray.intersectPlane(this._dragPlane, this._tmpWorld);
-    return hit ? this._tmpWorld : null;
+  _pulseBoard(id) {
+    const plat = this._platformById(id);
+    if (!plat) return;
+    // Best-effort: find the actual board mesh group (scene.js names it
+    // `board-<id>`) so the pulse reads on the real board; fall back to the
+    // (invisible) focus Object3D — still restores cleanly, just with no
+    // visible scale effect — if that lookup ever fails.
+    let target = null;
+    try {
+      if (this.sceneEnv && this.sceneEnv.scene && typeof this.sceneEnv.scene.getObjectByName === 'function') {
+        target = this.sceneEnv.scene.getObjectByName('board-' + id);
+      }
+    } catch (_) {
+      target = null;
+    }
+    if (!target) target = plat.focus;
+    if (!target) return;
+
+    const materials = [];
+    if (typeof target.traverse === 'function') {
+      target.traverse((o) => {
+        if (o.isMesh && o.material && o.material.emissive) {
+          materials.push({ mat: o.material, base: o.material.emissive.clone() });
+        }
+      });
+    }
+    this._boardPulse = {
+      target,
+      materials,
+      baseScale: target.scale.clone(),
+      t: 0,
+    };
   }
 
-  _pushDragSample(worldPos) {
-    const now = performance.now();
-    this._dragBuffer.push({ t: now, pos: worldPos.clone() });
-    // Trim samples older than the rolling window, but ALWAYS keep at least
-    // the two most recent ones. Pointer events don't arrive at a guaranteed
-    // cadence (frame jank, a slow last event before release, a device that
-    // batches touchmove); purging down to a single sample here would make
-    // _releaseVelocityFromBuffer() silently return zero velocity, turning
-    // a real flick into a dead-straight drop. Two points, however old, still
-    // give a meaningful direction+speed estimate.
-    while (this._dragBuffer.length > 2 && now - this._dragBuffer[0].t > DRAG_WINDOW_MS) {
-      this._dragBuffer.shift();
+  _updateBoardPulse(dt) {
+    const p = this._boardPulse;
+    if (!p) return;
+    p.t += dt;
+    const f = Math.min(1, p.t / BOARD_PULSE_DURATION);
+    // Ease up over the first third, ease back down over the rest.
+    const k = f < 0.35 ? f / 0.35 : Math.max(0, 1 - (f - 0.35) / 0.65);
+    const s = 1 + BOARD_PULSE_SCALE * k;
+    p.target.scale.set(p.baseScale.x * s, p.baseScale.y * s, p.baseScale.z * s);
+    for (const m of p.materials) {
+      m.mat.emissive.copy(m.base).lerp(BOARD_PULSE_COLOR, k);
+    }
+    if (f >= 1) {
+      p.target.scale.copy(p.baseScale);
+      for (const m of p.materials) m.mat.emissive.copy(m.base);
+      this._boardPulse = null;
     }
   }
 
-  _releaseVelocityFromBuffer() {
-    const buf = this._dragBuffer;
-    if (buf.length < 2) return new THREE.Vector3(0, 0, 0);
-    const last = buf[buf.length - 1];
-    const first = buf[0];
-    const dt = (last.t - first.t) / 1000;
-    if (dt < 0.008) return new THREE.Vector3(0, 0, 0);
-    const vel = last.pos.clone().sub(first.pos).divideScalar(dt);
-    vel.multiplyScalar(THROW_SCALE);
+  // -- aim gesture → velocity ---------------------------------------------
+
+  _computeAimVelocity(dxPx, dyPx, camera, out) {
+    const vel = out || new THREE.Vector3();
+    // "Forward" for the throw = from the current paw anchor toward the pool
+    // center (0,0) — robust regardless of exact camera placement, and
+    // matches "downward drag = forward+down power" (dragging down throws
+    // further into the pool).
+    const anchor = this._getPawAnchorPos(this._tmpAnchor);
+    this._tmpForward.set(-anchor.x, 0, -anchor.z);
+    if (this._tmpForward.lengthSq() < 1e-6) this._tmpForward.set(1, 0, 0);
+    this._tmpForward.normalize();
+
+    // "Right" for lateral left/right drag = the camera's own screen-right
+    // axis projected to the horizontal plane, so the gesture reads naturally
+    // from the player's point of view.
+    this._tmpRight.setFromMatrixColumn(camera.matrixWorld, 0);
+    this._tmpRight.y = 0;
+    if (this._tmpRight.lengthSq() < 1e-6) this._tmpRight.set(0, 0, 1);
+    this._tmpRight.normalize();
+
+    const lateral = dxPx * PX_TO_MPS;
+    const down = Math.max(0, dyPx) * PX_TO_MPS;
+    const up = Math.max(0, -dyPx) * PX_TO_MPS;
+
+    vel.set(0, 0, 0);
+    vel.addScaledVector(this._tmpForward, down * FORWARD_GAIN);
+    vel.addScaledVector(this._tmpRight, lateral * LATERAL_GAIN);
+    vel.y = up * UP_GAIN - down * DOWN_BIAS;
+
     const mag = vel.length();
     if (mag > MAX_RELEASE_SPEED) vel.multiplyScalar(MAX_RELEASE_SPEED / mag);
     return vel;
   }
 
+  // -- trajectory preview (owned InstancedMesh: 14 dots + 1 landing ring) ----
+
+  _buildTrajectoryPreview() {
+    const geo = new THREE.SphereGeometry(PREVIEW_DOT_RADIUS, 8, 6);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+    });
+    const total = PREVIEW_DOT_COUNT + 1; // + landing ring
+    const mesh = new THREE.InstancedMesh(geo, mat, total);
+    mesh.visible = false;
+    mesh.frustumCulled = false;
+    if (this.sceneEnv && this.sceneEnv.scene) this.sceneEnv.scene.add(mesh);
+    this._previewMesh = mesh;
+  }
+
+  _updateTrajectoryPreview(vel) {
+    const mesh = this._previewMesh;
+    if (!mesh) return;
+    const p0 = this._getPawAnchorPos(this._tmpAnchor);
+    const x0 = p0.x;
+    const y0 = p0.y;
+    const z0 = p0.z;
+    const vx = vel.x;
+    const vy = vel.y;
+    const vz = vel.z;
+
+    // Vertical-only ballistic solve for the impact time (y(t)=0). Horizontal
+    // clamping (below) never touches timing, matching Physics' own
+    // aim-assist which "bends the horizontal velocity/direction" only.
+    const disc = vy * vy + 2 * G * y0;
+    let tImpact = disc > 0 ? (vy + Math.sqrt(disc)) / G : 0.05;
+    if (!isFinite(tImpact) || tImpact <= 0) tImpact = 0.05;
+    tImpact = Math.min(tImpact, 3.5);
+
+    let landX = x0 + vx * tImpact;
+    let landZ = z0 + vz * tImpact;
+    const landR = Math.hypot(landX, landZ);
+    const maxR = POOL_CLAMP_FRACTION * POOL.WATER_RADIUS;
+    if (landR > maxR && landR > 1e-6) {
+      const s = maxR / landR;
+      landX *= s;
+      landZ *= s;
+    }
+
+    for (let i = 0; i < PREVIEW_DOT_COUNT; i++) {
+      const f = (i + 1) / PREVIEW_DOT_COUNT; // skip t=0 (that's the paw, not the arc)
+      const t = f * tImpact;
+      const y = Math.max(0, y0 + vy * t - 0.5 * G * t * t);
+      // Linear interpolation toward the (possibly clamped) landing point —
+      // exactly matches constant-velocity horizontal motion when unclamped,
+      // and "bends" smoothly/honestly toward the clamped point otherwise.
+      const x = x0 + (landX - x0) * f;
+      const z = z0 + (landZ - z0) * f;
+      this._tmpMatrix.makeScale(1, 1, 1);
+      this._tmpMatrix.setPosition(x, y, z);
+      mesh.setMatrixAt(i, this._tmpMatrix);
+    }
+    // Landing/target ring: bigger dot right at the (clamped) impact point.
+    this._tmpMatrix.makeScale(PREVIEW_RING_SCALE, PREVIEW_RING_SCALE, PREVIEW_RING_SCALE);
+    this._tmpMatrix.setPosition(landX, 0.02, landZ);
+    mesh.setMatrixAt(PREVIEW_DOT_COUNT, this._tmpMatrix);
+
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.visible = true;
+  }
+
+  _hideTrajectoryPreview() {
+    if (this._previewMesh) this._previewMesh.visible = false;
+  }
+
+  // -- aim lifecycle -----------------------------------------------------------
+
+  _cancelAim() {
+    this._aiming = false;
+    this._hideTrajectoryPreview();
+    if (this.gameflow && typeof this.gameflow.cancelAim === 'function') {
+      try {
+        this.gameflow.cancelAim();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  }
+
+  // -- 3D pointer interaction ------------------------------------------------
+
   _onDomPointerDown(e) {
-    // Ignore extra fingers while one drag is already in progress.
-    if (this._draggingPointerId !== null) return;
-    if (!this._heldBody) return; // nothing to grab during the spawn delay
+    if (this._activePointerId !== null) return; // first pointer wins
+    // Not starting on a DOM button (toy buttons live outside the 3D view,
+    // but this stays defensive in case `dom` ever wraps them).
+    if (this._toyBar && e.target && this._toyBar.contains(e.target)) return;
 
-    const camera = this.getCamera();
-    if (!camera) return;
+    this._activePointerId = e.pointerId;
+    this._pointerStartX = e.clientX;
+    this._pointerStartY = e.clientY;
+    this._pointerStartT = performance.now();
+    this._pointerMoved = false;
+    this._aiming = false;
 
-    if (!this._hitTestHeldToy(e.clientX, e.clientY, camera)) return;
-
-    e.preventDefault();
-    this._draggingPointerId = e.pointerId;
     try {
       this.dom.setPointerCapture(e.pointerId);
     } catch (_) {
       /* no-op, not fatal */
     }
-
-    camera.getWorldDirection(this._tmpDir);
-    this._dragPlane.setFromNormalAndCoplanarPoint(this._tmpDir, this._heldBody.mesh.position);
-
-    this._dragBuffer.length = 0;
-    this._pushDragSample(this._heldBody.mesh.position);
-
-    this.audio.onGrab(this.currentToyDef);
   }
 
   _onDomPointerMove(e) {
-    if (e.pointerId !== this._draggingPointerId) return;
-    if (!this._heldBody) return;
-    const camera = this.getCamera();
-    if (!camera) return;
+    if (e.pointerId !== this._activePointerId) return;
+    const dx = e.clientX - this._pointerStartX;
+    const dy = e.clientY - this._pointerStartY;
+    const dist = Math.hypot(dx, dy);
+    if (dist >= MOVE_THRESHOLD) this._pointerMoved = true;
 
-    const worldPos = this._raycastToDragPlane(e.clientX, e.clientY, camera);
-    if (worldPos) {
-      this.physics.dragTo(this._heldBody, worldPos);
-      this._pushDragSample(worldPos);
+    const state = this.gameflow && this.gameflow.state;
+
+    if (!this._aiming && this._pointerMoved && state === 'ready') {
+      this._aiming = true;
+      if (this.gameflow && typeof this.gameflow.beginAim === 'function') {
+        try {
+          this.gameflow.beginAim();
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    }
+
+    if (this._aiming) {
+      if (state !== 'ready') {
+        // State moved on mid-drag (e.g. something else forced a transition).
+        this._cancelAim();
+        return;
+      }
+      const camera = this.getCamera();
+      if (!camera) return;
+      const vel = this._computeAimVelocity(dx, dy, camera, this._tmpVel);
+      if (this.gameflow && typeof this.gameflow.updateAim === 'function') {
+        try {
+          this.gameflow.updateAim(vel);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      this._updateTrajectoryPreview(vel);
     }
   }
 
-  _endDrag(e) {
-    if (e.pointerId !== this._draggingPointerId) return;
+  _onDomPointerUp(e) {
+    if (e.pointerId !== this._activePointerId) return;
     try {
       this.dom.releasePointerCapture(e.pointerId);
     } catch (_) {
       /* no-op */
     }
-    this._draggingPointerId = null;
 
-    const body = this._heldBody;
-    if (body) {
-      // Capture the exact pointer-up position too, in case no pointermove
-      // fired between the last move sample and this release (event jitter,
-      // or a very short/fast flick) — keeps release velocity accurate.
+    const dx = e.clientX - this._pointerStartX;
+    const dy = e.clientY - this._pointerStartY;
+    const dt = performance.now() - this._pointerStartT;
+    const moved = Math.hypot(dx, dy);
+    const wasAiming = this._aiming;
+
+    if (wasAiming) {
       const camera = this.getCamera();
-      if (camera) {
-        const worldPos = this._raycastToDragPlane(e.clientX, e.clientY, camera);
-        if (worldPos) this._pushDragSample(worldPos);
+      const vel = camera
+        ? this._computeAimVelocity(dx, dy, camera, this._tmpVel)
+        : new THREE.Vector3(0, 0, 0);
+      this._aiming = false;
+      this._hideTrajectoryPreview();
+      if (this.gameflow && typeof this.gameflow.commitThrow === 'function') {
+        try {
+          this.gameflow.commitThrow(vel);
+        } catch (err) {
+          console.error(err);
+        }
       }
-      const velocity = this._releaseVelocityFromBuffer();
-      this.physics.release(body, velocity);
-      this.audio.onRelease(this.currentToyDef);
-      this._heldBody = null;
-      this._spawnTimer = RESPAWN_DELAY;
+      if (this.audio && typeof this.audio.onRelease === 'function') {
+        try {
+          this.audio.onRelease(this.currentToyDef);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    } else if (dt < TAP_MAX_MS && moved < MOVE_THRESHOLD) {
+      const state = this.gameflow && this.gameflow.state;
+      if (state === 'ready' || state === 'busy') {
+        const camera = this.getCamera();
+        if (camera) {
+          const id = this._hitTestBoard(e.clientX, e.clientY, camera);
+          if (id) {
+            if (this.gameflow && typeof this.gameflow.requestPlatform === 'function') {
+              try {
+                this.gameflow.requestPlatform(id);
+              } catch (err) {
+                console.error(err);
+              }
+            }
+            this._pulseBoard(id);
+          }
+        }
+      }
     }
-    this._dragBuffer.length = 0;
+
+    this._activePointerId = null;
+    this._pointerMoved = false;
+  }
+
+  _onDomPointerCancel(e) {
+    if (e.pointerId !== this._activePointerId) return;
+    if (this._aiming) this._cancelAim();
+    this._activePointerId = null;
+    this._pointerMoved = false;
   }
 
   // -- public API ------------------------------------------------------------
 
   update(dt) {
-    if (!this._heldBody && this._spawnTimer > 0) {
-      this._spawnTimer -= dt;
-      if (this._spawnTimer <= 0) {
-        this._spawnTimer = 0;
-        this._spawnHeldToy();
-      }
-    }
+    this._updateBoardPulse(dt);
+    this._updateToySelectionUI();
   }
 }
