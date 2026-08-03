@@ -16,6 +16,8 @@ const Render = {
   fish: { t: -3, x: 8, y: 26, wait: 5 },   // ときどきはねる さかな
   _boatCell: null, _boatMapRef: null,      // ふねの位置 (World.h の参照でキャッシュ有効性を判定)
 
+  _activeSRange: null, // { sMin, sMax }: アクティブセルが存在する対角線 s の範囲 (resize で更新)
+
   init(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
@@ -27,7 +29,27 @@ const Render = {
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
     this.canvas.width = Math.max(2, Math.round(st.width * this.dpr));
     this.canvas.height = Math.max(2, Math.round(st.height * this.dpr));
-    this.view = Iso.fitView(st.width, st.height, 18);
+    this.view = Iso.fitView(st.width, st.height, 18); // fitView が Iso.active も更新する
+    this.computeActiveSRange();
+  },
+
+  // Iso.active を1回だけ走査して、アクティブセルが存在する対角線 s の範囲を求める
+  // (毎フレームの s ループを画面に映る範囲だけに絞り込むための下ごしらえ)
+  computeActiveSRange() {
+    const GW = CFG.GW, GH = CFG.GH;
+    const maxS = (GW - 1) + (GH - 1);
+    if (!Iso.active) { this._activeSRange = { sMin: 0, sMax: maxS }; return; }
+    let sMin = maxS, sMax = 0, found = false;
+    for (let y = 0; y < GH; y++) {
+      for (let x = 0; x < GW; x++) {
+        if (!Iso.active[idx(x, y)]) continue;
+        const s = x + y;
+        if (s < sMin) sMin = s;
+        if (s > sMax) sMax = s;
+        found = true;
+      }
+    }
+    this._activeSRange = found ? { sMin, sMax } : { sMin: 0, sMax: maxS };
   },
 
   // スクリーン座標 → セル
@@ -84,16 +106,21 @@ const Render = {
     const v = this.view;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
-    this.drawTable(ctx, v);
-    this.drawTray(ctx, v);
+    // 保険の下地: 机・トレイは廃止し、画面ぜんたいを淡い色でぬるだけ
+    // (通常はアクティブセルの地形で全て覆われるので見えない)
+    ctx.fillStyle = PAL.tray;
+    ctx.fillRect(0, 0, v.w, v.h);
 
     const GW = CFG.GW, GH = CFG.GH;
     const maxS = (GW - 1) + (GH - 1);
-    for (let s = 0; s <= maxS; s++) {
+    const range = this._activeSRange || { sMin: 0, sMax: maxS };
+    for (let s = range.sMin; s <= range.sMax; s++) {
       const yFrom = Math.max(0, s - (GW - 1));
       const yTo = Math.min(GH - 1, s);
       for (let y = yFrom; y <= yTo; y++) {
-        this.drawCell(ctx, v, s - y, y);
+        const x = s - y;
+        if (!Iso.isActive(idx(x, y))) continue;
+        this.drawCell(ctx, v, x, y);
       }
       IsoWater.drawDiagonal(ctx, v, s, now);
       this.drawObjectsForS(ctx, v, s, now);

@@ -10,6 +10,22 @@
 // おなじ境界線になるようにし、アンチエイリアスの半端カバー率をなくす)
 function snapPt(p) { return { px: Math.round(p.px), py: Math.round(p.py) }; }
 
+// 全画面化: インアクティブ(画面外)な隣接セルは「水がない」あつかいにする
+// (露出ふちの判定用。画面外は見た目に影響しないのでこれでよい)
+function waterAtOrEdge(w, x, y) {
+  const GW = CFG.GW, GH = CFG.GH;
+  if (x < 0 || x >= GW || y < 0 || y >= GH) return 1; // マップ外はふちを丸めない (従来どおり)
+  const j = idx(x, y);
+  return Iso.isActive(j) ? w[j] : 0;
+}
+// だんさ落ちの相手セルの idx。グリッド外、またはインアクティブ(画面外)なら -1
+function activeNeighborIdx(x, y) {
+  const GW = CFG.GW, GH = CFG.GH;
+  if (x < 0 || x >= GW || y < 0 || y >= GH) return -1;
+  const j = idx(x, y);
+  return Iso.isActive(j) ? j : -1;
+}
+
 const IsoWater = {
   // 対角線 s 上の全セルの水を描く
   drawDiagonal(ctx, view, s, now) {
@@ -22,6 +38,7 @@ const IsoWater = {
     for (let y = yFrom; y <= yTo; y++) {
       const x = s - y;
       const i = idx(x, y);
+      if (!Iso.isActive(i)) continue; // 画面外セルは描かない
       const d = w[i];
       if (d < e) continue;
 
@@ -41,10 +58,11 @@ const IsoWater = {
       const alpha = clamp(0.5 + depthK * 0.38, 0, 0.9);
 
       // 隣セルの水の有無 (となりに水がない側の角をまるめて ぷるんとしたふちに)
-      const wW = x > 0 ? w[i - 1] : 1;      // (x-1, y)
-      const wE = x < GW - 1 ? w[i + 1] : 1; // (x+1, y)
-      const wN = y > 0 ? w[i - GW] : 1;     // (x, y-1)
-      const wS = y < GH - 1 ? w[i + GW] : 1;// (x, y+1)
+      // インアクティブな隣は「水がない」あつかい (画面外なので見た目に影響しない)
+      const wW = waterAtOrEdge(w, x - 1, y);
+      const wE = waterAtOrEdge(w, x + 1, y);
+      const wN = waterAtOrEdge(w, x, y - 1);
+      const wS = waterAtOrEdge(w, x, y + 1);
       const exposedN = wN < e; // N-E辺 側 (奥, (x,y-1)側)
       const exposedW = wW < e; // N-W辺 側 (奥, (x-1,y)側)
       const exposedE = wE < e; // E-S辺 側 (手前右)
@@ -73,13 +91,13 @@ const IsoWater = {
       }
 
       // だんさを流れおちる水: 右隣(x+1,y) → 右面(E-S辺)、左隣(x,y+1) → 左面(W-S辺)
-      // (グリッド外は 0 として、地図のはしから おちる ようすも描く)
-      const jR = x + 1 < GW ? idx(x + 1, y) : -1;
+      // (グリッド外・画面外(インアクティブ)は 0 として、地図のはしから おちる ようすも描く)
+      const jR = activeNeighborIdx(x + 1, y);
       const surfR = jR >= 0 ? h[jR] + w[jR] : 0;
       if (surf - surfR > 0.1) {
         this.drawFall(ctx, view, E, S, surf, surfR, c, alpha, now, x, 0);
       }
-      const jL = y + 1 < GH ? idx(x, y + 1) : -1;
+      const jL = activeNeighborIdx(x, y + 1);
       const surfL = jL >= 0 ? h[jL] + w[jL] : 0;
       if (surf - surfL > 0.1) {
         this.drawFall(ctx, view, W, S, surf, surfL, c, alpha, now, x, 1);

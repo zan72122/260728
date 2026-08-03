@@ -11,20 +11,27 @@
 </head>
 <body>
 <div id="app">
-  <div id="topbar">
-    <canvas id="mascot" width="120" height="120"></canvas>
-    <div id="modeButtons">
-      <button class="modeBtn active" id="modeFree"><canvas width="96" height="96"></canvas><span>あそぶ</span></button>
-      <button class="modeBtn" id="modeQuest"><canvas width="96" height="96"></canvas><span>おだい</span></button>
-      <button class="modeBtn" id="modeCompare"><canvas width="96" height="96"></canvas><span>みくらべ</span></button>
-    </div>
-    <div class="spacer"></div>
-    <button class="cmdBtn" id="btnUndo"><canvas width="96" height="96"></canvas></button>
-    <button class="cmdBtn" id="btnReset"><canvas width="96" height="96"></canvas></button>
-  </div>
-
   <div id="stage">
     <canvas id="game"></canvas>
+
+    <!-- 額縁のような ごく薄い内側の影(操作不可) -->
+    <div id="vignette"></div>
+
+    <!-- 左上: ぷるちゃん + モード3ボタン -->
+    <div id="topLeft" class="overlayGroup">
+      <canvas id="mascot" width="120" height="120"></canvas>
+      <div id="modeButtons">
+        <button class="modeBtn active" id="modeFree"><canvas width="96" height="96"></canvas><span>あそぶ</span></button>
+        <button class="modeBtn" id="modeQuest"><canvas width="96" height="96"></canvas><span>おだい</span></button>
+        <button class="modeBtn" id="modeCompare"><canvas width="96" height="96"></canvas><span>みくらべ</span></button>
+      </div>
+    </div>
+
+    <!-- 右上: もどす・リセット -->
+    <div id="topRight" class="overlayGroup">
+      <button class="cmdBtn" id="btnUndo"><canvas width="96" height="96"></canvas></button>
+      <button class="cmdBtn" id="btnReset"><canvas width="96" height="96"></canvas></button>
+    </div>
 
     <!-- おだいモード HUD -->
     <div id="questHud" class="hidden">
@@ -37,25 +44,26 @@
       <button class="compareBtn" id="btnSnap"><canvas width="110" height="110"></canvas><span>おぼえる</span></button>
       <button class="compareBtn hidden" id="btnSnapClear"><canvas width="110" height="110"></canvas><span>わすれる</span></button>
     </div>
-  </div>
 
-  <!-- たてもの えらび -->
-  <div id="subPalette" class="hidden">
-    <button class="subBtn" data-kind="house"><canvas width="110" height="110"></canvas></button>
-    <button class="subBtn" data-kind="shop"><canvas width="110" height="110"></canvas></button>
-    <button class="subBtn" data-kind="school"><canvas width="110" height="110"></canvas></button>
-  </div>
+    <!-- たてもの えらび (浮きツール列のすぐ上) -->
+    <div id="subPalette" class="hidden">
+      <button class="subBtn" data-kind="house"><canvas width="110" height="110"></canvas></button>
+      <button class="subBtn" data-kind="shop"><canvas width="110" height="110"></canvas></button>
+      <button class="subBtn" data-kind="school"><canvas width="110" height="110"></canvas></button>
+    </div>
 
-  <div id="toolbar">
-    <button class="tool" data-tool="mountain"><canvas width="110" height="110"></canvas><span>やま</span></button>
-    <button class="tool" data-tool="ditch"><canvas width="110" height="110"></canvas><span>みぞ</span></button>
-    <button class="tool" data-tool="river"><canvas width="110" height="110"></canvas><span>かわ</span></button>
-    <button class="tool" data-tool="levee"><canvas width="110" height="110"></canvas><span>ていぼう</span></button>
-    <button class="tool" data-tool="building"><canvas width="110" height="110"></canvas><span>たてもの</span></button>
-    <button class="tool" data-tool="plateau"><canvas width="110" height="110"></canvas><span>たかだい</span></button>
-    <button class="tool active" data-tool="water"><canvas width="110" height="110"></canvas><span>みず</span></button>
-    <button class="tool" data-tool="wave"><canvas width="110" height="110"></canvas><span>なみ</span></button>
-    <button class="tool" data-tool="eraser"><canvas width="110" height="110"></canvas><span>けす</span></button>
+    <!-- 下辺中央: ツール9ボタンの浮き列 -->
+    <div id="toolbar">
+      <button class="tool" data-tool="mountain"><canvas width="110" height="110"></canvas><span>やま</span></button>
+      <button class="tool" data-tool="ditch"><canvas width="110" height="110"></canvas><span>みぞ</span></button>
+      <button class="tool" data-tool="river"><canvas width="110" height="110"></canvas><span>かわ</span></button>
+      <button class="tool" data-tool="levee"><canvas width="110" height="110"></canvas><span>ていぼう</span></button>
+      <button class="tool" data-tool="building"><canvas width="110" height="110"></canvas><span>たてもの</span></button>
+      <button class="tool" data-tool="plateau"><canvas width="110" height="110"></canvas><span>たかだい</span></button>
+      <button class="tool active" data-tool="water"><canvas width="110" height="110"></canvas><span>みず</span></button>
+      <button class="tool" data-tool="wave"><canvas width="110" height="110"></canvas><span>なみ</span></button>
+      <button class="tool" data-tool="eraser"><canvas width="110" height="110"></canvas><span>けす</span></button>
+    </div>
   </div>
 </div>
 
