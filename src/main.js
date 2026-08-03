@@ -297,6 +297,21 @@ function heldScreenPos() {
 }
 window.__lab.heldScreenPos = heldScreenPos;
 
+// QA helper (final acceptance pass): expose renderer.info.render so headless
+// perf checks can read draw calls / triangles without instrumenting the
+// render loop. Read-only snapshot, no behavior change.
+function renderInfo() {
+  try {
+    if (!renderer || !renderer.info || !renderer.info.render) return null;
+    const r = renderer.info.render;
+    return { calls: r.calls, triangles: r.triangles };
+  } catch (err) {
+    recordError(err);
+    return null;
+  }
+}
+window.__lab.renderInfo = renderInfo;
+
 // ---------------------------------------------------------------------
 // Resize / orientation handling
 // ---------------------------------------------------------------------
