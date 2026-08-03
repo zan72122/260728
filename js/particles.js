@@ -72,12 +72,12 @@ const Particles = {
     }
   },
 
-  // view: {ox, oy, cs, rs, eh}
+  // view: Iso の view ({ox, oy, tw, th, eh, cs, ...})
   draw(ctx, view, now) {
-    const { ox, oy, cs, rs, eh } = view;
+    const cs = view.cs;
     for (const p of this.list) {
-      const px = ox + p.x * cs;
-      const py = oy + p.y * rs - p.z * eh;
+      const pr = Iso.project(view, p.x, p.y, p.z);
+      const px = pr.px, py = pr.py;
       const a = clamp(p.life, 0, 1);
       switch (p.kind) {
         case "sparkle": {
@@ -141,7 +141,7 @@ const Particles = {
           ctx.strokeStyle = "#ffffff";
           ctx.lineWidth = Math.max(1.5, cs * 0.09);
           ctx.beginPath();
-          ctx.ellipse(px, py, p.r * cs, p.r * cs * 0.55, 0, 0, 7);
+          ctx.ellipse(px, py, p.r * cs, p.r * cs * 0.5, 0, 0, 7);
           ctx.stroke();
           break;
       }
