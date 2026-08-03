@@ -144,14 +144,14 @@ void main() {
   float grooveDepth = clamp(vExtra.z, 0.0, 1.0);
   float edgeAO = clamp(vExtra.w, 0.0, 1.0);
 
-  // ρ<0.15(メッシュの極/中心付近)では、リッジ・ノイズ由来の法線の高周波成分を
-  // 滑らかに消し、ドームの大局法線(真上向き)だけへブレンドする。
-  // Round4審査で「中心に放射状の収束アーティファクトが見える」と指摘された箇所の
-  // 根本原因(極特異点での法線ノイズ)をここで直接抑える(スペキュラだけを弱める
-  // 対症療法ではなく、拡散・SSS・リムも含め N そのものを滑らかにする)。
+  // ρ<0.25(メッシュの極/中心付近)では、リッジ・ノイズ由来の法線の高周波成分を
+  // より緩やかに消し、ドームの大局法線(真上向き)だけへブレンドする。
+  // Round5審査: Round4のρ<0.15/急な smoothstepでは中心の放射状シワがまだ見えると
+  // 指摘されたため範囲を拡げ、下方でAO/groove陰影にも同じフェードを効かせる
+  // (centerFade として使い回す。中心は「つるんと滑らかな頂上」にする)。
   vec3 Nraw = normalize(vNormal);
-  float poleBlend = smoothstep(0.0, 0.15, rho);
-  vec3 N = normalize(mix(vec3(0.0, 0.0, 1.0), Nraw, poleBlend));
+  float centerFade = smoothstep(0.0, 0.25, rho);
+  vec3 N = normalize(mix(vec3(0.0, 0.0, 1.0), Nraw, centerFade));
   vec3 L = normalize(uLightDir);
   vec3 V = vec3(0.0, 0.0, 1.0);
 
@@ -163,18 +163,22 @@ void main() {
   float edgeRaw = clamp(horiz * 0.50 + rho * rho * 0.42, 0.0, 1.0);
   float edgeBoost = pow(edgeRaw, 1.35);
   float lowFreq = fbm(vLocalPos * 0.012 + 11.0); // まだら焼き(低周波、位相をずらす)
-  float centerT = uBake * 0.55;
-  float edgeT = clamp(uBake * 1.15, 0.0, 1.0);
+  // Round5: 中心が「中間ブラウン/じゃがいも」寄りに見えた → 中心は焼きランプの
+  // 第1区間(golden)にできるだけ留まるよう centerT を大きく下げ、縁とのコントラストを強める。
+  float centerT = uBake * 0.36;
+  float edgeT = clamp(uBake * 1.18, 0.0, 1.0);
   float bakeLocal = mix(centerT, edgeT, edgeBoost);
   bakeLocal = clamp(bakeLocal + (lowFreq - 0.5) * 0.22 * uBake, 0.0, 1.0);
 
   // ---------- 3段焼き色ランプ: base -> golden -> mid -> 焦げ縁 ----------
   // Round4指摘: 黄土色/オリーブに寄って冷たく見える → 緑成分を出さない暖色(橙寄り)の
   // 固定アンカー色 (#EDB96B / #C9803C / #8F5423) へ強めにブレンドして色相を担保する。
-  vec3 goldAnchorA = vec3(0.929, 0.725, 0.420); // #EDB96B (中心の明るい黄金)
+  // Round5: 中心をもう半段明るい黄金(#E2A85E 付近)にするため、アンカー自体を
+  // 明るく(#F0C077 相当へ)し、プリセット色への依存もさらに下げてブレンド比を上げる。
+  vec3 goldAnchorA = vec3(0.965, 0.780, 0.475); // 明るい黄金 (#F0C077 相当)
   vec3 goldAnchorB = vec3(0.788, 0.502, 0.235); // #C9803C (中間のこんがり橙)
   vec3 goldAnchorC = vec3(0.561, 0.329, 0.137); // #8F5423 (焦げ縁)
-  vec3 goldenA = mix(mix(uBaseColor, uBakedColor, 0.4), goldAnchorA, 0.72);
+  vec3 goldenA = mix(mix(uBaseColor, uBakedColor, 0.4), goldAnchorA, 0.82);
   vec3 goldenB = mix(uBakedColor, goldAnchorB, 0.72);
   vec3 crustColor = mix(uBakedColor, goldAnchorC, 0.78);
   vec3 albedo;
@@ -200,18 +204,29 @@ void main() {
   albedo *= (1.0 - poreDark);
 
   // ---------- topping ゾーン: 淡いクリーム黄 + 粒子感 (緑味を出さない) ----------
-  // Round4指摘: オリーブ/カーキに見える → #F2E3B0 系の淡いクリーム黄をベースにし、
-  // 焼けても格子の峰だけ淡い黄金色(#E8C078 程度)に留めて暗く/緑がからないようにする。
-  vec3 toppingBase = vec3(0.949, 0.890, 0.690); // #F2E3B0
-  vec3 toppingBaked = vec3(0.910, 0.753, 0.471); // 淡い黄金(#E8C078 相当)
-  float toppingGrain = fbm(vLocalPos * 0.28 + 50.0);
-  float toppingBakeMix = clamp(uBake * (0.4 + edgeBoost * 0.5), 0.0, 0.62);
-  vec3 toppingAlbedo = mix(toppingBase * 0.96, mix(toppingBase, toppingBaked, toppingBakeMix), 0.35 + toppingGrain * 0.4);
+  // Round5指摘: まだ灰色がかった砂岩/サンドペーパーに見える。
+  //   (a) ベースをもっと明度高く暖かいクリーム黄(#F5E6BC)へ。
+  //   (b) 粒子コントラストを半分以下に(明暗2色を強く切り替えるmixではなく、
+  //       1本の色を±小さく明度だけ揺らす方式に変更=「砂粒」感を消す)。
+  //   (c) 焼けた格子の峰は #EAC57E 程度の明るい淡黄金に(暗く/灰色くしない)。
+  vec3 toppingBase = vec3(0.961, 0.902, 0.737); // #F5E6BC
+  vec3 toppingBaked = vec3(0.918, 0.773, 0.494); // #EAC57E
+  float toppingGrain = fbm(vLocalPos * 0.24 + 50.0);
+  float toppingBakeMix = clamp(uBake * (0.35 + edgeBoost * 0.5), 0.0, 0.68);
+  vec3 toppingFlat = mix(toppingBase, toppingBaked, toppingBakeMix);
+  vec3 toppingAlbedo = toppingFlat * (0.95 + toppingGrain * 0.10); // 明度だけ僅かに揺らす(粒子感は控えめ)
   albedo = mix(albedo, toppingAlbedo, toppingMask);
 
   // ---------- 溝(grooveDepth): 溝底を暗く、縁にハイライト ----------
-  albedo *= mix(1.0, 0.72, grooveDepth);
-  float grooveRim = smoothstep(0.08, 0.26, grooveDepth) * (1.0 - smoothstep(0.26, 0.62, grooveDepth));
+  // Round5: 中心近傍(centerFade)では groove 由来の陰影も無効化し、
+  // 「つるんと滑らかな頂上」を保証する(中心のシワ痕の残存要因を断つ)。
+  // また、実際の高さ場(法線傾き)+ albedo darken + edgeAO darken の3つが同じ溝に
+  // 重ねて掛かると濃く濁って「砂/汚れ」に見えるため(Round5 melon topping指摘)、
+  // albedo側の減光は topping では大きく弱める(実陰影は法線/edgeAOに任せる)。
+  float grooveEff = grooveDepth * centerFade;
+  float grooveFloor = mix(0.72, 0.94, toppingMask);
+  albedo *= mix(1.0, grooveFloor, grooveEff);
+  float grooveRim = smoothstep(0.08, 0.26, grooveEff) * (1.0 - smoothstep(0.26, 0.62, grooveEff));
   albedo += grooveRim * 0.16;
 
   // ---------- 亀裂ノイズ (crackAmount / topping.crack) ----------
@@ -237,10 +252,14 @@ void main() {
   albedo = clamp(albedo, 0.0, 1.0);
 
   // ================= ライティング =================
-  float w = 0.5;
+  // Round5: golden中心の明るさ不足・melon toppingの陰影が濃すぎて灰色に見える問題に
+  // 対応するため、ラップ係数を少し柔らかく(w↑)し、アンビエント床を底上げする。
+  // topping はマットなクッキー生地なので、影側でも極端に暗くならないよう
+  // さらに高いアンビエント床を与える(=均一に明るいクリーム色を保つ)。
+  float w = 0.62;
   float ndl = dot(N, L);
   float wrap = clamp((ndl + w) / (1.0 + w), 0.0, 1.0);
-  wrap = max(wrap, 0.22); // 完全な黒潰れを避ける弱いアンビエント床
+  wrap = max(wrap, mix(0.28, 0.58, toppingMask)); // 完全な黒潰れを避けるアンビエント床
 
   // 擬似SSS: 生地ほど影側へ暖色の透過を足す(「もちっと」感の要なので少し強めに)
   float sssAmt = (1.0 - uBake) * clamp(uSSS, 0.0, 1.0);
@@ -275,8 +294,16 @@ void main() {
   vec3 lit = albedo * wrap + sssColor * sssTerm + rimColor;
   lit += vec3(1.0, 0.96, 0.85) * spec;
 
-  // 縁・溝の接地陰影 (edgeAO)
-  lit *= mix(0.72, 1.0, edgeAO);
+  // 縁・溝の接地陰影 (edgeAO)。中心近傍(centerFade)では無効化して滑らかな頂上を保つ。
+  // topping(マットなクッキー生地)は albedo 側の減光と重ねて濁らないよう床を高くする。
+  float edgeAOEff = mix(1.0, edgeAO, centerFade);
+  float aoFloor = mix(0.72, 0.94, toppingMask);
+  lit *= mix(aoFloor, 1.0, edgeAOEff);
+
+  // 中心付近の追加ブライトニング(Round5: golden の中心をもう半段明るく)。
+  // ドーム頂上(N がほぼ真上向き)かつ中心に近いほど、光源直下に近い扱いでほんのり底上げする。
+  float topGlow = pow(clamp(N.z, 0.0, 1.0), 2.0) * (1.0 - rho) * 0.14;
+  lit += albedo * topGlow;
 
   // inOven: ほんのり暖色
   lit = mix(lit, lit * vec3(1.08, 0.93, 0.76) + vec3(0.025, 0.008, 0.0), uOpts.x * 0.5);

@@ -71,11 +71,20 @@ export class Forest {
     this._backdropCanvas = null;
     this._backdropCtx = null;
     this._backdropSize = { w: 0, h: 0 };
+    // 全体上限の「最古」判定用の単調増加シーケンス。Date.now() は同一ミリ秒内に
+    // 複数配置されると同値になり得るため、置換順の一意性はこちらで保証する
+    // (load() で復元したものには先にこのシーケンスを振り、常にそれより新しくなるようにする)。
+    this._placeSeq = 0;
+  }
+
+  _nextSeq() {
+    this._placeSeq += 1;
+    return this._placeSeq;
   }
 
   /**
    * 完成パンを森に配置する。
-   * 同じ breadId は最大 MAX_PER_KIND 個まで蓄積し、超えたら最古を置換する。
+   * 全体で最大 MAX_TOTAL 個まで蓄積し、超えたら kind をまたいで最古を置換する。
    * @param {string} breadId
    * @param {any} snapshot dough.snapshot() の返り値
    */
@@ -84,7 +93,7 @@ export class Forest {
     const kind = (bread && bread.forest && bread.forest.kind) || 'stone';
     if (!this.items[kind]) this.items[kind] = [];
     const list = this.items[kind];
-    const entry = { breadId, snapshot, placedAt: Date.now() };
+    const entry = { breadId, snapshot, placedAt: Date.now(), _seq: this._nextSeq() };
     list.push(entry);
     this._ensureImage(entry); // snapshot.image があれば Image のデコードをここで開始 (一度だけ生成)
     this._enforceGlobalCap();
@@ -107,14 +116,17 @@ export class Forest {
     }
   }
 
-  // 全 kind を通じて最も古い(placedAt が最小の) 1個を取り除く。取り除けたら true。
+  // 全 kind を通じて最も古い(_seq が最小の) 1個を取り除く。取り除けたら true。
+  // 各 kind 内は push 順(古い→新しい)を保っているため、各 kind の先頭同士だけ比較すれば良い。
   _evictOldest() {
     let oldestKind = null;
-    let oldestTime = Infinity;
+    let oldestSeq = Infinity;
     for (const kind in this.items) {
       const list = this.items[kind];
-      if (list.length && list[0].placedAt <= oldestTime) {
-        oldestTime = list[0].placedAt;
+      if (!list.length) continue;
+      const seq = typeof list[0]._seq === 'number' ? list[0]._seq : list[0].placedAt;
+      if (seq <= oldestSeq) {
+        oldestSeq = seq;
         oldestKind = kind;
       }
     }
@@ -224,6 +236,7 @@ export class Forest {
             // image 無しの旧形式 snapshot もそのまま読める (後方互換)
             snapshot: it.snapshot,
             placedAt: 0, // 復元時は落下演出をスキップ（十分昔とみなす）
+            _seq: this._nextSeq(), // このセッションで新規に place() されるものより必ず古い扱いにする
           }));
       }
       this.items = cleaned;
