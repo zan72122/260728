@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>underwater.js jet standalone test (R4)</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #10202a; }
+  #canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #hud {
+    position: fixed; top: 8px; left: 8px; z-index: 10;
+    font: 12px/1.4 monospace; color: #fff; background: rgba(0,0,0,0.45);
+    padding: 6px 10px; border-radius: 6px; pointer-events: none;
+    white-space: pre;
+  }
+</style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="hud">loading...</div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three.module.js"
+    }
+  }
+  </script>
+  <script type="module" src="./jet-test.js"></script>
+</body>
+</html>
