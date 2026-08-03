@@ -105,6 +105,39 @@ export class Audio {
     this._tone({ freq: 1180, dur: 0.5, type: 'sine', gain: 0.14 });
     this._tone({ freq: 1770, dur: 0.35, type: 'sine', gain: 0.06 });
   }
+  /** キーキーというきしみ（油をさす前） */
+  squeak() {
+    this._tone({ freq: 1900, slideTo: 950, dur: 0.14, type: 'sawtooth', gain: 0.05 });
+    this._tone({ freq: 1650, slideTo: 820, dur: 0.16, type: 'sawtooth', gain: 0.045, delay: 0.16 });
+  }
+
+  /** スパナ・ネジの「きゅっ」 */
+  clunk() {
+    this._tone({ freq: 150, slideTo: 70, dur: 0.12, type: 'square', gain: 0.2 });
+    this._noise({ dur: 0.06, freq: 900, gain: 0.09, q: 1.5 });
+  }
+
+  /** 油のしずくがポタッ */
+  drip() {
+    this._tone({ freq: 1500, slideTo: 320, dur: 0.16, type: 'sine', gain: 0.22 });
+  }
+
+  /** スポンジでこする音 */
+  scrub() {
+    this._noise({ dur: 0.16, freq: 900, slideTo: 1600, q: 0.9, gain: 0.08 });
+  }
+
+  /** ピカッと光る音 */
+  ding() {
+    this._tone({ freq: 1568, dur: 0.5, type: 'sine', gain: 0.14 });
+    this._tone({ freq: 2349, dur: 0.32, type: 'sine', gain: 0.05 });
+  }
+
+  /** こわれたベルの「…」 */
+  thud() {
+    this._tone({ freq: 220, slideTo: 140, dur: 0.09, type: 'triangle', gain: 0.12 });
+  }
+
   fanfare() {
     const notes = [523, 659, 784, 1047];
     notes.forEach((f, i) => {

@@ -1,6 +1,6 @@
 // 絵の部品ぜんぶ。canvas 2D で手描き。
 import {
-  TAU, PI, clamp, lerp, smoothstep, hash1, roundRect, capsule, ik2, alpha, shade,
+  TAU, PI, clamp, lerp, smoothstep, hash1, hash2, roundRect, capsule, ik2, alpha, shade,
 } from './util.js';
 import { star4, heartPath } from './particles.js';
 
@@ -522,9 +522,21 @@ export const TRIKE = {
   seat: [44, -100],
   head: [96, -108],
   bar: [100, -146],
+  barScrew: [98, -126],   // ステムのネジ（ぐらぐらハンドルの原因）
   wheelbase: 156,
   crank: 15,
 };
+
+// ベルの位置（車体ローカル）。ネジはドームのてっぺん
+export const BELL_LOCAL = [TRIKE.bar[0] + 2, TRIKE.bar[1] - 12];
+export const BELL_SCREW_LOCAL = [BELL_LOCAL[0], BELL_LOCAL[1] - 13];
+
+/** ベルの中に入れる部品（3種類とも正解） */
+export const BELLPARTS = [
+  { type: 'round', color: '#FF6B6B' },
+  { type: 'star', color: '#8ED2F5' },
+  { type: 'flower', color: '#FFD36E' },
+];
 
 /** 奥側：後輪（奥）・車軸・フレーム・サドル */
 export function drawTrikeBack(ctx, wheelRot) {
@@ -571,11 +583,438 @@ export function drawTrikeMid(ctx, wheelRot) {
   drawSmallWheel(ctx, rx + 7, ry, TRIKE.rearR, wheelRot);
 }
 
-/** 手前側：ハンドル・ベル・吹き流し・かご */
-export function drawTrikeFront(ctx, t) {
+/** ベルの中の部品（金属の座金 + 色つきの飾り） */
+export function drawBellPart(ctx, type, s, color) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.2)';
+  ctx.shadowBlur = s * 0.3;
+  ctx.shadowOffsetY = s * 0.1;
+  const g = ctx.createLinearGradient(0, -s, 0, s);
+  g.addColorStop(0, '#E4EAF0');
+  g.addColorStop(1, C.metalDark);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, s * 0.72, 0, TAU);
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = color;
+  if (type === 'star') { star5(ctx, s * 0.52); ctx.fill(); }
+  else if (type === 'flower') {
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * TAU;
+      ctx.beginPath();
+      ctx.ellipse(Math.cos(a) * s * 0.3, Math.sin(a) * s * 0.3, s * 0.26, s * 0.2, a, 0, TAU);
+      ctx.fill();
+    }
+    ctx.fillStyle = shade(color, 0.25);
+    ctx.beginPath();
+    ctx.arc(0, 0, s * 0.2, 0, TAU);
+    ctx.fill();
+  } else {
+    ctx.beginPath();
+    ctx.arc(0, 0, s * 0.42, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.beginPath();
+    ctx.arc(-s * 0.14, -s * 0.14, s * 0.16, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/**
+ * ベル。b = { broken, open(0..1), part, screwA, ring(0..1), shake }
+ * open でドームが持ち上がり、中の部品スロットが見える。
+ */
+export function drawBell(ctx, x, y, b = {}, t = 0) {
+  const R = 13;
+  ctx.save();
+  ctx.translate(x, y);
+  const ring = b.ring || 0;
+  const shake = b.shake || 0;
+  if (ring > 0 || shake > 0) ctx.rotate(Math.sin(t * 55) * 0.12 * Math.max(ring, shake * 0.5));
+
+  // 鳴った波紋
+  if (ring > 0.05) {
+    ctx.save();
+    ctx.globalAlpha = ring * 0.8;
+    ctx.strokeStyle = '#FFE9A3';
+    ctx.lineWidth = 2.6;
+    for (let i = 0; i < 2; i++) {
+      ctx.beginPath();
+      ctx.arc(0, -4, R * (1.5 + i * 0.6) * (2 - ring), PI * 1.1, PI * 1.9);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // レバーと台座
+  ctx.fillStyle = '#C2405A';
+  roundRect(ctx, -4, -2, 20, 5, 2);
+  ctx.fill();
+  ctx.fillStyle = C.metalDark;
+  roundRect(ctx, -R, 0, R * 2, 4.5, 2);
+  ctx.fill();
+
+  const open = b.open || 0;
+  if (open > 0.02) {
+    // 中身（うつわ側）
+    ctx.fillStyle = '#3A3440';
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 0.82, PI, 0);
+    ctx.closePath();
+    ctx.fill();
+    if (b.part) {
+      drawBellPart(ctx, b.part.type, 7.5, b.part.color);
+      // 位置合わせ: スロット中心へ
+    } else {
+      // ここに部品が入る、の点線
+      ctx.strokeStyle = '#FFE9A3';
+      ctx.setLineDash([3, 3]);
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(0, -3.5, 5.6, 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // ドーム（フタ）
+  ctx.save();
+  if (open > 0.02) {
+    ctx.translate(-R, 0);
+    ctx.rotate(-open * 1.35);
+    ctx.translate(R, 0);
+  }
+  const g = ctx.createLinearGradient(-R, -R, R, 2);
+  g.addColorStop(0, '#FF8F8F');
+  g.addColorStop(0.5, '#FF6B6B');
+  g.addColorStop(1, '#D14B4B');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, R, PI, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.beginPath();
+  ctx.arc(-4.5, -6.8, 3.2, 0, TAU);
+  ctx.fill();
+  // てっぺんのネジ
+  ctx.save();
+  ctx.translate(0, -R + 1.5);
+  ctx.rotate(b.screwA || 0);
+  ctx.fillStyle = C.metalDark;
+  ctx.beginPath();
+  ctx.arc(0, 0, 4.4, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = C.metal;
+  ctx.beginPath();
+  ctx.arc(0, 0, 3.2, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = C.metalDark;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-2.4, 0);
+  ctx.lineTo(2.4, 0);
+  ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+
+  ctx.restore();
+}
+
+/** ステムの六角ネジ */
+export function drawScrew(ctx, x, y, r, a = 0) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(a);
+  ctx.fillStyle = C.metalDark;
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const th = (i / 6) * TAU;
+    const px = Math.cos(th) * r;
+    const py = Math.sin(th) * r;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = C.metal;
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.62, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = C.metalDark;
+  ctx.lineWidth = r * 0.24;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.4, 0);
+  ctx.lineTo(r * 0.4, 0);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** スパナ。口（C形）の中心が原点 */
+export function drawWrench(ctx, s = 1) {
+  ctx.save();
+  ctx.scale(s, s);
+  ctx.lineJoin = 'round';
+  // 柄
+  const g = ctx.createLinearGradient(0, -8, 0, 8);
+  g.addColorStop(0, '#C8D2DC');
+  g.addColorStop(0.5, '#9AA6B2');
+  g.addColorStop(1, '#7C8794');
+  ctx.fillStyle = g;
+  ctx.strokeStyle = '#5E6873';
+  ctx.lineWidth = 2;
+  roundRect(ctx, 10, -6.5, 52, 13, 6.5);
+  ctx.stroke();
+  ctx.fill();
+  // 口（C形）
+  ctx.beginPath();
+  ctx.arc(0, 0, 15, 0.75, TAU - 0.75);
+  ctx.arc(0, 0, 7.5, TAU - 0.9, 0.9, true);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  roundRect(ctx, 14, -6, 44, 4.6, 2.3);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** 油さし。注ぎ口の先が local (-30,-30) */
+export function drawOilCan(ctx, s = 1, squash = 0) {
+  ctx.save();
+  ctx.scale(s * (1 + squash * 0.06), s * (1 - squash * 0.1));
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = C.pumpDark;
+  ctx.lineWidth = 2.4;
+  // 本体（円すい）
+  const g = ctx.createLinearGradient(-16, 0, 16, 0);
+  g.addColorStop(0, C.pumpDark);
+  g.addColorStop(0.45, C.pumpBody);
+  g.addColorStop(1, '#63C9BF');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(-17, 12);
+  ctx.lineTo(17, 12);
+  ctx.lineTo(7, -8);
+  ctx.lineTo(-7, -8);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.fill();
+  ctx.fillStyle = C.pumpDark;
+  roundRect(ctx, -19, 10, 38, 6, 3);
+  ctx.fill();
+  // 注ぎ口
+  capsule(ctx, -4, -8, -30, -30, 6.5, C.pumpDark);
+  capsule(ctx, -4, -8, -30, -30, 3.6, C.metal);
+  // 押しボタン（ドーム）
+  ctx.fillStyle = '#FF7C90';
+  ctx.beginPath();
+  ctx.arc(0, -8, 6.5, PI, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/** スポンジ */
+export function drawSponge(ctx, s = 1) {
+  ctx.save();
+  ctx.scale(s, s);
+  ctx.shadowColor = 'rgba(0,0,0,0.18)';
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 3;
+  ctx.fillStyle = '#F5D76E';
+  roundRect(ctx, -26, -18, 52, 36, 9);
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = '#7FC98F';
+  roundRect(ctx, -26, 8, 52, 10, 5);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(180,140,50,0.3)';
+  for (const [hx, hy, hr] of [[-13, -8, 3.4], [4, -11, 2.6], [14, -3, 3], [-4, 0, 2.4]]) {
+    ctx.beginPath();
+    ctx.arc(hx, hy, hr, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** みがき布 */
+export function drawCloth(ctx, s = 1, t = 0) {
+  ctx.save();
+  ctx.scale(s, s);
+  ctx.shadowColor = 'rgba(0,0,0,0.16)';
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 3;
+  const w = Math.sin(t * 6) * 2;
+  ctx.fillStyle = '#FFB3C6';
+  ctx.beginPath();
+  ctx.moveTo(-24, -14 + w);
+  ctx.quadraticCurveTo(0, -24, 24, -14 - w);
+  ctx.quadraticCurveTo(30, 4, 22, 16);
+  ctx.quadraticCurveTo(0, 24, -22, 16);
+  ctx.quadraticCurveTo(-30, 2, -24, -14 + w);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+  ctx.lineWidth = 2.6;
+  ctx.beginPath();
+  ctx.moveTo(-14, -8);
+  ctx.quadraticCurveTo(0, -2, 14, -9);
+  ctx.moveTo(-14, 4);
+  ctx.quadraticCurveTo(2, 10, 15, 3);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** どろ汚れ（hp 1→0 で消える） */
+export function drawMud(ctx, b) {
+  if (b.hp <= 0.02) return;
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.rotate(hash1(b.seed * 3.3) * TAU);
+  ctx.globalAlpha = 0.88 * b.hp;
+  ctx.fillStyle = '#7A5433';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, b.r, b.r * 0.72, 0, 0, TAU);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(b.r * 0.5, b.r * 0.28, b.r * 0.55, b.r * 0.4, 0.5, 0, TAU);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(-b.r * 0.5, -b.r * 0.2, b.r * 0.48, b.r * 0.36, -0.4, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#5E3F24';
+  ctx.globalAlpha = 0.5 * b.hp;
+  ctx.beginPath();
+  ctx.ellipse(b.r * 0.15, 0, b.r * 0.4, b.r * 0.26, 0.2, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+/** きしみのギザギザ（車軸から放射） */
+export function drawSqueak(ctx, t, r, amp) {
+  if (amp <= 0.03) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const frame = Math.floor(t * 9);
+  for (let i = 0; i < 3; i++) {
+    const fl = hash2(frame, i);
+    if (fl < 0.3) continue;
+    const a = -2.4 + i * 1.05 + (hash1(frame + i * 7) - 0.5) * 0.5;
+    ctx.save();
+    ctx.rotate(a);
+    ctx.globalAlpha = amp * (0.5 + fl * 0.5);
+    ctx.beginPath();
+    let rr = r * 0.5;
+    ctx.moveTo(rr, 0);
+    for (let k = 0; k < 4; k++) {
+      rr += r * 0.16;
+      ctx.lineTo(rr, (k % 2 === 0 ? 1 : -1) * r * 0.13);
+    }
+    ctx.strokeStyle = '#FFD36E';
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.strokeStyle = '#E0556E';
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+/** タイトル画面のエピソード選択アイコン */
+export function iconEpisode(ep) {
+  return (ctx, r) => {
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.fillStyle = '#FFFFFF';
+    ctx.lineWidth = r * 0.14;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (ep === 'tire') {
+      // ぺしゃんこタイヤ
+      ctx.beginPath();
+      ctx.ellipse(0, r * 0.12, r * 0.46, r * 0.3, 0, 0, TAU);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.5, r * 0.44);
+      ctx.lineTo(r * 0.5, r * 0.44);
+      ctx.stroke();
+      heartPath2(ctx, 0, -r * 0.4, r * 0.2);
+      ctx.fill();
+    } else if (ep === 'bell') {
+      ctx.beginPath();
+      ctx.arc(-r * 0.12, -r * 0.02, r * 0.34, PI, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillRect(-r * 0.5, r * 0.05, r * 0.76, r * 0.14);
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(r * 0.3 + i * r * 0.16, -r * 0.3, r * 0.05, 0, TAU);
+        ctx.fill();
+      }
+    } else if (ep === 'bar') {
+      ctx.save();
+      ctx.rotate(-0.18);
+      ctx.beginPath();
+      ctx.moveTo(0, r * 0.42);
+      ctx.lineTo(0, -r * 0.12);
+      ctx.moveTo(-r * 0.4, -r * 0.18);
+      ctx.lineTo(r * 0.4, -r * 0.24);
+      ctx.stroke();
+      ctx.restore();
+      for (const sgn of [-1, 1]) {
+        ctx.beginPath();
+        ctx.arc(sgn * r * 0.44, -r * 0.24, r * 0.16, sgn > 0 ? -0.9 : PI - 0.9, sgn > 0 ? 0.9 : PI + 0.9);
+        ctx.stroke();
+      }
+    } else if (ep === 'oil') {
+      // しずく
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 0.44);
+      ctx.quadraticCurveTo(r * 0.34, -r * 0.02, r * 0.3, r * 0.14);
+      ctx.arc(0, r * 0.14, r * 0.3, 0, PI);
+      ctx.quadraticCurveTo(-r * 0.34, -r * 0.02, 0, -r * 0.44);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      // あわ
+      for (const [x, y, rr] of [[-r * 0.18, r * 0.08, 0.26], [r * 0.22, -r * 0.1, 0.2], [-r * 0.02, -r * 0.3, 0.13]]) {
+        ctx.beginPath();
+        ctx.arc(x, y, r * rr, 0, TAU);
+        ctx.stroke();
+      }
+      ctx.fillRect(-r * 0.42, r * 0.26, r * 0.84, r * 0.2);
+    }
+  };
+}
+
+function heartPath2(ctx, x, y, s) {
+  ctx.save();
+  ctx.translate(x, y);
+  heartPath(ctx, s);
+  ctx.restore();
+}
+
+/** 手前側：ハンドル・ベル・吹き流し・かご。o = { bell, barWobble, barScrewA } */
+export function drawTrikeFront(ctx, t, o = {}) {
   const [bx, by] = TRIKE.bar;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
+
+  // ぐらぐら（ステムの上で回る）
+  const wobA = (o.barWobble || 0) * Math.sin(t * 24) * 0.09;
+  const px = bx;
+  const py = by + 18;
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(wobA);
+  ctx.translate(-px, -py);
 
   ctx.save();
   ctx.translate(bx, by);
@@ -585,18 +1024,6 @@ export function drawTrikeFront(ctx, t) {
   roundRect(ctx, -38, -3, 17, 11, 5);
   ctx.fill();
   roundRect(ctx, 22, -8, 17, 11, 5);
-  ctx.fill();
-  // ベル
-  ctx.fillStyle = '#FF6B6B';
-  ctx.beginPath();
-  ctx.arc(4, -5, 8.5, PI, TAU);
-  ctx.fill();
-  ctx.fillStyle = '#D14B4B';
-  roundRect(ctx, -4.5, -5, 17, 4.5, 2);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.beginPath();
-  ctx.arc(1, -8, 2.6, 0, TAU);
   ctx.fill();
   // 吹き流し
   ctx.lineWidth = 3;
@@ -650,6 +1077,14 @@ export function drawTrikeFront(ctx, t) {
     ctx.fill();
   }
   ctx.restore();
+
+  // ベル
+  drawBell(ctx, BELL_LOCAL[0], BELL_LOCAL[1], o.bell || {}, t);
+
+  ctx.restore(); // ぐらぐらグループ
+
+  // ステムのネジ
+  drawScrew(ctx, TRIKE.barScrew[0], TRIKE.barScrew[1], 6.5, o.barScrewA || 0);
 }
 
 function drawSmallWheel(ctx, x, y, r, t, dim = false) {

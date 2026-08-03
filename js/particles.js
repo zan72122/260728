@@ -1,6 +1,6 @@
 // パーティクル：空気のもや・キラキラ・紙ふぶき・ハートなど。
 // space が 'world' ならカメラ変換の内側、'screen' なら画面座標で描く。
-import { TAU, rand, clamp } from './util.js';
+import { TAU, rand, clamp, pick } from './util.js';
 
 export class Particles {
   constructor() {
@@ -73,6 +73,53 @@ export class Particles {
     }
   }
 
+  /** 音符（ベルが鳴った） */
+  notes(x, y, n = 3, space = 'screen') {
+    const cols = ['#F2657A', '#5A8FD9', '#F0A03C'];
+    for (let i = 0; i < n; i++) {
+      this.spawn({
+        x: x + rand(-10, 10), y: y + rand(-6, 6),
+        vx: rand(-36, 36), vy: rand(-150, -90),
+        g: -22, drag: 0.7, max: rand(0.8, 1.25), size: rand(13, 19),
+        rot: rand(-0.3, 0.3), spin: rand(-1.2, 1.2),
+        type: 'note', color: cols[i % cols.length], space,
+      });
+    }
+  }
+
+  /** 石けんのあわ */
+  bubbles(x, y, n = 2, space = 'world') {
+    for (let i = 0; i < n; i++) {
+      this.spawn({
+        x: x + rand(-16, 16), y: y + rand(-12, 12),
+        vx: rand(-18, 18), vy: rand(-55, -15),
+        g: -30, drag: 1.1, max: rand(0.5, 1.05), size: rand(4, 11),
+        type: 'bubble', color: '#FFFFFF', space,
+      });
+    }
+  }
+
+  /** おどろいて飛び立つ小鳥 */
+  bird(x, y, dir = -1, space = 'world') {
+    this.spawn({
+      x, y, vx: dir * rand(70, 150), vy: rand(-210, -140),
+      g: -12, drag: 0.12, max: rand(1.2, 1.7), size: rand(9, 13),
+      type: 'bird', color: pick(['#8ED2F5', '#FFB3C6', '#FFE28A']), space,
+    });
+  }
+
+  /** こわれたベルの「…」 */
+  silence(x, y, space = 'screen') {
+    for (let i = 0; i < 3; i++) {
+      this.spawn({
+        x: x + (i - 1) * 13, y: y - 8,
+        vx: 0, vy: -34, g: -6, drag: 1.4,
+        max: 0.8 + i * 0.12, size: 4.6,
+        type: 'puff', color: '#9AA0AA', space,
+      });
+    }
+  }
+
   dust(x, y, dir = -1, space = 'world') {
     this.spawn({
       x, y, vx: rand(20, 70) * dir, vy: rand(-40, -8),
@@ -128,6 +175,71 @@ export class Particles {
           ctx.fillStyle = p.color;
           const sq = Math.abs(Math.cos(p.life * 7));
           ctx.fillRect(-s / 2, (-s * 0.6 * sq) / 2, s, s * 0.62 * sq + 1.5);
+          break;
+        }
+        case 'note': {
+          const s = p.size;
+          ctx.globalAlpha = 1 - t * t;
+          ctx.fillStyle = p.color;
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = s * 0.15;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.ellipse(0, s * 0.32, s * 0.34, s * 0.24, -0.4, 0, TAU);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(s * 0.3, s * 0.24);
+          ctx.lineTo(s * 0.3, -s * 0.5);
+          ctx.stroke();
+          ctx.lineWidth = s * 0.13;
+          ctx.beginPath();
+          ctx.moveTo(s * 0.3, -s * 0.5);
+          ctx.quadraticCurveTo(s * 0.76, -s * 0.34, s * 0.6, 0);
+          ctx.stroke();
+          break;
+        }
+        case 'bubble': {
+          const s = p.size * (1 + t * 0.25);
+          ctx.globalAlpha = (1 - t) * 0.85;
+          ctx.fillStyle = 'rgba(255,255,255,0.3)';
+          ctx.beginPath();
+          ctx.arc(0, 0, s, 0, TAU);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+          ctx.lineWidth = Math.max(1.4, s * 0.16);
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          ctx.beginPath();
+          ctx.arc(-s * 0.35, -s * 0.35, s * 0.2, 0, TAU);
+          ctx.fill();
+          break;
+        }
+        case 'bird': {
+          const s = p.size;
+          ctx.globalAlpha = t > 0.7 ? (1 - t) / 0.3 : 1;
+          if (p.vx < 0) ctx.scale(-1, 1);
+          const flap = Math.sin(p.life * 26) * 0.7;
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, s * 0.7, s * 0.45, -0.15, 0, TAU);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(s * 0.55, -s * 0.28, s * 0.32, 0, TAU);
+          ctx.fill();
+          ctx.fillStyle = '#F0A03C';
+          ctx.beginPath();
+          ctx.moveTo(s * 0.84, -s * 0.32);
+          ctx.lineTo(s * 1.08, -s * 0.22);
+          ctx.lineTo(s * 0.84, -s * 0.12);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = p.color;
+          ctx.save();
+          ctx.rotate(flap * 0.7);
+          ctx.beginPath();
+          ctx.ellipse(-s * 0.1, -s * 0.22, s * 0.56, s * 0.27, -0.7, 0, TAU);
+          ctx.fill();
+          ctx.restore();
           break;
         }
         case 'heart': {
