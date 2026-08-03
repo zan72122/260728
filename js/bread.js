@@ -291,9 +291,23 @@
           F.brown = Math.min(1.15, F.brown + dt * 0.062);
           if (Math.random() < 0.12) steamPuff(sc.parts, App.W / 2 + rnd(-80, 80) * App.S, App.H * 0.24);
         },
+        ovenBox() {
+          const S = App.S;
+          const w = Math.min(App.W * 0.82, 520 * S), h = Math.min(App.H * 0.62, 500 * S);
+          return { x: App.W / 2, y: App.H * 0.52, w, h };
+        },
+        up(p, tap) {
+          if (!tap) return;
+          const o = this.ovenBox();
+          if (Math.abs(p.x - o.x) < o.w * 0.44 && Math.abs(p.y - (o.y + o.h * 0.05)) < o.h * 0.36) {
+            Ouch.trigger(p.x, p.y);
+          }
+        },
         draw(ctx) {
           const S = App.S;
           const w = Math.min(App.W * 0.82, 520 * S), h = Math.min(App.H * 0.62, 500 * S);
+          drawHeatMark(ctx, App.W / 2, App.H * 0.52 - h / 2 - 34 * S, S);
+          drawMitt(ctx, App.W / 2 + w * 0.32, App.H * 0.52 - h / 2 - 44 * S, S, 0.25);
           drawOven(ctx, App.W / 2, App.H * 0.52, w, h, 0, (cx, cy, ww, wh) => {
             /* oven spring: well-kneaded dough jumps up more in the heat */
             const springK = 1 + F.gluten * 0.38 * clamp(F.brown * 4, 0, 1);

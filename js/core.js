@@ -181,6 +181,7 @@ const App = {
     }
     this.fx.update(dt);
     this.fx.draw(this.ctx);
+    Ouch.draw(this.ctx);
     if (this.fadeT > 0) {
       this.ctx.fillStyle = `rgba(255,250,240,${clamp(this.fadeT, 0, 1)})`;
       this.ctx.fillRect(0, 0, this.W, this.H);
@@ -226,6 +227,7 @@ const Snd = {
   chime() { [660, 880, 1046].forEach((f, i) => setTimeout(() => this.blip(f, 0.26, 'sine', 0.13), i * 90)); },
   tada() { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.blip(f, 0.32, 'triangle', 0.13), i * 130)); },
   gulp() { this.blip(300, 0.18, 'sine', 0.15, 90); setTimeout(() => this.blip(200, 0.14, 'sine', 0.12, 320), 140); },
+  ouch() { this.blip(1250, 0.07, 'square', 0.11, 850); setTimeout(() => this.blip(1500, 0.09, 'square', 0.09, 1050), 80); },
   noise() {
     if (!this._nb && this.c) {
       const len = this.c.sampleRate;
@@ -405,6 +407,30 @@ function blobPath(ctx, x, y, r, irr = 0.1, seed = 0) {
     i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
   }
   ctx.closePath();
+}
+/* oblique (2.5D) blob: same shape squashed vertically by ysc */
+function blobPathO(ctx, x, y, r, irr = 0.1, seed = 0, ysc = 0.74) {
+  ctx.beginPath();
+  const N = 26;
+  for (let i = 0; i <= N; i++) {
+    const a = i / N * TAU;
+    const w = Math.sin(a * 5 + seed) * 0.55 + Math.sin(a * 3 + seed * 2.7) * 0.45;
+    const rr2 = r * (1 + irr * w);
+    const px = x + Math.cos(a) * rr2, py = y + Math.sin(a) * rr2 * ysc;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  }
+  ctx.closePath();
+}
+/* extruded oblique blob: visible side wall + top. topDraw(makeTopPath) paints the top */
+function extrudeBlob(ctx, x, y, r, irr, seed, ysc, h, sideTop, sideBot, topDraw) {
+  const steps = Math.max(3, Math.round(h / (4 * App.S)));
+  for (let i = steps; i >= 1; i--) {
+    const t = i / steps;
+    blobPathO(ctx, x, y + h * t, r, irr, seed, ysc);
+    ctx.fillStyle = mixc(sideTop, sideBot, t);
+    ctx.fill();
+  }
+  topDraw(() => blobPathO(ctx, x, y, r, irr, seed, ysc));
 }
 
 /* ---------------- clay material ---------------- */
@@ -792,38 +818,70 @@ function drawKitchenBG(ctx, mode = 'counter') {
 
 /* ---------------- kitchen furniture ---------------- */
 function drawBowl(ctx, x, y, r, color = '#8ecbe8') {
-  softShadow(ctx, x, y + r * 0.72, r * 1.15, r * 0.4, 0.25);
-  /* body */
-  clay(ctx, () => { ctx.beginPath(); ctx.ellipse(x, y + r * 0.13, r, r * 0.76, 0, 0, TAU); },
-    { x, y: y + r * 0.13, r: r * 0.8, base: color, gloss: 0 });
-  /* stripe */
+  softShadow(ctx, x + r * 0.06, y + r * 0.86, r * 1.18, r * 0.4, 0.28);
+  /* deep body seen from ~30° above */
+  clay(ctx, () => {
+    ctx.beginPath();
+    ctx.moveTo(x - r * 1.0, y + r * 0.04);
+    ctx.bezierCurveTo(x - r * 1.02, y + r * 0.75, x - r * 0.55, y + r * 1.0, x, y + r * 1.0);
+    ctx.bezierCurveTo(x + r * 0.55, y + r * 1.0, x + r * 1.02, y + r * 0.75, x + r * 1.0, y + r * 0.04);
+    ctx.closePath();
+  }, { x, y: y + r * 0.5, r: r * 0.9, base: color, gloss: 0 });
+  /* stripe + side gloss */
   ctx.save();
-  ctx.beginPath(); ctx.ellipse(x, y + r * 0.13, r, r * 0.76, 0, 0, TAU); ctx.clip();
+  ctx.beginPath();
+  ctx.moveTo(x - r * 1.0, y + r * 0.04);
+  ctx.bezierCurveTo(x - r * 1.02, y + r * 0.75, x - r * 0.55, y + r * 1.0, x, y + r * 1.0);
+  ctx.bezierCurveTo(x + r * 0.55, y + r * 1.0, x + r * 1.02, y + r * 0.75, x + r * 1.0, y + r * 0.04);
+  ctx.closePath();
+  ctx.clip();
   ctx.fillStyle = 'rgba(255,255,255,0.35)';
-  ctx.fillRect(x - r, y + r * 0.38, r * 2, r * 0.14);
-  /* side gloss */
-  ctx.globalAlpha = 0.4;
-  ell(ctx, x - r * 0.62, y + r * 0.28, r * 0.13, r * 0.34, '#ffffff');
+  ctx.fillRect(x - r, y + r * 0.5, r * 2, r * 0.15);
+  ctx.globalAlpha = 0.28;
+  ell(ctx, x - r * 0.58, y + r * 0.34, r * 0.1, r * 0.24, '#ffffff');
   ctx.globalAlpha = 1;
   ctx.restore();
-  /* rim */
+  /* rim with thickness */
   ctx.beginPath();
-  ctx.ellipse(x, y, r * 0.97, r * 0.66, 0, 0, TAU);
-  ctx.fillStyle = mixc(color, '#ffffff', 0.35);
+  ctx.ellipse(x, y, r * 1.0, r * 0.68, 0, 0, TAU);
+  ctx.fillStyle = mixc(color, '#ffffff', 0.4);
   ctx.fill();
-  /* inside */
-  const ig = ctx.createLinearGradient(0, y - r * 0.6, 0, y + r * 0.5);
-  ig.addColorStop(0, mixc(color, '#1a2a38', 0.45));
-  ig.addColorStop(1, mixc(color, '#1a2a38', 0.15));
   ctx.beginPath();
-  ctx.ellipse(x, y, r * 0.88, r * 0.6, 0, 0, TAU);
+  ctx.ellipse(x, y + r * 0.015, r * 0.92, r * 0.62, 0, 0, TAU);
+  ctx.fillStyle = mixc(color, '#ffffff', 0.12);
+  ctx.fill();
+  /* inside: back wall visible at the top, floor lighter at the bottom */
+  const ig = ctx.createLinearGradient(0, y - r * 0.6, 0, y + r * 0.55);
+  ig.addColorStop(0, mixc(color, '#122430', 0.55));
+  ig.addColorStop(0.45, mixc(color, '#122430', 0.3));
+  ig.addColorStop(1, mixc(color, '#ffffff', 0.05));
+  ctx.beginPath();
+  ctx.ellipse(x, y + r * 0.02, r * 0.88, r * 0.6, 0, 0, TAU);
   ctx.fillStyle = ig;
   ctx.fill();
+  /* soft occlusion under the back rim */
+  ctx.save();
+  ctx.beginPath(); ctx.ellipse(x, y + r * 0.02, r * 0.88, r * 0.6, 0, 0, TAU); ctx.clip();
+  ctx.globalAlpha = 0.35;
+  ctx.beginPath(); ctx.ellipse(x, y - r * 0.34, r * 0.82, r * 0.26, 0, 0, TAU);
+  ctx.fillStyle = '#0c1820'; ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.restore();
 }
 function bowlInner(x, y, r) { return { x, y, rx: r * 0.84, ry: r * 0.56 }; }
 function bowlClip(ctx, x, y, r) {
   const b = bowlInner(x, y, r);
   ctx.beginPath(); ctx.ellipse(b.x, b.y, b.rx, b.ry, 0, 0, TAU); ctx.clip();
+}
+/* front inner lip drawn OVER the bowl content for depth */
+function bowlFront(ctx, x, y, r, color = '#8ecbe8') {
+  ctx.save();
+  ctx.strokeStyle = rgba(mixc(color, '#ffffff', 0.45), 0.9);
+  ctx.lineWidth = r * 0.06;
+  ctx.beginPath();
+  ctx.ellipse(x, y, r * 0.9, r * 0.62, 0, Math.PI * 0.12, Math.PI * 0.88);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawStoveTop(ctx, x, y, r) {
@@ -876,35 +934,55 @@ function drawPan(ctx, x, y, r) {
   ctx.fillStyle = 'rgba(255,255,255,0.14)';
   rr(ctx, x + r * 0.98, y - 9 * S, r * 0.7, 7 * S, 4 * S); ctx.fill();
   circle(ctx, x + r * 1.06, y, 4 * S, '#8a8a94');
-  /* body rim */
-  const bg = ctx.createLinearGradient(0, y - r * 0.82, 0, y + r * 0.82);
-  bg.addColorStop(0, '#5a5a64'); bg.addColorStop(0.5, '#33333b'); bg.addColorStop(1, '#1f1f26');
+  /* outer wall with height (2.5D): rim sits higher than the floor */
+  const wallH = r * 0.14;
+  const bg = ctx.createLinearGradient(0, y - r * 0.82, 0, y + r * 0.82 + wallH);
+  bg.addColorStop(0, '#5a5a64'); bg.addColorStop(0.5, '#33333b'); bg.addColorStop(1, '#17171d');
   ctx.fillStyle = bg;
+  ctx.beginPath(); ctx.ellipse(x, y + wallH, r * 1.06, r * 0.82, 0, 0, TAU); ctx.fill();
   ctx.beginPath(); ctx.ellipse(x, y, r * 1.06, r * 0.82, 0, 0, TAU); ctx.fill();
-  /* inner wall */
-  ctx.beginPath(); ctx.ellipse(x, y - r * 0.02, r, r * 0.76, 0, 0, TAU);
-  ctx.fillStyle = '#26262d'; ctx.fill();
-  /* cooking surface: brushed metal */
-  const sg = ctx.createRadialGradient(x - r * 0.2, y - r * 0.15, r * 0.1, x, y, r * 0.95);
+  /* rim top surface */
+  ctx.beginPath(); ctx.ellipse(x, y, r * 1.0, r * 0.78, 0, 0, TAU);
+  ctx.fillStyle = '#4a4a54'; ctx.fill();
+  /* inner wall drops down to the floor */
+  const iw = ctx.createLinearGradient(0, y - r * 0.76, 0, y + r * 0.5);
+  iw.addColorStop(0, '#101014');
+  iw.addColorStop(1, '#2c2c34');
+  ctx.beginPath(); ctx.ellipse(x, y + r * 0.01, r * 0.95, r * 0.72, 0, 0, TAU);
+  ctx.fillStyle = iw; ctx.fill();
+  /* cooking floor: brushed metal, sunken */
+  const fy = y + r * 0.06;
+  const sg = ctx.createRadialGradient(x - r * 0.2, fy - r * 0.15, r * 0.1, x, fy, r * 0.95);
   sg.addColorStop(0, '#6b6b78');
   sg.addColorStop(0.7, '#54545e');
   sg.addColorStop(1, '#3d3d46');
   ctx.fillStyle = sg;
-  ctx.beginPath(); ctx.ellipse(x, y, r * 0.9, r * 0.66, 0, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x, fy, r * 0.88, r * 0.62, 0, 0, TAU); ctx.fill();
   ctx.save();
-  ctx.beginPath(); ctx.ellipse(x, y, r * 0.9, r * 0.66, 0, 0, TAU); ctx.clip();
+  ctx.beginPath(); ctx.ellipse(x, fy, r * 0.88, r * 0.62, 0, 0, TAU); ctx.clip();
+  /* occlusion at the back wall */
+  ctx.globalAlpha = 0.4;
+  ctx.beginPath(); ctx.ellipse(x, fy - r * 0.36, r * 0.84, r * 0.26, 0, 0, TAU);
+  ctx.fillStyle = '#0c0c10'; ctx.fill();
+  ctx.globalAlpha = 1;
   /* brushed arcs */
   ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 2.5 * S;
   for (let i = 1; i < 6; i++) {
-    ctx.beginPath(); ctx.ellipse(x, y, r * 0.15 * i, r * 0.11 * i, 0, 0, TAU); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(x, fy, r * 0.15 * i, r * 0.1 * i, 0, 0, TAU); ctx.stroke();
   }
   /* oil sheen */
   ctx.globalAlpha = 0.13;
-  ell(ctx, x - r * 0.3, y - r * 0.2, r * 0.34, r * 0.16, '#ffffff');
-  ell(ctx, x + r * 0.25, y + r * 0.18, r * 0.22, r * 0.1, '#ffffff');
+  ell(ctx, x - r * 0.3, fy - r * 0.2, r * 0.34, r * 0.14, '#ffffff');
+  ell(ctx, x + r * 0.25, fy + r * 0.16, r * 0.22, r * 0.09, '#ffffff');
   ctx.globalAlpha = 1;
   ctx.restore();
-  return { x, y, rx: r * 0.88, ry: r * 0.64 };
+  /* front rim highlight over the floor */
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  ctx.lineWidth = r * 0.03;
+  ctx.beginPath();
+  ctx.ellipse(x, y + r * 0.01, r * 0.95, r * 0.72, 0, Math.PI * 0.15, Math.PI * 0.85);
+  ctx.stroke();
+  return { x, y: fy, rx: r * 0.86, ry: r * 0.6 };
 }
 
 function drawOven(ctx, x, y, w, h, openT, drawInner) {
@@ -1076,6 +1154,130 @@ function drawRollingPin(ctx, x, y, s) {
   clay(ctx, () => rr(ctx, x + 95 * s, y - 9 * s, 38 * s, 18 * s, 9 * s),
     { x: x + 114 * s, y, r: 20 * s, base: '#b9834a', gloss: 0 });
 }
+
+/* フライ返し — blade centered at (x,y), wooden handle to the upper right */
+function drawTurner(ctx, x, y, s, ang = 0, scoop = 0) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(ang - scoop * 0.9);
+  /* handle */
+  ctx.save();
+  ctx.rotate(0.78);
+  clay(ctx, () => rr(ctx, -8 * s, -108 * s, 16 * s, 62 * s, 8 * s),
+    { x: 0, y: -77 * s, r: 34 * s, base: '#d9a468', gloss: 0.4, glossX: -3 * s, glossY: -96 * s });
+  const ng = ctx.createLinearGradient(-5 * s, 0, 5 * s, 0);
+  ng.addColorStop(0, '#dfe3ec'); ng.addColorStop(1, '#9aa2b5');
+  ctx.fillStyle = ng;
+  rr(ctx, -4 * s, -52 * s, 8 * s, 34 * s, 4 * s); ctx.fill();
+  ctx.restore();
+  /* blade: rounded trapezoid with slots */
+  const bw = 60 * s, bh = 46 * s;
+  const bg = ctx.createLinearGradient(0, -bh / 2, 0, bh / 2);
+  bg.addColorStop(0, '#e4e8f0'); bg.addColorStop(0.5, '#bcc3d2'); bg.addColorStop(1, '#8f97a8');
+  ctx.beginPath();
+  ctx.moveTo(-bw * 0.38, -bh * 0.5);
+  ctx.lineTo(bw * 0.38, -bh * 0.5);
+  ctx.quadraticCurveTo(bw * 0.56, -bh * 0.45, bw * 0.5, -bh * 0.1);
+  ctx.lineTo(bw * 0.44, bh * 0.42);
+  ctx.quadraticCurveTo(0, bh * 0.58, -bw * 0.44, bh * 0.42);
+  ctx.lineTo(-bw * 0.5, -bh * 0.1);
+  ctx.quadraticCurveTo(-bw * 0.56, -bh * 0.45, -bw * 0.38, -bh * 0.5);
+  ctx.closePath();
+  ctx.fillStyle = bg; ctx.fill();
+  ctx.strokeStyle = 'rgba(90,100,120,0.5)'; ctx.lineWidth = 1.6 * s; ctx.stroke();
+  /* slots */
+  ctx.fillStyle = 'rgba(70,78,95,0.55)';
+  for (let i = -1; i <= 1; i++) {
+    rr(ctx, i * 14 * s - 3.5 * s, -bh * 0.28, 7 * s, bh * 0.6, 3.5 * s);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 0.5;
+  ell(ctx, -bw * 0.26, -bh * 0.3, 8 * s, 3.5 * s, '#ffffff');
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+/* wooden spatula */
+function drawSpatula(ctx, x, y, s, ang = 0) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(ang);
+  ctx.save();
+  ctx.rotate(0.7);
+  clay(ctx, () => rr(ctx, -7 * s, -100 * s, 14 * s, 66 * s, 7 * s),
+    { x: 0, y: -67 * s, r: 34 * s, base: '#d9a468', gloss: 0.4, glossX: -3 * s, glossY: -90 * s });
+  ctx.restore();
+  clayEll(ctx, 0, 0, 24 * s, 30 * s, '#e5b877', { bot: '#b98a4a', gloss: 0.5, glossX: -8 * s, glossY: -10 * s });
+  ctx.strokeStyle = 'rgba(140,95,40,0.35)'; ctx.lineWidth = 2 * s;
+  ctx.beginPath(); ctx.ellipse(0, 2 * s, 15 * s, 20 * s, 0, 0, TAU); ctx.stroke();
+  ctx.restore();
+}
+/* oven mitt */
+function drawMitt(ctx, x, y, s, ang = 0) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(ang);
+  softShadow(ctx, 2 * s, 30 * s, 26 * s, 9 * s, 0.18);
+  /* thumb */
+  clayEll(ctx, -20 * s, 2 * s, 12 * s, 17 * s, '#e8635a', { gloss: 0 });
+  /* body */
+  clay(ctx, () => rr(ctx, -14 * s, -26 * s, 34 * s, 46 * s, 15 * s),
+    { x: 3 * s, y: -3 * s, r: 28 * s, base: '#f27a70', bot: '#c74a44', gloss: 0.5, glossX: -3 * s, glossY: -16 * s });
+  /* cuff */
+  clay(ctx, () => rr(ctx, -16 * s, 16 * s, 38 * s, 15 * s, 7 * s),
+    { x: 3 * s, y: 23 * s, r: 16 * s, base: '#fdf6ea', gloss: 0 });
+  /* stitches */
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.8 * s;
+  ctx.setLineDash([3 * s, 3 * s]);
+  rr(ctx, -10 * s, -22 * s, 26 * s, 38 * s, 12 * s);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+/* "hot!" mark — wavering red heat lines */
+function drawHeatMark(ctx, x, y, s) {
+  ctx.save();
+  ctx.strokeStyle = `rgba(255,90,40,${0.55 + 0.25 * Math.sin(App.time * 5)})`;
+  ctx.lineWidth = 4 * s;
+  ctx.lineCap = 'round';
+  for (let i = -1; i <= 1; i++) {
+    const ph = App.time * 5 + i * 1.8;
+    ctx.beginPath();
+    for (let k = 0; k <= 6; k++) {
+      const t = k / 6;
+      const px = x + i * 13 * s + Math.sin(ph + t * 5) * 4.5 * s;
+      const py = y + 15 * s - t * 30 * s;
+      k ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+/* gentle "あちち!" reaction when a hot thing is poked bare-handed */
+const Ouch = {
+  at: -9, x: 0, y: 0,
+  trigger(x, y) {
+    if (App.time - this.at < 1) return;
+    this.at = App.time; this.x = x; this.y = y;
+    Snd.ouch();
+    steamPuff(App.fx, x, y - 24 * App.S, 3);
+    for (let i = 0; i < 4; i++) {
+      App.fx.add({
+        x: x + rnd(-14, 14) * App.S, y: y - rnd(0, 18) * App.S,
+        kind: 'glow', color: '#ff5a3c', r: rnd(10, 16) * App.S,
+        vy: -rnd(40, 90) * App.S, life: 0.5, alpha: 0.8
+      });
+    }
+  },
+  draw(ctx) {
+    const k = (App.time - this.at) / 0.9;
+    if (k < 0 || k > 1) return;
+    const S = App.S;
+    ctx.save();
+    ctx.globalAlpha = 1 - k;
+    drawHeatMark(ctx, this.x, this.y - 34 * S, S * (1 + k * 0.4));
+    /* the hand snaps back, shaking */
+    drawHand(ctx, this.x + 22 * S, this.y + 34 * S + easeOutBack(k) * 80 * S, S, Math.sin(k * 34) * 0.18);
+    ctx.restore();
+  }
+};
 
 function drawEggItem(ctx, x, y, s, crack = 0) {
   softShadow(ctx, x, y + 30 * s, 26 * s, 9 * s, 0.2);

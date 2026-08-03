@@ -123,6 +123,7 @@
           drawYolk(ctx, b.x + b.rx * 0.32, b.y + b.ry * 0.22, App.S);
         }
         ctx.restore();
+        bowlFront(ctx, x, y, r, '#8ecbe8');
       }
 
       /* ---- mixing bowl (step 2) ---- */
@@ -192,13 +193,50 @@
           ctx.fillStyle = 'rgba(255,255,255,0.7)';
           circle(ctx, bx2 - br * 0.35, by2 - br * 0.35, br * 0.25);
         }
+        /* volume: batter mounds up in the middle when still, dips into a vortex while stirring */
+        const stirN = clamp(stir.speed / 10, 0, 1);
+        const domeH = (1 - stirN) * (0.35 + 0.45 * (1 - F.lump));
+        if (domeH > 0.05) {
+          const dg = ctx.createRadialGradient(b.x - b.rx * 0.15, b.y - b.ry * 0.25 * domeH, b.rx * 0.05, b.x, b.y, b.rx * 0.75);
+          dg.addColorStop(0, rgba(mixc(base, '#ffffff', 0.4), 0.75 * domeH));
+          dg.addColorStop(0.7, rgba(mixc(base, '#ffffff', 0.1), 0.25 * domeH));
+          dg.addColorStop(1, rgba(base, 0));
+          ell(ctx, b.x, b.y - b.ry * 0.12 * domeH, b.rx * 0.72, b.ry * 0.62, dg);
+          /* occlusion ring where the mound meets the bowl wall */
+          ctx.globalAlpha = 0.25 * domeH;
+          ctx.strokeStyle = mixc(base, '#7a4a18', 0.5);
+          ctx.lineWidth = 7 * App.S;
+          ctx.beginPath(); ctx.ellipse(b.x, b.y + b.ry * 0.1, b.rx * 0.88, b.ry * 0.8, 0, 0, TAU); ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+        if (stirN > 0.15) {
+          /* vortex dip around the whisk */
+          const vg = ctx.createRadialGradient(b.x, b.y, b.rx * 0.02, b.x, b.y, b.rx * 0.5);
+          vg.addColorStop(0, rgba(mixc(base, '#6a3c12', 0.5), 0.45 * stirN));
+          vg.addColorStop(1, rgba(base, 0));
+          ell(ctx, b.x, b.y, b.rx * 0.5, b.ry * 0.42, vg);
+          ctx.globalAlpha = 0.4 * stirN;
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 3 * App.S;
+          ctx.beginPath();
+          for (let sp2 = 0; sp2 <= 20; sp2++) {
+            const t = sp2 / 20;
+            const a = phase * 1.2 + t * 4.5;
+            const rr2 = b.rx * (0.06 + t * 0.42);
+            const px = b.x + Math.cos(a) * rr2, py = b.y + Math.sin(a) * rr2 * 0.7;
+            sp2 ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+          }
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
         grainRect(ctx, b.x - b.rx, b.y - b.ry, b.rx * 2, b.ry * 2, 0.25);
         ctx.restore();
         ctx.restore();
+        bowlFront(ctx, x, y, r, '#8ecbe8');
         ctx.restore();
       }
 
-      /* ---- pancake blob on the pan ---- */
+      /* ---- pancake blob on the pan: extruded 2.5D volume ---- */
       function drawBlob(ctx, b) {
         const S = App.S;
         let sy = 1, lift = 0;
@@ -208,37 +246,38 @@
         }
         /* shadow stays on the pan while the pancake is airborne */
         ctx.save();
-        ctx.translate(b.x, b.y);
-        ctx.scale(1, 0.74);
-        ctx.globalAlpha = 0.25 * (1 - lift / (140 * S));
-        ell(ctx, 0, 6 * S, b.r * 1.02, b.r * 0.9, '#1a1a20');
+        ctx.globalAlpha = 0.28 * (1 - lift / (140 * S));
+        blobPathO(ctx, b.x, b.y + 6 * S, b.r * 1.02, 0.07, b.seed, 0.7);
+        ctx.fillStyle = '#141418'; ctx.fill();
         ctx.globalAlpha = 1;
         ctx.restore();
         ctx.save();
         ctx.translate(b.x, b.y - lift);
         const land = b.land || 0;
-        ctx.scale(1 + land * 0.1, (0.74 - land * 0.12) * Math.max(sy, 0.06));
-        const rise = (1 + b.rise * 0.12);
-        /* underside colour peeks around the edge */
-        blobPath(ctx, 0, 2 * S, b.r * rise + 5 * S, 0.07, b.seed);
-        ctx.fillStyle = bakeColor(clamp(b.bot * 1.05, 0, 1)); ctx.fill();
-        /* top surface: browning gradient + blotches + sheen */
-        bakeSurface(ctx, () => blobPath(ctx, 0, 0, b.r * rise, 0.07, b.seed),
-          0, 0, b.r * rise, b.top, b.seed, { blotches: 6 });
+        ctx.scale(1 + land * 0.1, (1 - land * 0.16) * Math.max(sy, 0.06));
+        const rise = (1 + b.rise * 0.1);
+        /* thickness grows as the pancake puffs up */
+        const h = (6 + b.rise * 15) * S;
+        const sideBase = bakeColor(clamp(Math.max(b.bot, b.top * 0.4) * 0.95, 0, 1));
+        extrudeBlob(ctx, 0, -h, b.r * rise, 0.07, b.seed, 0.74, h,
+          mixc(sideBase, '#ffffff', 0.06), mixc(sideBase, '#5a2c10', 0.4),
+          makeTop => {
+            bakeSurface(ctx, makeTop, 0, -h, b.r * rise, b.top, b.seed, { blotches: 6 });
+          });
         /* pores from popped bubbles */
         ctx.fillStyle = 'rgba(110,60,15,0.4)';
         for (const po of b.pores) {
-          circle(ctx, po.dx * b.r, po.dy * b.r, 2.6 * S);
+          circle(ctx, po.dx * b.r, po.dy * b.r * 0.74 - h, 2.6 * S);
         }
         ctx.fillStyle = 'rgba(255,240,200,0.25)';
         for (const po of b.pores) {
-          circle(ctx, po.dx * b.r - 1 * S, po.dy * b.r - 1 * S, 1.1 * S);
+          circle(ctx, po.dx * b.r - 1 * S, po.dy * b.r * 0.74 - h - 1 * S, 1.1 * S);
         }
         /* live bubbles — glossy domes */
         for (const bu of b.bub) {
           const k = clamp(bu.age / bu.life, 0, 1);
           const br = bu.r * (0.5 + k * 0.6);
-          const bx2 = bu.dx * b.r, by2 = bu.dy * b.r;
+          const bx2 = bu.dx * b.r, by2 = bu.dy * b.r * 0.74 - h;
           ctx.fillStyle = 'rgba(255,246,220,0.95)';
           circle(ctx, bx2, by2, br);
           ctx.fillStyle = 'rgba(200,150,80,0.3)';
@@ -401,6 +440,7 @@
           drawStoveTop(ctx, pn.x, pn.y, pn.r);
           drawPan(ctx, pn.x, pn.y, pn.r);
           for (const b of F.blobs) drawBlob(ctx, b);
+          drawHeatMark(ctx, pn.x - pn.r * 1.08, pn.y - pn.r * 0.8, S);
           const p = App.pointer;
           if (p.down && F.batter > 0 && dist(p.x, p.y, pn.x, pn.y) < pn.r * 0.95) {
             drawLadle(ctx, p.x, p.y - 60 * S, S);
@@ -421,6 +461,7 @@
 
       /* ================= step 4 : cook & flip ================= */
       let popCool = 0;
+      let turnerFx = null;
       const s4 = {
         hint: 'flick',
         bgMode: 'stove',
@@ -487,18 +528,41 @@
           }
         },
         draw(ctx) {
-          const pn = panAt();
+          const pn = panAt(), S = App.S;
           drawStoveTop(ctx, pn.x, pn.y, pn.r);
           drawPan(ctx, pn.x, pn.y, pn.r);
           for (const b of F.blobs) drawBlob(ctx, b);
+          drawHeatMark(ctx, pn.x - pn.r * 1.08, pn.y - pn.r * 0.8, S);
+          /* the turner does the flipping — it follows the finger over the pan */
+          const p = App.pointer;
+          if (turnerFx) {
+            turnerFx.t += 1 / 60;
+            const k = clamp(turnerFx.t * 3, 0, 1);
+            drawTurner(ctx, turnerFx.x, turnerFx.y - Math.sin(k * Math.PI) * 50 * S, S,
+              -0.1, Math.sin(k * Math.PI));
+            if (k >= 1) turnerFx = null;
+          } else if (p.down) {
+            drawTurner(ctx, p.x, p.y - 6 * S, S, -0.1);
+          } else {
+            drawTurner(ctx, pn.x + pn.r * 1.05, pn.y + pn.r * 0.75, S * 0.92, 0.5);
+          }
         },
-        up(p) {
+        up(p, tap) {
           const sp = Math.hypot(p.vx, p.vy);
           if (sp > 650 * App.S) {
             for (const b of F.blobs) {
               if (!b.flipping && dist(p.downX, p.downY, b.x, b.y) < b.r + 50 * App.S) {
                 b.flipping = true; b.flipT = 0; b.swapped = false;
+                turnerFx = { x: b.x, y: b.y, t: 0 };
                 Snd.whoosh();
+                break;
+              }
+            }
+          } else if (tap) {
+            /* poking hot food with a bare finger → gentle "あちち!" lesson */
+            for (const b of F.blobs) {
+              if (dist(p.x, p.y, b.x, b.y) < b.r + 24 * App.S) {
+                Ouch.trigger(p.x, p.y);
                 break;
               }
             }
@@ -533,34 +597,60 @@
         draw(ctx) {
           const S = App.S, pl = plateAt();
           drawPlate(ctx, pl.x, pl.y + 14 * S, Math.min(App.W * 0.42, 250 * S));
-          /* side-view stack: fluffiness(air) & browning survive here */
+          /* true cylinder stack: top ellipse joined to a curved side wall */
           let y = pl.y;
           stack.forEach((b, i) => {
             const c = bakeColor(b.c);
-            /* side wall with vertical gradient */
-            const g = ctx.createLinearGradient(0, y - b.h, 0, y + 4 * S);
-            g.addColorStop(0, mixc(c, '#ffffff', 0.12));
-            g.addColorStop(0.6, c);
-            g.addColorStop(1, mixc(c, '#5a2c10', 0.32));
+            const ry = b.r * 0.26;
+            const yTop = y - b.h, yBot = y;
+            /* contact shadow of this layer on the one below (or the plate) */
+            ell(ctx, pl.x, yBot + 3 * S, b.r * 1.0, ry * 0.9, 'rgba(100,55,15,0.22)');
+            /* side wall */
+            ctx.beginPath();
+            ctx.moveTo(pl.x - b.r, yTop);
+            ctx.lineTo(pl.x - b.r, yBot);
+            ctx.ellipse(pl.x, yBot, b.r, ry, 0, Math.PI, 0, true);
+            ctx.lineTo(pl.x + b.r, yTop);
+            ctx.ellipse(pl.x, yTop, b.r, ry, 0, 0, Math.PI, false);
+            ctx.closePath();
+            const g = ctx.createLinearGradient(0, yTop, 0, yBot + ry);
+            g.addColorStop(0, mixc(c, '#ffffff', 0.1));
+            g.addColorStop(0.55, c);
+            g.addColorStop(1, mixc(c, '#5a2c10', 0.35));
             ctx.fillStyle = g;
-            rr(ctx, pl.x - b.r, y - b.h, b.r * 2, b.h + 5 * S, b.h * 0.5);
             ctx.fill();
-            /* top face */
-            const tg = ctx.createRadialGradient(pl.x - b.r * 0.2, y - b.h - 3 * S, b.r * 0.1, pl.x, y - b.h, b.r);
-            tg.addColorStop(0, mixc(c, '#ffffff', 0.35));
-            tg.addColorStop(1, mixc(c, '#ffffff', 0.12));
-            ell(ctx, pl.x, y - b.h, b.r, b.r * 0.26, tg);
+            /* moist crumb line along the middle of the side */
+            ctx.save();
+            ctx.globalAlpha = 0.3;
+            ctx.strokeStyle = mixc(c, '#ffffff', 0.4);
+            ctx.lineWidth = b.h * 0.22;
+            ctx.beginPath();
+            ctx.ellipse(pl.x, (yTop + yBot) / 2, b.r * 0.99, ry * 0.9, 0, Math.PI * 0.15, Math.PI * 0.85);
+            ctx.stroke();
+            ctx.restore();
+            /* top face — paler than the sides, like a real pancake */
+            const tg = ctx.createRadialGradient(pl.x - b.r * 0.2, yTop - 3 * S, b.r * 0.1, pl.x, yTop, b.r);
+            tg.addColorStop(0, mixc(c, '#ffffff', 0.4));
+            tg.addColorStop(1, mixc(c, '#ffffff', 0.14));
+            ell(ctx, pl.x, yTop, b.r, ry, tg);
             /* browning blotches on the top face */
             ctx.fillStyle = rgba(mixc(c, '#5a2c10', 0.3), 0.35);
             for (let k = 0; k < 5; k++) {
               ell(ctx, pl.x + (n1(b.seed + k * 3) - 0.5) * b.r * 1.3,
-                y - b.h + (n1(b.seed + k * 7) - 0.5) * b.r * 0.3,
+                yTop + (n1(b.seed + k * 7) - 0.5) * ry * 1.4,
                 b.r * (0.08 + n1(b.seed + k) * 0.09), b.r * 0.035);
             }
+            /* inner rim occlusion on the top face */
+            ctx.save();
+            ctx.globalAlpha = 0.18;
+            ctx.strokeStyle = mixc(c, '#5a2c10', 0.4);
+            ctx.lineWidth = b.r * 0.06;
+            ctx.beginPath(); ctx.ellipse(pl.x, yTop, b.r * 0.93, ry * 0.8, 0, 0, TAU); ctx.stroke();
+            ctx.restore();
             if (i === stack.length - 1) {
               ctx.fillStyle = 'rgba(110,60,15,0.35)';
               for (const po of b.pores) {
-                if (Math.abs(po.dy) < 0.8) circle(ctx, pl.x + po.dx * b.r * 0.8, y - b.h + po.dy * b.r * 0.2, 2.4 * S);
+                if (Math.abs(po.dy) < 0.8) circle(ctx, pl.x + po.dx * b.r * 0.8, yTop + po.dy * ry * 0.9, 2.4 * S);
               }
             }
             y -= b.h;
@@ -574,27 +664,39 @@
             ctx.restore();
             drawButterCube(ctx, pl.x, y - 8 * S, S, 0.25);
           }
-          /* syrup trail follows exactly where the finger went */
+          /* syrup trail follows exactly where the finger went —
+             drawn as a pooling amber ribbon with wavering width */
           if (F.syrup.length > 1) {
             ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-            const trace = () => {
-              ctx.beginPath();
-              F.syrup.forEach((pt, i) => i ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y));
+            const segs = (wBase, color, dy = 0) => {
+              ctx.strokeStyle = color;
+              for (let i = 1; i < F.syrup.length; i++) {
+                const a = F.syrup[i - 1], b = F.syrup[i];
+                ctx.lineWidth = wBase * (0.7 + n1(i * 5.3) * 0.7);
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y + dy); ctx.lineTo(b.x, b.y + dy);
+                ctx.stroke();
+              }
             };
-            ctx.strokeStyle = 'rgba(120,62,10,0.75)'; ctx.lineWidth = 16 * S; trace(); ctx.stroke();
-            ctx.strokeStyle = 'rgba(201,120,30,0.95)'; ctx.lineWidth = 11 * S; trace(); ctx.stroke();
+            segs(15 * S, 'rgba(150,84,20,0.55)', 2 * S);
+            segs(12 * S, 'rgba(224,146,44,0.9)');
+            /* pooled blobs along the trail */
+            for (let i = 0; i < F.syrup.length; i += 3) {
+              const pt = F.syrup[i];
+              ell(ctx, pt.x, pt.y + 1 * S, (8 + n1(i * 7.7) * 7) * S, (5 + n1(i * 2.3) * 4) * S, 'rgba(224,146,44,0.85)');
+            }
             /* drips hanging off the trail */
-            ctx.strokeStyle = 'rgba(160,88,18,0.9)'; ctx.lineWidth = 7 * S;
+            ctx.strokeStyle = 'rgba(178,102,24,0.9)'; ctx.lineWidth = 6.5 * S;
             for (let i = 3; i < F.syrup.length; i += 5) {
               const pt = F.syrup[i];
               const len = (6 + n1(i * 3.1) * 15) * S;
               ctx.beginPath(); ctx.moveTo(pt.x, pt.y); ctx.lineTo(pt.x, pt.y + len); ctx.stroke();
-              circle(ctx, pt.x, pt.y + len, 4 * S, 'rgba(160,88,18,0.9)');
+              circle(ctx, pt.x, pt.y + len, 4 * S, 'rgba(178,102,24,0.9)');
             }
             /* glossy light streak */
             ctx.save();
-            ctx.translate(-2.5 * S, -2.5 * S);
-            ctx.strokeStyle = 'rgba(255,226,170,0.8)'; ctx.lineWidth = 3.5 * S; trace(); ctx.stroke();
+            ctx.translate(-2 * S, -2.5 * S);
+            segs(3.5 * S, 'rgba(255,232,180,0.75)');
             ctx.restore();
           }
           for (const be of F.berries) drawStrawberry(ctx, be.x, be.y, S * be.s);

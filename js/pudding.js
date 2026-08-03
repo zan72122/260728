@@ -87,6 +87,16 @@
             ell(ctx, -pn.r * 0.2, -pn.r * 0.15, pn.r * 0.16, pn.r * 0.1, 'rgba(255,255,255,0.35)');
           }
           ctx.restore();
+          drawHeatMark(ctx, pn.x - pn.r * 1.3, pn.y - pn.r * 0.85, App.S);
+          /* stirring happens with a wooden spatula, not fingers */
+          if (App.pointer.down) drawSpatula(ctx, App.pointer.x, App.pointer.y, App.S, 0.15);
+          else drawSpatula(ctx, pn.x + pn.r * 1.3, pn.y + pn.r * 0.8, App.S * 0.9, 0.5);
+        },
+        up(p, tap) {
+          if (tap && F.melt > 0.25) {
+            const pn = panAt();
+            if (dist(p.x, p.y, pn.x, pn.y) < pn.r * 0.9) Ouch.trigger(p.x, p.y);
+          }
         },
         done: () => F.melt >= 1 && F.caramel > 0.12
       };
@@ -277,7 +287,18 @@
           ctx.translate(0, rattle);
           ell(ctx, cx, cy - 70 * S, w * 0.54, 34 * S, '#c2d2de');
           ell(ctx, cx, cy - 84 * S, 20 * S, 12 * S, '#8ea6b8');
+          /* the lid knob is held with an oven mitt */
+          if (App.pointer.down) drawMitt(ctx, cx + 14 * S, cy - 104 * S, S, 0.5);
           ctx.restore();
+          drawHeatMark(ctx, cx - w * 0.62, cy - 90 * S, S);
+        },
+        up(p, tap) {
+          if (tap && F.steamT > 0.1) {
+            const cx = App.W / 2, cy = App.H * 0.52, w = Math.min(App.W * 0.7, 430 * App.S);
+            if (Math.abs(p.x - cx) < w * 0.55 && p.y > cy - 70 * App.S && p.y < cy + 160 * App.S) {
+              Ouch.trigger(p.x, p.y);
+            }
+          }
         },
         done: () => F.steamT > 0.5
       };

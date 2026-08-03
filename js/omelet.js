@@ -180,6 +180,7 @@
           const pn = panAt(), S = App.S;
           drawStoveTop(ctx, pn.x, pn.y, pn.r);
           drawPan(ctx, pn.x, pn.y, pn.r);
+          drawHeatMark(ctx, pn.x - pn.r * 1.08, pn.y - pn.r * 0.8, S);
           /* melted shiny film where the butter has been */
           if (F.trail.length > 1) {
             ctx.strokeStyle = 'rgba(250,225,140,0.55)';
@@ -192,6 +193,9 @@
             ctx.lineWidth = 14 * S;
             ctx.stroke();
           }
+          /* the turner pushes the butter around — no bare fingers on a hot pan */
+          if (grabbed && App.pointer.down) drawTurner(ctx, bx + 6 * S, by + 10 * S, S, -0.12);
+          else drawTurner(ctx, pn.x + pn.r * 1.05, pn.y + pn.r * 0.75, S * 0.92, 0.5);
           drawButterCube(ctx, bx, by, S * 1.1, 1 - F.butter);
         },
         down(p) {
@@ -260,8 +264,16 @@
             ell(ctx, -c.r * 0.25, -c.r * 0.3, c.r * 0.3, c.r * 0.2, 'rgba(255,255,255,0.45)');
             ctx.restore();
           }
+          drawHeatMark(ctx, pn.x - pn.r * 1.08, pn.y - pn.r * 0.8, S);
           const p = App.pointer;
-          if (p.down) drawSpoon(ctx, p.x, p.y, S, 0.2);
+          if (p.down) drawSpatula(ctx, p.x, p.y, S, 0.15);
+          else drawSpatula(ctx, pn.x + pn.r * 1.05, pn.y + pn.r * 0.72, S * 0.92, 0.5);
+        },
+        up(p, tap) {
+          if (tap) {
+            const pn = panAt();
+            if (dist(p.x, p.y, pn.x, pn.y) < pn.r * 0.8) Ouch.trigger(p.x, p.y);
+          }
         },
         done: () => F.cookT > 0.45 && F.curds.length > 4
       };
@@ -317,14 +329,24 @@
             ctx.restore();
           }
           ctx.restore();
+          drawHeatMark(ctx, pn.x - pn.r * 1.08, pn.y - pn.r * 0.8, S);
+          /* the turner folds the omelet */
+          if (folding && F.foldT < 1) {
+            drawTurner(ctx, pn.x + pn.r * 0.35 * (1 - F.foldT), pn.y - 30 * S - Math.sin(F.foldT * Math.PI) * 40 * S, S, -0.2, Math.sin(F.foldT * Math.PI) * 0.7);
+          } else if (F.foldT < 1) {
+            drawTurner(ctx, pn.x + pn.r * 1.05, pn.y + pn.r * 0.75, S * 0.92, 0.5);
+          }
         },
-        up(p) {
+        up(p, tap) {
           if (!folding && Math.hypot(p.vx, p.vy) > 550 * App.S) {
             const pn = panAt();
             if (dist(p.downX, p.downY, pn.x, pn.y) < pn.r) {
               folding = true;
               Snd.whoosh();
             }
+          } else if (tap) {
+            const pn = panAt();
+            if (dist(p.x, p.y, pn.x, pn.y) < pn.r * 0.8) Ouch.trigger(p.x, p.y);
           }
         },
         done: () => F.foldT >= 1

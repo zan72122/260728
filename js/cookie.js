@@ -284,9 +284,19 @@
           }
           if (Math.random() < 0.1) steamPuff(sc.parts, App.W / 2 + rnd(-100, 100) * App.S, App.H * 0.22);
         },
+        up(p, tap) {
+          if (!tap) return;
+          const S = App.S;
+          const w = Math.min(App.W * 0.84, 540 * S), h = Math.min(App.H * 0.64, 500 * S);
+          if (Math.abs(p.x - App.W / 2) < w * 0.44 && Math.abs(p.y - App.H * 0.55) < h * 0.36) {
+            Ouch.trigger(p.x, p.y);
+          }
+        },
         draw(ctx) {
           const S = App.S;
           const w = Math.min(App.W * 0.84, 540 * S), h = Math.min(App.H * 0.64, 500 * S);
+          drawHeatMark(ctx, App.W / 2, App.H * 0.52 - h / 2 - 34 * S, S);
+          drawMitt(ctx, App.W / 2 + w * 0.32, App.H * 0.52 - h / 2 - 44 * S, S, 0.25);
           drawOven(ctx, App.W / 2, App.H * 0.52, w, h, 0, (cx, cy, ww, wh) => {
             /* tray */
             ctx.fillStyle = '#8a8a94';
