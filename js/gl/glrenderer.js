@@ -111,6 +111,22 @@ float fbm(vec2 p) {
   return v;
 }
 
+// Worley風の点特徴ノイズ。セル内のランダム1点までの距離を返す(3x3固定9反復)。
+// 軸に揃った value-noise のセルがそのまま四角い斑点に見える問題(Round4指摘)を、
+// 「セル内特徴点からの丸い距離場」に変えることで解消する。
+float pointField(vec2 p) {
+  vec2 base = floor(p);
+  float minD = 4.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 cell = base + vec2(float(i), float(j));
+      vec2 fp = cell + vec2(hash(cell + 13.1), hash(cell + 71.7));
+      minD = min(minD, distance(p, fp));
+    }
+  }
+  return minD;
+}
+
 void main() {
   // ドーナツの穴: メッシュ側(indices skip + annulus remap)だけでは
   // 完全な透過にできない(このプログラムは常に alpha=1.0 で描いていたため)。
@@ -123,14 +139,21 @@ void main() {
     if (holeAlpha <= 0.001) discard;
   }
 
-  vec3 N = normalize(vNormal);
-  vec3 L = normalize(uLightDir);
-  vec3 V = vec3(0.0, 0.0, 1.0);
-
   float rho = clamp(vExtra.x, 0.0, 1.0);
   float toppingMask = clamp(vExtra.y, 0.0, 1.0);
   float grooveDepth = clamp(vExtra.z, 0.0, 1.0);
   float edgeAO = clamp(vExtra.w, 0.0, 1.0);
+
+  // ρ<0.15(メッシュの極/中心付近)では、リッジ・ノイズ由来の法線の高周波成分を
+  // 滑らかに消し、ドームの大局法線(真上向き)だけへブレンドする。
+  // Round4審査で「中心に放射状の収束アーティファクトが見える」と指摘された箇所の
+  // 根本原因(極特異点での法線ノイズ)をここで直接抑える(スペキュラだけを弱める
+  // 対症療法ではなく、拡散・SSS・リムも含め N そのものを滑らかにする)。
+  vec3 Nraw = normalize(vNormal);
+  float poleBlend = smoothstep(0.0, 0.15, rho);
+  vec3 N = normalize(mix(vec3(0.0, 0.0, 1.0), Nraw, poleBlend));
+  vec3 L = normalize(uLightDir);
+  vec3 V = vec3(0.0, 0.0, 1.0);
 
   // ---------- 曲率・縁依存の焼きムラファクタ ----------
   // 「法線が横向き(horiz)」かつ「ρ大」ほど焼きが進む。中心は常に uBake より控えめ
@@ -145,31 +168,45 @@ void main() {
   float bakeLocal = mix(centerT, edgeT, edgeBoost);
   bakeLocal = clamp(bakeLocal + (lowFreq - 0.5) * 0.22 * uBake, 0.0, 1.0);
 
-  // ---------- 3段焼き色ランプ: base -> golden -> 焦げ縁 ----------
-  vec3 golden = clamp(mix(uBaseColor, uBakedColor, 0.5) * vec3(1.22, 1.14, 0.92) + 0.03, 0.0, 1.0);
-  vec3 crustColor = uBakedColor * vec3(0.62, 0.50, 0.38);
+  // ---------- 3段焼き色ランプ: base -> golden -> mid -> 焦げ縁 ----------
+  // Round4指摘: 黄土色/オリーブに寄って冷たく見える → 緑成分を出さない暖色(橙寄り)の
+  // 固定アンカー色 (#EDB96B / #C9803C / #8F5423) へ強めにブレンドして色相を担保する。
+  vec3 goldAnchorA = vec3(0.929, 0.725, 0.420); // #EDB96B (中心の明るい黄金)
+  vec3 goldAnchorB = vec3(0.788, 0.502, 0.235); // #C9803C (中間のこんがり橙)
+  vec3 goldAnchorC = vec3(0.561, 0.329, 0.137); // #8F5423 (焦げ縁)
+  vec3 goldenA = mix(mix(uBaseColor, uBakedColor, 0.4), goldAnchorA, 0.72);
+  vec3 goldenB = mix(uBakedColor, goldAnchorB, 0.72);
+  vec3 crustColor = mix(uBakedColor, goldAnchorC, 0.78);
   vec3 albedo;
-  if (bakeLocal < 0.5) {
-    albedo = mix(uBaseColor, golden, bakeLocal * 2.0);
+  if (bakeLocal < 0.34) {
+    albedo = mix(uBaseColor, goldenA, bakeLocal / 0.34);
+  } else if (bakeLocal < 0.67) {
+    albedo = mix(goldenA, goldenB, (bakeLocal - 0.34) / 0.33);
   } else {
-    albedo = mix(golden, crustColor, (bakeLocal - 0.5) * 2.0);
+    albedo = mix(goldenB, crustColor, (bakeLocal - 0.67) / 0.33);
   }
 
   // ---------- fBm 粉肌 (明度ムラ、やや広めのブロッチで粉っぽさを出す) ----------
   float flour = fbm(vLocalPos * 0.10 + 3.0);
   albedo *= (0.97 + flour * 0.06);
 
-  // ---------- 気泡ポア: 高周波しきい値、air に比例した密度 ----------
-  float poreN = hash(floor(vLocalPos * 0.34) + 7.0);
-  float poreThresh = mix(0.985, 0.90, clamp(uAir, 0.0, 1.0));
-  float poreDark = step(poreThresh, poreN) * mix(0.10, 0.38, uBake);
+  // ---------- 気泡ポア: セル内特徴点からの丸い距離場で小さな円形ポアに ----------
+  // Round4指摘: 軸に沿った矩形ドット(=汚れ/カビに見える)を、Worley風の丸い距離場に
+  // 置き換え。コントラストを半分・サイズも小さく・焼けた面(uBake高)では目立たせない。
+  float poreD = pointField(vLocalPos * 0.55);
+  float poreRadius = mix(0.10, 0.16, clamp(uAir, 0.0, 1.0)); // air が多いほど僅かに大きく
+  float poreMask = 1.0 - smoothstep(0.0, poreRadius, poreD);
+  float poreDark = poreMask * mix(0.07, 0.10, uBake) * (1.0 - toppingMask);
   albedo *= (1.0 - poreDark);
 
-  // ---------- topping ゾーン: 黄色みマット + 粒子感 (crustほど暗く落とさない) ----------
-  vec3 toppingBase = vec3(0.95, 0.83, 0.50);
+  // ---------- topping ゾーン: 淡いクリーム黄 + 粒子感 (緑味を出さない) ----------
+  // Round4指摘: オリーブ/カーキに見える → #F2E3B0 系の淡いクリーム黄をベースにし、
+  // 焼けても格子の峰だけ淡い黄金色(#E8C078 程度)に留めて暗く/緑がからないようにする。
+  vec3 toppingBase = vec3(0.949, 0.890, 0.690); // #F2E3B0
+  vec3 toppingBaked = vec3(0.910, 0.753, 0.471); // 淡い黄金(#E8C078 相当)
   float toppingGrain = fbm(vLocalPos * 0.28 + 50.0);
-  float toppingBakeMix = clamp(uBake * (0.45 + edgeBoost * 0.55), 0.0, 0.78);
-  vec3 toppingAlbedo = mix(toppingBase * 0.92, mix(toppingBase, vec3(0.66, 0.42, 0.20), toppingBakeMix), 0.4 + toppingGrain * 0.5);
+  float toppingBakeMix = clamp(uBake * (0.4 + edgeBoost * 0.5), 0.0, 0.62);
+  vec3 toppingAlbedo = mix(toppingBase * 0.96, mix(toppingBase, toppingBaked, toppingBakeMix), 0.35 + toppingGrain * 0.4);
   albedo = mix(albedo, toppingAlbedo, toppingMask);
 
   // ---------- 溝(grooveDepth): 溝底を暗く、縁にハイライト ----------
@@ -211,24 +248,29 @@ void main() {
   float sssTerm = (1.0 - clamp(ndl, -1.0, 1.0) * 0.5 - 0.5) * sssAmt * 0.85;
   sssTerm = clamp(sssTerm, 0.0, 1.0);
 
-  // リムライト: 輪郭際にごく淡いクリーム色
-  float fres = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.5);
-  vec3 rimColor = vec3(1.0, 0.97, 0.9) * fres * 0.30 * (0.35 + rho * 0.65);
+  // リムライト: 輪郭際にごく淡い暖白色。狭く絞る(Round4: ハイライトは狭く暖白に)
+  float fres = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.5);
+  vec3 rimColor = vec3(1.0, 0.96, 0.88) * fres * 0.22 * (0.35 + rho * 0.65);
 
-  // スペキュラ: Blinn-Phong。焼けるほど強く鋭く。ノイズでムラ。
-  // ρ→0(極めて曲率の高い頂点/メッシュの極)付近は鏡面ハイライトを弱め、
-  // 低ポリゴンの極特異点がピンポイントの光点として目立つのを防ぐ。
+  // スペキュラ: Blinn-Phong。
+  // Round4指摘: 「真鍮/ブロンズの塊」に見える = 強すぎ・シャープすぎ・全面に均一すぎ。
+  //   - 強度を従来の約1/3へ
+  //   - 低周波ノイズ(shinePatch)で「照りが乗る場所/乗らない場所」を大きくムラにする
+  //     (パン表面の艶は局所的なものであり、金属反射のように全面一様ではない)
+  //   - ハイライト自体は絞る(shininess を上げてスポットを狭く)ことで、弱く・小さく・
+  //     暖白色の「艶の点」として見えるようにする
   vec3 Hh = normalize(L + V);
-  float shininess = mix(8.0, 48.0, uBake);
-  float specStrength = mix(0.045, 0.42, uBake) * (1.0 - toppingMask * 0.75) + uGloss * 0.05 * (1.0 - uBake);
-  float glossNoise = 0.55 + 0.45 * fbm(vLocalPos * 0.5 + 200.0);
-  float apexFade = smoothstep(0.0, 0.07, rho);
-  float spec = pow(max(dot(N, Hh), 0.0), shininess) * specStrength * glossNoise * mix(0.2, 1.0, apexFade);
-  spec += fillGlossBoost * 0.5 * uBake;
+  float shininess = mix(14.0, 64.0, uBake);
+  float specStrength = mix(0.015, 0.14, uBake) * (1.0 - toppingMask * 0.8) + uGloss * 0.018 * (1.0 - uBake);
+  float shinePatch = fbm(vLocalPos * 0.045 + 400.0);
+  float shineMask = mix(0.12, 1.0, smoothstep(0.42, 0.72, shinePatch));
+  float glossNoise = 0.5 + 0.5 * fbm(vLocalPos * 0.5 + 200.0);
+  float spec = pow(max(dot(N, Hh), 0.0), shininess) * specStrength * shineMask * glossNoise;
+  spec += fillGlossBoost * 0.3 * uBake;
 
-  // frying: 下半分に油の照り
+  // frying: 下半分に油の照り(控えめ)
   float fryBoost = uOpts.y * clamp(vLocalPos.y * 0.01 + 0.3, 0.0, 1.0);
-  spec += fryBoost * 0.22;
+  spec += fryBoost * 0.09;
 
   vec3 lit = albedo * wrap + sssColor * sssTerm + rimColor;
   lit += vec3(1.0, 0.96, 0.85) * spec;
