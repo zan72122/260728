@@ -96,11 +96,16 @@ function drawGarageHints(g: Game, ctx: Ctx): void {
     ctx.restore();
   }
 
-  if (g.hintT <= 1.4) return;
+  // the lever glows whenever it is the thing to touch, no idle wait
   const upReady = g.liftT >= 1 && g.locked;
+  const leverActive = g.liftT === 0 || (g.allRepaired() && g.liftT >= 1) || (g.freePlay && g.liftT >= 1 && g.creeperProg === 0);
+  if (leverActive) {
+    glow(ctx, l.leverX, l.leverY, l.carW * 0.18, 'rgba(255,209,102,0.45)', 0.4 + pulse * 0.5);
+  }
+
+  if (g.hintT <= 0.9) return;
   const chevSize = Math.max(16, l.carW * 0.055);
   if (g.liftT === 0) {
-    glow(ctx, l.leverX, l.leverY, l.carW * 0.2, 'rgba(255,209,102,0.5)', 0.5 + pulse * 0.5);
     for (let i = 0; i < 3; i++) {
       const yy = l.leverY - chevSize * 1.6 - ((g.time * 60 + i * 26) % 78);
       chevron(ctx, l.leverX, yy, chevSize, 0, '#ffd166', 0.9 - i * 0.25);
@@ -125,12 +130,24 @@ function drawGarageHints(g: Game, ctx: Ctx): void {
 function drawUnderHints(g: Game, ctx: Ctx): void {
   const l = layoutUnder(g.W, g.H);
   const pulse = (Math.sin(g.time * 5) + 1) / 2;
+
+  // every unfixed fault carries a persistent beacon — a 4-year-old should
+  // never have to guess which parts are touchable
+  for (const f of g.faults) {
+    if (f.fixed || f.held) continue;
+    const fp = g.faultGrabPos(f);
+    const sp = underToScreen(l, fp.x, fp.y);
+    glow(ctx, sp.x, sp.y, l.grabR * (0.9 + pulse * 0.25), 'rgba(255,196,90,0.5)', 0.45 + pulse * 0.4);
+    ctx.fillStyle = `rgba(255,244,200,${0.75 + pulse * 0.25})`;
+    starPath(ctx, sp.x, sp.y - l.grabR * 0.55, 8 + pulse * 3, 4, 0.42, g.time * 2.2);
+    ctx.fill();
+  }
+
   const first = g.faults.find((f) => !f.fixed);
   if (first) {
-    if (g.hintT <= 1.4) return;
+    if (g.hintT <= 0.9) return;
     const fp = g.faultGrabPos(first);
     const sp = underToScreen(l, fp.x, fp.y);
-    glow(ctx, sp.x, sp.y, l.grabR * (1.1 + pulse * 0.3), 'rgba(255,233,168,0.4)', 0.5 + pulse * 0.5);
     if (first.kind === 'exhaust') {
       const base = underToScreen(l, PART.exhaustGrab.x, PART.exhaustGrab.y);
       const top = underToScreen(l, PART.exhaustGrab.x, PART.exhaustGrab.y - 55);

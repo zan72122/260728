@@ -41,6 +41,7 @@ interface Mood {
   hemi: number;
   key: number;
   window: number;
+  env: number;
 }
 
 export class Scene3D {
@@ -285,9 +286,12 @@ export class Scene3D {
   }
 
   private garagePose(): CamPose {
-    return this.portrait()
-      ? pose(0.9, 2.6, 13.5, 0.9, 1.6, 0, 47)
-      : pose(0.35, 1.95, 8.9, 0.25, 1.4, 0, 34);
+    if (this.portrait()) return pose(0.9, 2.6, 13.5, 0.9, 1.6, 0, 47);
+    // landscape: pick the distance so the lever & creeper (x≈4.6) always fit,
+    // whatever the aspect ratio (iPad 4:3 is much narrower than a phone)
+    const aspect = this.W / this.H;
+    const dist = clamp(5.9 / (Math.tan((34 * Math.PI) / 360) * aspect), 8.9, 16);
+    return pose(0.35, 1.95 + (dist - 8.9) * 0.06, dist, 0.25, 1.45, 0, 34);
   }
 
   private underPose(g: Game): CamPose {
@@ -339,7 +343,7 @@ export class Scene3D {
   private testPose(): CamPose {
     const x = this.testX;
     return this.portrait()
-      ? pose(x, 2.4, 13.5, x + 0.4, 1.3, 0, 50)
+      ? pose(x, 2.0, 10.5, x + 0.4, 1.15, 0, 48)
       : pose(x - 0.4, 1.7, 8.6, x + 0.5, 1.1, 0, 38);
   }
 
@@ -567,7 +571,7 @@ export class Scene3D {
   private gPos(kind: string): { x: number; y: number } {
     // grab positions for lamp aiming (PART coords)
     switch (kind) {
-      case 'bolt': return { x: 640, y: 268 };
+      case 'bolt': return { x: 640, y: 296 };
       case 'clip': return { x: 505, y: 330 };
       case 'hose': return { x: 720, y: 320 };
       default: return { x: 300, y: 330 };
@@ -619,7 +623,7 @@ export class Scene3D {
     if (mp && g.phase === 'garage') {
       this.maskItem.visible = true;
       const bob = Math.sin(time * 2.2) * 6;
-      this.placePuck(this.maskItem, mp.x, mp.y + bob, Math.max(40, l.carW * 0.13));
+      this.placePuck(this.maskItem, mp.x, mp.y + bob, Math.max(54, l.carW * 0.17));
       this.maskItem.rotation.z = Math.sin(time * 1.8) * 0.08;
     } else {
       this.maskItem.visible = false;
@@ -661,28 +665,33 @@ export class Scene3D {
     let target: Mood;
     if (g.phase === 'test') {
       target = g.test.course === 0
-        ? { bg: new THREE.Color(0x87d0f2), hemi: 1.0, key: 2.6, window: 0 }
-        : { bg: new THREE.Color(0x4a3f76), hemi: 0.5, key: 0.9, window: 0 };
+        ? { bg: new THREE.Color(0x87d0f2), hemi: 1.0, key: 2.6, window: 0, env: 0.4 }
+        : { bg: new THREE.Color(0x4a3f76), hemi: 0.5, key: 0.9, window: 0, env: 0.16 };
     } else if (g.phase === 'weld' || g.phase === 'weldDone' || g.phase === 'shield' || g.phase === 'freeweld') {
       const dim = g.maskT;
       target = {
         bg: new THREE.Color(0x1a2130).lerp(new THREE.Color(0xe8d9c0), 1 - dim),
-        hemi: lerp(0.55, 0.3, dim),
-        key: lerp(2.6, 0.55, dim),
-        window: lerp(1.6, 0.15, dim),
+        hemi: lerp(0.55, 0.16, dim),
+        key: lerp(2.6, 0.28, dim),
+        window: lerp(1.6, 0.05, dim),
+        env: lerp(0.4, 0.05, dim),
       };
       if (dim > 0.5) this.hemi.color.set(0xcfe0ff);
       else this.hemi.color.set(0xfff2df);
     } else if (g.phase === 'under' || ((g.phase === 'slideIn' || g.phase === 'slideOut') && g.creeperProg > 0.4)) {
-      target = { bg: new THREE.Color(0x252831), hemi: 0.7, key: 1.2, window: 0.4 };
+      target = { bg: new THREE.Color(0x252831), hemi: 0.7, key: 1.2, window: 0.4, env: 0.18 };
+    } else if (g.phase === 'choice') {
+      // slightly dusk so the three big buttons own the screen
+      target = { bg: new THREE.Color(0xcbbda9), hemi: 0.4, key: 1.5, window: 0.8, env: 0.28 };
     } else {
-      target = { bg: new THREE.Color(0xe8d9c0), hemi: 0.55, key: 2.6, window: 1.6 };
+      target = { bg: new THREE.Color(0xe8d9c0), hemi: 0.55, key: 2.6, window: 1.6, env: 0.4 };
     }
-    const k = 1 - Math.exp(-dt * 4);
+    const k = 1 - Math.exp(-dt * 6);
     this.bg.lerp(target.bg, k);
     this.hemi.intensity = lerp(this.hemi.intensity, target.hemi, k);
     this.key.intensity = lerp(this.key.intensity, target.key, k);
     this.windowSpot.intensity = lerp(this.windowSpot.intensity, target.window, k);
+    this.scene.environmentIntensity = lerp(this.scene.environmentIntensity, target.env, k);
     if (this.scene.fog instanceof THREE.Fog) this.scene.fog.color.copy(this.bg);
   }
 

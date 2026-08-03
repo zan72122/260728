@@ -11,7 +11,7 @@ export function courseGround(course: number, x: number): number {
       const d = (m - cx) / w;
       return h * Math.exp(-d * d);
     };
-    return bump(12, 0.42, 2.6) + bump(23, 0.34, 2.2);
+    return bump(12, 0.34, 2.8) + bump(23, 0.28, 2.4);
   }
   const m = ((x % 44) + 44) % 44;
   const d = (m - 16) / 5.5;
@@ -116,11 +116,26 @@ export class Test3D {
         cl.position.set(i * 11 - 4, 7 + (i % 3), -18 - (i % 2) * 6);
         this.root.add(cl);
       }
-      // flowers along the roadside
+      // flowers + toy trees along the roadside
       for (let i = 0; i < 40; i++) {
         const f = flower(i % 2 ? 0xff9fb6 : 0xffd166);
         f.position.set(x0 + i * 2.3, courseGround(course, x0 + i * 2.3) * 0.2, (i % 2 ? 2.4 : -2.6) + (i % 3) * 0.4);
         this.root.add(f);
+      }
+      for (let i = 0; i < 16; i++) {
+        const t = new THREE.Group();
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 0.7, 8), M.wood(0x8a6a3c));
+        trunk.position.y = 0.35;
+        t.add(trunk);
+        const crown = new THREE.Mesh(
+          new THREE.SphereGeometry(0.55 + (i % 3) * 0.12, 12, 10),
+          M.plastic(i % 2 ? 0x5aae67 : 0x7cc98b, 0.8),
+        );
+        crown.position.y = 0.95;
+        crown.scale.y = 1.15;
+        t.add(crown);
+        t.position.set(x0 + i * 5.6 + (i % 4), 0, i % 2 ? 3.4 + (i % 3) : -3.6 - (i % 3));
+        this.root.add(t);
       }
     } else {
       // string lights

@@ -102,7 +102,7 @@ export class Garage3D {
     // props: cones + tire stack + box
     const cone = this.assets.prop('cone');
     cone.scale.setScalar(1.6);
-    cone.position.set(-5.6, 0.02, 0.9);
+    cone.position.set(-4.9, 0.02, 0.9);
     r.add(cone);
     const cone2 = this.assets.prop('cone');
     cone2.scale.setScalar(1.6);
@@ -329,17 +329,20 @@ export class Garage3D {
       legs.add(leg);
     }
     this.plate.add(legs);
-    const sheet = this.assets.prop('debris-plate-a');
-    sheet.scale.set(2.2, 2.2, 2.2);
-    sheet.rotation.x = Math.PI / 2 - 0.12;
+    // clean seamless steel sheet with corner rivets (invites doodling)
+    const sheet = new THREE.Mesh(
+      new RoundedBoxGeometry(1.95, 1.95, 0.1, 3, 0.06),
+      new THREE.MeshStandardMaterial({ color: 0xb9c2cf, roughness: 0.4, metalness: 0.6 }),
+    );
+    sheet.rotation.x = -0.12;
     sheet.position.set(0, 0.1, 0);
-    // steel-plate look (the kit's plate is orange)
-    sheet.traverse((o) => {
-      if (o instanceof THREE.Mesh) {
-        o.material = new THREE.MeshStandardMaterial({ color: 0xb9c2cf, roughness: 0.42, metalness: 0.65 });
-      }
-    });
     this.plate.add(sheet);
+    for (const [rx, ry] of [[-0.8, -0.8], [0.8, -0.8], [-0.8, 0.8], [0.8, 0.8]] as Array<[number, number]>) {
+      const rivet = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.05, 12), M.metal(0x7c8494, 0.4));
+      rivet.rotation.x = Math.PI / 2 - 0.12;
+      rivet.position.set(rx, 0.1 + ry * Math.cos(0.12), 0.06 + ry * Math.sin(0.12) * -1);
+      this.plate.add(rivet);
+    }
     this.plate.position.copy(PLATE_POS);
     this.root.add(this.plate);
   }

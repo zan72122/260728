@@ -160,7 +160,7 @@ function retintAtlas(
     d[i + 2] = Math.min(255, tb * k);
     changed++;
   }
-  console.info(`[retint] changed ${changed}/${d.length / 4} px (atlas ${c.width}x${c.height})`);
+  void changed;
   ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(c);
   tex.flipY = false;

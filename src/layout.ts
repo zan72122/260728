@@ -110,7 +110,7 @@ export function layoutChoice(W: number, H: number): ChoiceLayout {
 
 // under-body part positions in PART coordinates (1000 x 420, front = +x)
 export const PART = {
-  boltPos: { x: 640, y: 268 },
+  boltPos: { x: 640, y: 296 },
   oilPan: { x: 640, y: 210 },
   clipSlot: { x: 462, y: 196 },
   clipLoose: { x: 505, y: 330 },

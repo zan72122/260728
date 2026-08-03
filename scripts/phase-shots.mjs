@@ -17,7 +17,7 @@ page.on('console', (m) => {
 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const dbg = () => page.evaluate(() => window.__game.debug());
-async function waitPhase(want, timeout = 25000) {
+async function waitPhase(want, timeout = 60000) {
   const t0 = Date.now();
   for (;;) {
     const d = await dbg();

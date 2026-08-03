@@ -25,6 +25,9 @@ export class Puck {
     this.group.add(body);
     const rim = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.06, 10, 36), M.plastic(0xffffff, 0.35));
     this.group.add(rim);
+    // dark outer ring keeps the puck readable on bright scenes
+    const outline = new THREE.Mesh(new THREE.TorusGeometry(1.08, 0.05, 10, 36), M.plastic(0x394050, 0.5));
+    this.group.add(outline);
     const tex = M.canvasTexture(256, 256, (ctx, w) => {
       ctx.clearRect(0, 0, w, w);
       ctx.save();
@@ -122,8 +125,19 @@ export function makeChoicePucks(carIdx: number): Puck[] {
     new Puck({
       id: 'next', color: 0xffb45e, label: 'つぎのくるま',
       icon: (ctx, s) => {
-        miniCar(ctx, -s * 0.22, s * 0.24, s * 0.62, spec.body);
-        miniCar(ctx, s * 0.16, -s * 0.1, s * 0.84, next.body);
+        miniCar(ctx, -s * 0.3, s * 0.3, s * 0.55, spec.body);
+        miniCar(ctx, s * 0.14, -s * 0.16, s * 0.8, next.body);
+        // big forward arrow so it can't be confused with "again"
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = s * 0.11;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-s * 0.5, s * 0.62);
+        ctx.lineTo(s * 0.34, s * 0.62);
+        ctx.moveTo(s * 0.12, s * 0.42);
+        ctx.lineTo(s * 0.38, s * 0.62);
+        ctx.lineTo(s * 0.12, s * 0.82);
+        ctx.stroke();
       },
     }),
     new Puck({

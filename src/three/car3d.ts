@@ -234,6 +234,15 @@ export class Car3D {
     const eng = new THREE.Mesh(new RoundedBoxGeometry(0.6, 0.24, 0.7, 3, 0.08), M.metal(0x767d8a, 0.5));
     eng.position.copy(partToLocal(810, 160, 0.1));
     b.add(eng);
+    // side skirts: keep the hanging parts hidden from the outside view
+    for (const z of [-0.72, 0.72]) {
+      const skirt = new THREE.Mesh(
+        new THREE.BoxGeometry(2.9, 0.16, 0.05),
+        new THREE.MeshStandardMaterial({ color: 0x363b45, roughness: 0.8 }),
+      );
+      skirt.position.set(0, BELLY_Y - 0.05, z);
+      b.add(skirt);
+    }
 
     this.buildOilPan(b);
     this.buildClip(b);

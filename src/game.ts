@@ -792,7 +792,8 @@ export class Game {
     if (this.freePlay) return null;
     if (this.faultsRemaining() > 0 || this.cracksRemaining() === 0) return null;
     if (this.liftT < 1) return null;
-    return { x: clamp(l.mechHomeX - l.carW * 0.30, 60, l.W - 60), y: l.mechY - l.carW * 0.42 };
+    // floats right above the standing robot's head, clearly "take me"
+    return { x: clamp(l.mechHomeX + l.carW * 0.02, 60, l.W - 60), y: Math.max(70, l.mechY - l.carW * 0.58) };
   }
 
   raiseLift(): void {
