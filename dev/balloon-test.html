@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Balloon + gondola test harness (M1, mega splash tier)</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1a2b38; }
+  #canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #hud {
+    position: fixed; top: 8px; left: 8px; z-index: 10;
+    font: 12px/1.5 monospace; color: #fff; background: rgba(0,0,0,0.5);
+    padding: 6px 10px; border-radius: 6px; pointer-events: none;
+    white-space: pre;
+    max-width: 44vw;
+  }
+  #buttons {
+    position: fixed; bottom: 8px; left: 8px; z-index: 10;
+    display: flex; flex-wrap: wrap; gap: 6px; max-width: 96vw;
+  }
+  #buttons button {
+    font: 12px/1 monospace; padding: 8px 10px; border-radius: 6px; border: none;
+    background: #ffd23f; color: #1a2b38; cursor: pointer;
+  }
+  #buttons button:active { background: #ffb703; }
+</style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="hud">loading…</div>
+  <div id="buttons">
+    <button data-act="camGame">cam: game</button>
+    <button data-act="camSky">cam: sky</button>
+    <button data-act="board">boardGondola</button>
+    <button data-act="progress0">progress→0</button>
+    <button data-act="progress1">progress→1</button>
+    <button data-act="fetchGiant">fetchGiantToy</button>
+    <button data-act="heave">heaveThrow</button>
+    <button data-act="exit">exitGondola</button>
+    <button data-act="runAll">run full sequence</button>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three.module.js"
+    }
+  }
+  </script>
+  <script type="module" src="./balloon-test.js"></script>
+</body>
+</html>

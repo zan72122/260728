@@ -9,6 +9,11 @@
 // repeated part (ears, arms, legs, crates, peeking balls) and a canvas face
 // texture on the head instead of separate eye/nose/cheek meshes.
 //
+// Mega splash tier (docs/CONTRACTS-MEGA.md "M1"): boardGondola/exitGondola/
+// fetchGiantToy/heaveThrow reuse the exact same pivots/springs above — no
+// new meshes. See the block of constants above GONDOLA_HOP_DUR for the
+// gondola-riding tunables and the pawAnchor clearance tradeoff.
+//
 // pawAnchor placement note (see constructor comment above PAW_HOLD_Y_OFFSET):
 // the contract's literal "tip.y + ~0.15" sits only ~3cm above the physical
 // board-top surface (tip.y is the board's CENTER height in scene.js, top is
@@ -110,6 +115,34 @@ const LADDER_DX = -2.3;
 const PAW_HOLD_Y_OFFSET = 0.46;
 
 const MAX_LEAN = (20 * Math.PI) / 180; // aimLean clamp, per contract
+
+// ---------------------------------------------------------------------------
+// Mega splash tier additions (docs/CONTRACTS-MEGA.md "M1 — balloon, sky
+// access, rabbit"): boardGondola/exitGondola/fetchGiantToy/heaveThrow, plus
+// gondola-riding. These reuse the same pivots/springs as the ground
+// workflow above — no new meshes, no new draw calls.
+// ---------------------------------------------------------------------------
+const GONDOLA_HOP_DUR = 0.65; // boardGondola hop, scaled seconds
+const EXIT_HOP_DUR = 0.6; // exitGondola hop, scaled seconds
+const FETCH_GIANT_DUR = 1.0; // two-arm heave from the giant crate, per contract "~1.0s"
+const HEAVE_THROW_DUR = 0.8; // slow whole-body push, per contract "~0.8s"
+// Paw-hold height while gondola-riding, measured from the basket floor
+// (== gondolaAnchor, == root position while riding). The contract asks for
+// enough clearance that a toy of radius up to 1.5m clears BOTH the basket
+// rim and the balloon ropes, but scene.js's own geometry makes that
+// impossible to satisfy literally for anything bigger than ~0.75m radius:
+// the rim sits at BASKET_H=0.95 and the rope cone doesn't finish
+// narrowing to the envelope neck until NECK_Y=2.45 — a 1.5m-radius (or
+// even the validation harness's 1.1m) sphere is simply taller than that
+// 1.5m gap. The contract explicitly allows deviation here, so this offset
+// picks the LESS-bad tradeoff: clear the basket RIM (the solid, opaque,
+// immediately-obvious obstruction — a toy sliced by a solid wicker edge
+// reads as broken) by a visible margin, and accept that the widest giant
+// toys' upper hemisphere may overlap the thin, mostly-open rope cone and
+// the envelope's own lower curve — a few thin ropes crossing in front of
+// a giant ball reads as "held up near the balloon", not as clipping. See
+// report for the exact number and the geometric reasoning above.
+const GONDOLA_PAW_Y_OFFSET = 2.2;
 
 // ---------------------------------------------------------------------------
 // Canvas face texture (baked once, shared by every Rabbit instance).
@@ -287,6 +320,15 @@ export class Rabbit {
     // ---- internal animation state ----
     this._action = null; // {type, t, dur, ...} while climb/fetch/stow/windup/cheer runs
     this._holdingToy = false;
+    // Mega splash tier: true from the moment boardGondola's hop lands until
+    // exitGondola's hop begins — while true, update() locks root.position
+    // onto balloon.gondolaAnchor every frame (contract) instead of running
+    // the ground idle pose.
+    this._riding = false;
+    // True while holding the giant toy (between fetchGiantToy's onTakeOut
+    // and heaveThrow's onRelease) — drives the "still straining a little"
+    // hold pose and the gondola pawAnchor height.
+    this._holdingGiant = false;
     this._breathT = Math.random() * 10;
     this._twitchTimer = 1.5 + Math.random() * 2.5;
     this._twitchSide = 0; // spring impulse applied to one ear
@@ -955,6 +997,331 @@ export class Rabbit {
   }
 
   // -----------------------------------------------------------------------
+  // Mega splash tier — gondola riding + giant-toy heave
+  // -----------------------------------------------------------------------
+  _gondolaAnchor() {
+    const b = this.sceneEnv && this.sceneEnv.balloon;
+    return (b && b.gondolaAnchor) || null;
+  }
+
+  // Hop from wherever the rabbit currently stands (the tower-top area, per
+  // gameflow's own sequencing) into the gondola basket. Once the hop lands,
+  // `_riding` goes true and every subsequent update() locks root.position
+  // onto balloon.gondolaAnchor (contract) until exitGondola.
+  boardGondola(onDone) {
+    const from = this.root.position.clone();
+    this.state = 'board';
+    this._riding = false; // only becomes true once the hop actually lands
+    this._action = {
+      type: 'board',
+      t: 0,
+      dur: GONDOLA_HOP_DUR,
+      from,
+      onDone: onDone || null,
+    };
+  }
+
+  _stepBoard(dt) {
+    const a = this._action;
+    a.t += dt;
+    const t = Math.min(a.t, a.dur);
+    const p = clamp01(t / a.dur);
+    const e = easeInOutCubic(p);
+
+    const anchor = this._gondolaAnchor();
+    if (anchor) anchor.getWorldPosition(this._pawTargetScratch);
+    else this._pawTargetScratch.copy(a.from);
+    const target = this._pawTargetScratch;
+
+    const x = lerp(a.from.x, target.x, e);
+    const y = lerp(a.from.y, target.y, e) + Math.sin(p * Math.PI) * 0.4; // hop arc
+    const z = lerp(a.from.z, target.z, e);
+    this.root.position.set(x, y, z);
+    this.root.rotation.y = damp(this.root.rotation.y, 0, 0.12, dt);
+
+    const legKick = Math.sin(p * Math.PI) * 0.6;
+    this._legAngle.l = this._legAngle.r = -legKick;
+    this._armAngle.l = this._armAngle.r = lerp(this._armAngle.l, 0.4 + legKick * 0.3, 0.5);
+    this._bodyPivot.rotation.x = -legKick * 0.15;
+    this._earDriveFB = legKick * 0.8;
+
+    if (a.t >= a.dur) {
+      this.root.position.copy(target);
+      this._riding = true;
+      this._legAngle.l = this._legAngle.r = 0;
+      this._bodyPivot.rotation.x = 0;
+      this._action = null;
+      this.state = 'ride';
+      const cb = a.onDone;
+      if (cb) cb();
+    }
+  }
+
+  // Hop back out of the gondola to the top platform (contract: "the top
+  // platform" — the tower's highest board, where sky access begins).
+  exitGondola(onDone) {
+    const from = this.root.position.clone();
+    const tip = this._tipOf(this.currentPlatformId);
+    const target = new THREE.Vector3(this._standX(tip), tip.y + FOOT_Y_OFFSET, tip.z);
+    this.state = 'exit';
+    this._riding = false;
+    this._action = {
+      type: 'exit',
+      t: 0,
+      dur: EXIT_HOP_DUR,
+      from,
+      target,
+      onDone: onDone || null,
+    };
+  }
+
+  _stepExit(dt) {
+    const a = this._action;
+    a.t += dt;
+    const p = clamp01(a.t / a.dur);
+    const e = easeInOutCubic(p);
+    const x = lerp(a.from.x, a.target.x, e);
+    const y = lerp(a.from.y, a.target.y, e) + Math.sin(p * Math.PI) * 0.35;
+    const z = lerp(a.from.z, a.target.z, e);
+    this.root.position.set(x, y, z);
+    this.root.rotation.y = damp(this.root.rotation.y, 0, 0.12, dt);
+
+    const legKick = Math.sin(p * Math.PI) * 0.6;
+    this._legAngle.l = this._legAngle.r = -legKick;
+    this._bodyPivot.rotation.x = -legKick * 0.12;
+    this._earDriveFB = legKick * 0.7;
+
+    if (a.t >= a.dur) {
+      this._snapToPlatform(this.currentPlatformId);
+      this._legAngle.l = this._legAngle.r = 0;
+      this._bodyPivot.rotation.x = 0;
+      this._action = null;
+      this.state = 'idle';
+      const cb = a.onDone;
+      if (cb) cb();
+    }
+  }
+
+  // Two-arm heave from the giant crate: reach down (knees bend), a brief
+  // stagger under the (about to be revealed) weight, then a SLOW heavy
+  // extend upward, settling into a "still straining a little" hold pose.
+  // onTakeOut fires at the lift moment (contract), roughly mid-animation.
+  fetchGiantToy(onTakeOut, onDone) {
+    this.state = 'fetchGiant';
+    const dur = FETCH_GIANT_DUR;
+    this._action = {
+      type: 'fetchGiant',
+      t: 0,
+      dur,
+      reachEnd: dur * 0.32,
+      liftAt: dur * 0.5,
+      riseEnd: dur * 0.78,
+      liftedOut: false,
+      onTakeOut: onTakeOut || null,
+      onDone: onDone || null,
+    };
+  }
+
+  _stepFetchGiant(dt) {
+    const a = this._action;
+    a.t += dt;
+    const t = a.t;
+    const { reachEnd, liftAt, riseEnd } = a;
+
+    if (t <= reachEnd) {
+      // Reach down toward the crate; knees bend, arms extend low.
+      const p = easeInCubic(clamp01(t / reachEnd));
+      this._bodyPivot.rotation.z = lerp(0, -0.55, p);
+      this._bodyPivot.position.y = lerp(LEG_LEN, LEG_LEN - 0.05, p);
+      this._legAngle.l = this._legAngle.r = lerp(0, -0.5, p);
+      this._armAngle.l = this._armAngle.r = lerp(this._holdingToy ? Math.PI : 0, -0.75, p);
+      this._earDriveFB = -1.0 * p;
+      this._bodySquashY = lerp(1, 0.88, p);
+      this._bodySquashXZ = lerp(1, 1.1, p);
+    } else if (t <= liftAt) {
+      // Grip the crate; a brief stagger-in-place under the hidden weight.
+      const span = Math.max(liftAt - reachEnd, 1e-6);
+      const p = clamp01((t - reachEnd) / span);
+      const wobble = Math.sin(p * Math.PI * 3) * 0.08 * (1 - p);
+      this._bodyPivot.rotation.x = wobble;
+      this._bodyPivot.rotation.z = -0.55 + wobble * 0.3;
+    } else if (t <= riseEnd) {
+      // Slow, heavy heave upward — knees straighten with visible effort,
+      // a big side-to-side stagger selling the comic weight.
+      const span = Math.max(riseEnd - liftAt, 1e-6);
+      const p = easeInOutCubic(clamp01((t - liftAt) / span));
+      this._bodyPivot.rotation.z = lerp(-0.55, 0.08, p);
+      this._bodyPivot.position.y = lerp(LEG_LEN - 0.05, LEG_LEN + 0.02, p);
+      const stagger = Math.sin(t * 9) * 0.14 * (1 - p);
+      this._legAngle.l = lerp(-0.5, 0.15, p) + stagger;
+      this._legAngle.r = lerp(-0.5, 0.15, p) - stagger;
+      this._armAngle.l = this._armAngle.r = lerp(-0.75, Math.PI, p);
+      this._bodySquashY = lerp(0.88, 1.06, p);
+      this._bodySquashXZ = lerp(1.1, 0.96, p);
+      this._bodyPivot.rotation.x = Math.sin(t * 7) * 0.1 * (1 - p);
+      this._earDriveFB = lerp(-1.0, 1.1, p);
+    } else {
+      // Settle into the "holding it up, straining a little" pose.
+      const span = Math.max(a.dur - riseEnd, 1e-6);
+      const p = clamp01((t - riseEnd) / span);
+      const e = easeOutCubic(p);
+      this._bodyPivot.rotation.z = lerp(0.08, 0.02, e);
+      this._bodyPivot.rotation.x = lerp(this._bodyPivot.rotation.x, 0, e);
+      this._bodyPivot.position.y = lerp(LEG_LEN + 0.02, LEG_LEN - 0.01, e); // knees stay bent — it's heavy
+      this._legAngle.l = lerp(this._legAngle.l, 0.12, e);
+      this._legAngle.r = lerp(this._legAngle.r, 0.12, e);
+      this._armAngle.l = this._armAngle.r = Math.PI;
+      this._bodySquashY = lerp(this._bodySquashY, 1.03, e);
+      this._bodySquashXZ = lerp(this._bodySquashXZ, 0.98, e);
+      this._earDriveFB = lerp(this._earDriveFB, 0.3, e);
+    }
+
+    if (!a.liftedOut && t >= liftAt) {
+      a.liftedOut = true;
+      this._holdingGiant = true;
+      this._holdingToy = true;
+      if (a.onTakeOut) a.onTakeOut();
+    }
+
+    if (t >= a.dur) {
+      this._bodyPivot.rotation.set(0, this._bodyPivot.rotation.y, 0);
+      this._bodyPivot.position.y = LEG_LEN - 0.01;
+      this._legAngle.l = this._legAngle.r = 0.12;
+      this._armAngle.l = this._armAngle.r = Math.PI;
+      this._bodySquashY = 1.03;
+      this._bodySquashXZ = 0.98;
+      this._action = null;
+      this.state = 'ride';
+      const cb = a.onDone;
+      if (cb) cb();
+    }
+  }
+
+  // Slow whole-body push (~0.8s per contract) with a big anticipation
+  // squash-crouch, then a heavy explosive extend; onRelease fires at full
+  // extension (the release pose moment — gameflow calls physics.release
+  // then, same convention as windupAndThrow).
+  heaveThrow(onRelease, onDone) {
+    this.state = 'heave';
+    const dur = HEAVE_THROW_DUR;
+    this._action = {
+      type: 'heave',
+      t: 0,
+      dur,
+      anticipateEnd: dur * 0.45,
+      releaseAt: dur * 0.72,
+      released: false,
+      onRelease: onRelease || null,
+      onDone: onDone || null,
+    };
+  }
+
+  _stepHeave(dt) {
+    const a = this._action;
+    a.t += dt;
+    const t = a.t;
+    const { anticipateEnd, releaseAt } = a;
+
+    if (t <= anticipateEnd) {
+      // Big anticipation: deep crouch, hard squash, holding the giant back.
+      const p = easeInCubic(clamp01(t / anticipateEnd));
+      this._bodySquashY = lerp(1.03, 0.74, p);
+      this._bodySquashXZ = lerp(0.98, 1.22, p);
+      this._bodyPivot.position.y = lerp(LEG_LEN - 0.01, LEG_LEN - 0.07, p);
+      this._legAngle.l = this._legAngle.r = lerp(0.12, -0.55, p);
+      this._armAngle.l = this._armAngle.r = lerp(Math.PI, Math.PI + 0.4, p);
+      this._bodyPivot.rotation.x = lerp(0, -0.22, p);
+      this._earDriveFB = -0.8 * p;
+    } else if (t <= releaseAt) {
+      // Slow, heavy explosive extend to full stretch — release at the top.
+      const span = Math.max(releaseAt - anticipateEnd, 1e-6);
+      const p = easeOutCubic(clamp01((t - anticipateEnd) / span));
+      this._bodySquashY = lerp(0.74, 1.28, p);
+      this._bodySquashXZ = lerp(1.22, 0.86, p);
+      this._bodyPivot.position.y = lerp(LEG_LEN - 0.07, LEG_LEN + 0.06, p);
+      this._legAngle.l = this._legAngle.r = lerp(-0.55, 0.65, p);
+      this._armAngle.l = this._armAngle.r = lerp(Math.PI + 0.4, 0.15, p);
+      this._bodyPivot.rotation.x = lerp(-0.22, 0.28, p);
+      this._earDriveFB = lerp(-0.8, 1.5, p);
+    } else {
+      // Follow-through + settle wobble.
+      const span = Math.max(a.dur - releaseAt, 1e-6);
+      const p = clamp01((t - releaseAt) / span);
+      const settle = easeOutCubic(p);
+      const wobble = Math.sin(p * Math.PI * 2.2) * 0.3 * (1 - p);
+      this._bodySquashY = lerp(1.28, 1, settle);
+      this._bodySquashXZ = lerp(0.86, 1, settle);
+      this._bodyPivot.position.y = lerp(LEG_LEN + 0.06, LEG_LEN, settle);
+      this._legAngle.l = this._legAngle.r = lerp(0.65, 0, settle);
+      this._armAngle.l = this._armAngle.r = lerp(0.15, 0.6, settle) + wobble;
+      this._bodyPivot.rotation.x = lerp(0.28, 0, settle);
+      this._earDriveFB = lerp(1.5, 0, settle) + wobble;
+    }
+
+    if (!a.released && t >= releaseAt) {
+      a.released = true;
+      this._holdingGiant = false;
+      this._holdingToy = false;
+      if (a.onRelease) a.onRelease();
+    }
+
+    if (t >= a.dur) {
+      this._bodySquashY = this._bodySquashXZ = 1;
+      this._bodyPivot.position.y = LEG_LEN;
+      this._bodyPivot.rotation.x = 0;
+      this._legAngle.l = this._legAngle.r = 0;
+      this._armAngle.l = this._armAngle.r = 0.6;
+      this._action = null;
+      this.state = 'ride';
+      const cb = a.onDone;
+      if (cb) cb();
+    }
+  }
+
+  // Idle-equivalent while gondola-riding: locks root.position onto
+  // balloon.gondolaAnchor every frame (contract), plus breathing/twitch as
+  // in ground idle, plus altitude-wind ear reaction (stronger once
+  // balloon.progress > 0.3, per contract).
+  _updateRideIdle(dt) {
+    const anchor = this._gondolaAnchor();
+    if (anchor) {
+      anchor.getWorldPosition(this._pawTargetScratch);
+      this.root.position.copy(this._pawTargetScratch);
+    }
+
+    this._breathT += dt;
+    const breath = Math.sin(this._breathT * 2.1);
+    const restLeg = this._holdingGiant ? 0.12 : 0;
+    const restArm = this._holdingGiant || this._holdingToy ? Math.PI : 0;
+    this._bodyPivot.position.y = LEG_LEN + breath * 0.008 - (this._holdingGiant ? 0.01 : 0);
+    this._bodySquashY = 1 + breath * 0.012;
+    this._bodySquashXZ = 1 - breath * 0.008;
+    this._armAngle.l = damp(this._armAngle.l, restArm, 0.15, dt);
+    this._armAngle.r = damp(this._armAngle.r, restArm, 0.15, dt);
+    this._legAngle.l = damp(this._legAngle.l, restLeg, 0.15, dt);
+    this._legAngle.r = damp(this._legAngle.r, restLeg, 0.15, dt);
+    this._bodyPivot.rotation.z = damp(this._bodyPivot.rotation.z, 0, 0.15, dt);
+    this._bodyPivot.rotation.x = damp(this._bodyPivot.rotation.x, 0, 0.15, dt);
+
+    // Altitude wind: ears stream backward, stronger once progress > 0.3.
+    const progress = (this.sceneEnv && this.sceneEnv.balloon && this.sceneEnv.balloon.progress) || 0;
+    const windAmt = progress > 0.3 ? clamp01((progress - 0.3) / 0.7) : 0;
+    const windDrive = -0.95 * windAmt;
+
+    this._twitchTimer -= dt;
+    if (this._twitchTimer <= 0) {
+      this._twitchTimer = 2.5 + Math.random() * 3.5;
+      this._twitchSide = Math.random() < 0.5 ? -1 : 1;
+      this._twitchAmt.vel += 6;
+    }
+    springStep(this._twitchAmt, 0, 220, 16, dt);
+
+    this._earDriveFB = damp(this._earDriveFB, breath * 0.06 + windDrive, 0.2, dt);
+    this._earDriveSideL = (this._twitchSide < 0 ? this._twitchAmt.v : 0) + windAmt * 0.18;
+    this._earDriveSideR = (this._twitchSide > 0 ? this._twitchAmt.v : 0) - windAmt * 0.18;
+  }
+
+  // -----------------------------------------------------------------------
   // Public API — cheer
   // -----------------------------------------------------------------------
   cheer() {
@@ -1087,6 +1454,21 @@ export class Rabbit {
   }
 
   _updatePawAnchor() {
+    if (this._riding) {
+      // Gondola-riding: hold point is above the basket floor (== root
+      // position while riding), not above a board tip. See
+      // GONDOLA_PAW_Y_OFFSET's comment for the clearance tradeoff.
+      const anchor = this._gondolaAnchor();
+      if (anchor) anchor.getWorldPosition(this._pawTargetScratch);
+      else this._pawTargetScratch.copy(this.root.position);
+      this._pawTargetScratch.y += GONDOLA_PAW_Y_OFFSET;
+      this.root.updateMatrixWorld(true);
+      this._pawLocalScratch.copy(this._pawTargetScratch);
+      this.root.worldToLocal(this._pawLocalScratch);
+      this.pawAnchor.position.copy(this._pawLocalScratch);
+      if (this.pawAnchor.parent !== this.root) this.root.add(this.pawAnchor);
+      return;
+    }
     const tip = this._tipOf(this.currentPlatformId);
     this._pawTargetScratch.set(tip.x, tip.y + PAW_HOLD_Y_OFFSET, tip.z);
     this.root.updateMatrixWorld(true);
@@ -1160,9 +1542,23 @@ export class Rabbit {
         case 'cheer':
           this._stepCheer(dt);
           break;
+        case 'board':
+          this._stepBoard(dt);
+          break;
+        case 'exit':
+          this._stepExit(dt);
+          break;
+        case 'fetchGiant':
+          this._stepFetchGiant(dt);
+          break;
+        case 'heave':
+          this._stepHeave(dt);
+          break;
         default:
           break;
       }
+    } else if (this._riding) {
+      this._updateRideIdle(dt);
     } else {
       this._updateIdle(dt);
     }
