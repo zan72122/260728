@@ -1,0 +1,315 @@
+/* こねこね！パンの森 — css/style.css (Agent F)
+   基調色: クリーム #FFF6E3 / 淡ピンク #FFD9E0 / 水色 #CDEDF6 / 淡緑 #D5EFD0
+*/
+
+:root{
+  --cream:#FFF6E3;
+  --pink:#FFD9E0;
+  --pink-deep:#FFC2CE;
+  --blue:#CDEDF6;
+  --blue-deep:#B3E2EF;
+  --green:#D5EFD0;
+  --green-deep:#BFE6B8;
+  --ink:#6b4a3a;
+  --ink-soft:#8a6a58;
+  --shadow: 0 4px 10px rgba(120,90,60,0.22);
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+}
+
+*{ box-sizing: border-box; }
+
+html, body{
+  margin:0; padding:0;
+  width:100%; height:100%;
+  position:fixed;
+  inset:0;
+  overflow:hidden;
+  background: var(--cream);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body{
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Maru Gothic ProN", "Hiragino Sans", "Rounded Mplus 1c", "Yu Gothic", sans-serif;
+  color: var(--ink);
+}
+
+#game{
+  position:fixed;
+  inset:0;
+  display:block;
+  width:100%;
+  height:100%;
+  touch-action:none;
+  background: var(--cream);
+}
+
+#hud{
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:10;
+}
+
+/* ---------- 汎用ボタン ---------- */
+.hud-btn{
+  pointer-events:auto;
+  min-width:64px;
+  min-height:64px;
+  border-radius:50%;
+  border: none;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:1px;
+  background: var(--pink);
+  box-shadow: var(--shadow);
+  font-size:26px;
+  line-height:1;
+  padding:4px;
+  cursor:pointer;
+  touch-action:none;
+  -webkit-user-select:none;
+  user-select:none;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.hud-btn:active{
+  transform: scale(0.86);
+  box-shadow: 0 1px 4px rgba(120,90,60,0.25);
+}
+.hud-btn.bounce{
+  animation: btn-pop .32s ease;
+}
+@keyframes btn-pop{
+  0%{ transform: scale(0.82); }
+  55%{ transform: scale(1.12); }
+  100%{ transform: scale(1); }
+}
+
+.hud-label{
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.02em;
+}
+
+.hud-emoji{ font-size:26px; }
+
+.hud-btn.is-active{
+  background: var(--green-deep);
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.7) inset, var(--shadow);
+}
+
+/* ---------- 左上: 現在のパンの顔ボタン ---------- */
+.hud-face-wrap{
+  position:absolute;
+  top: calc(14px + var(--safe-t));
+  left: calc(14px + var(--safe-l));
+}
+.hud-face{
+  width:76px; height:76px; min-width:76px; min-height:76px;
+  background: var(--blue);
+  font-size:34px;
+}
+
+/* ---------- 右側縦列: 手/絞り器/もよう/うわがけ/布 ---------- */
+.hud-tools{
+  position:absolute;
+  top: calc(14px + var(--safe-t));
+  right: calc(14px + var(--safe-r));
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  align-items:flex-end;
+}
+.hud-tools .hud-btn{ background: var(--pink); }
+.hud-cover{ background: var(--blue); }
+.hud-topping{ background: var(--green); }
+
+/* ---------- 右下: オーブン/揚げ鍋/蒸し器ゾーン ---------- */
+.hud-oven-wrap{
+  position:absolute;
+  right: calc(10px + var(--safe-r));
+  bottom: calc(10px + var(--safe-b));
+  pointer-events:none;
+}
+.hud-oven{
+  width: 110px; height: 110px;
+  border-radius: 28px;
+  background: radial-gradient(circle at 35% 30%, #FFE6C2, #F4C08A 70%, #E2A468);
+  box-shadow: 0 4px 14px rgba(150,90,40,0.35), inset 0 0 0 4px rgba(255,255,255,0.35);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:44px;
+  pointer-events:none;
+}
+
+/* ---------- 左下: もりへ ---------- */
+.hud-bottom-left{
+  position:absolute;
+  left: calc(14px + var(--safe-l));
+  bottom: calc(14px + var(--safe-b));
+}
+.hud-forest{ background: var(--green); }
+
+/* ---------- ヒント ---------- */
+.hud-hint{
+  position:absolute;
+  left:50%;
+  bottom: calc(96px + var(--safe-b));
+  transform: translate(-50%, 12px);
+  background: rgba(255,255,255,0.88);
+  color: var(--ink);
+  padding:8px 18px;
+  border-radius:999px;
+  font-size:15px;
+  font-weight:600;
+  box-shadow: var(--shadow);
+  opacity:0;
+  transition: opacity .35s ease, transform .35s ease;
+  pointer-events:none;
+  white-space:nowrap;
+  max-width: 86vw;
+  overflow:hidden;
+  text-overflow: ellipsis;
+}
+.hud-hint.show{
+  opacity:1;
+  transform: translate(-50%, 0);
+}
+
+/* ---------- 発酵の布 ---------- */
+.hud-cloth{
+  position:absolute;
+  left:50%;
+  top:45%;
+  width: min(62vw, 62vh, 420px);
+  height: min(62vw, 62vh, 420px);
+  transform: translate(-50%,-50%) translateY(-140%) scale(0.75) rotate(-4deg);
+  opacity:0;
+  pointer-events:none;
+  border-radius: 44% 56% 48% 52% / 52% 46% 54% 48%;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255,255,255,0.85), rgba(255,246,227,0.55) 55%, rgba(255,217,224,0.55) 100%);
+  box-shadow: 0 10px 30px rgba(150,110,70,0.18);
+  border: 3px dashed rgba(255,255,255,0.7);
+}
+.hud-cloth.active{
+  animation: cloth-fall .7s cubic-bezier(.32,1.4,.5,1) forwards;
+}
+.hud-cloth.leaving{
+  animation: cloth-lift .5s ease-in forwards;
+}
+@keyframes cloth-fall{
+  0%{ transform: translate(-50%,-50%) translateY(-140%) scale(0.75) rotate(-6deg); opacity:0; }
+  60%{ transform: translate(-50%,-50%) translateY(6%) scale(1.03) rotate(2deg); opacity:0.9; }
+  100%{ transform: translate(-50%,-50%) translateY(0) scale(1) rotate(0deg); opacity:0.85; }
+}
+@keyframes cloth-lift{
+  0%{ transform: translate(-50%,-50%) translateY(0) scale(1) rotate(0deg); opacity:0.85; }
+  100%{ transform: translate(-50%,-50%) translateY(-140%) scale(0.8) rotate(6deg); opacity:0; }
+}
+
+/* ---------- done パネル ---------- */
+.hud-done-panel{
+  position:absolute;
+  left:50%;
+  bottom: calc(18px + var(--safe-b));
+  transform: translateX(-50%);
+  display:flex;
+  gap:16px;
+  align-items:flex-end;
+}
+.hud-place-btn{
+  width:92px; height:92px; min-width:92px; min-height:92px;
+  background: linear-gradient(160deg, var(--green), var(--green-deep));
+  font-size:30px;
+  animation: place-breathe 1.6s ease-in-out infinite;
+}
+@keyframes place-breathe{
+  0%,100%{ box-shadow: var(--shadow); }
+  50%{ box-shadow: 0 6px 22px rgba(120,90,60,0.35); }
+}
+.hud-newdough-btn{
+  background: var(--blue);
+}
+
+/* ---------- 森ビュー中のもどるボタン ---------- */
+.hud-forest-panel{
+  position:absolute;
+  left:50%;
+  bottom: calc(18px + var(--safe-b));
+  transform: translateX(-50%);
+}
+.hud-back-btn{ background: var(--cream); }
+
+/* ---------- パン選択オーバーレイ ---------- */
+.hud-bread-overlay{
+  position:absolute;
+  inset:0;
+  pointer-events:auto;
+  background: rgba(255,246,227,0.94);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding: calc(20px + var(--safe-t)) calc(16px + var(--safe-r)) calc(20px + var(--safe-b)) calc(16px + var(--safe-l));
+  overflow:auto;
+}
+.hud-bread-grid{
+  display:grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap:14px;
+  max-width: 640px;
+  width:100%;
+}
+.hud-bread-item{
+  pointer-events:auto;
+  border:none;
+  border-radius:22px;
+  background: var(--blue);
+  box-shadow: var(--shadow);
+  padding:10px 4px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:4px;
+  font-size:30px;
+  min-height:84px;
+}
+.hud-bread-item:active{ transform: scale(0.9); }
+.hud-bread-item .hud-label{ font-size:12px; color: var(--ink); }
+
+/* ---------- キラキラ演出 ---------- */
+.hud-sparkles{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  overflow:hidden;
+}
+.hud-sparkle{
+  position:absolute;
+  font-size: 22px;
+  animation: sparkle-pop 1.4s ease-out forwards;
+  filter: drop-shadow(0 0 4px rgba(255,255,255,0.8));
+}
+@keyframes sparkle-pop{
+  0%{ transform: scale(0) rotate(0deg); opacity:0; }
+  30%{ transform: scale(1.3) rotate(40deg); opacity:1; }
+  100%{ transform: scale(0.6) translateY(-40px) rotate(90deg); opacity:0; }
+}
+
+/* 小さめ画面向けの微調整 */
+@media (max-width: 380px){
+  .hud-btn{ min-width:60px; min-height:60px; font-size:22px; }
+  .hud-face{ width:64px; height:64px; min-width:64px; min-height:64px; font-size:28px; }
+  .hud-oven{ width:88px; height:88px; font-size:34px; }
+  .hud-place-btn{ width:80px; height:80px; min-width:80px; min-height:80px; }
+}
