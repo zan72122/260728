@@ -23,6 +23,24 @@ function easeInOutCubic(t) {
   return c < 0.5 ? 4 * c * c * c : 1 - Math.pow(-2 * c + 2, 3) / 2;
 }
 
+// Fixed 3/4 azimuth offset (around the pool, toward +Z) applied to the
+// default camera position in BOTH framings. The diving boards' long axis
+// runs along world X (see scene.js), so a camera sitting right on the +X
+// axis sees them end-on (reads as a short pad). Swinging the camera this
+// many degrees off the +X axis — while still looking back toward the
+// tower/pool center — puts the boards in 3/4 perspective with their full
+// length visible, without disturbing framing (pool + all 3 boards still
+// fit) or any slow-mo/dip/shake behavior below.
+const CAMERA_AZIMUTH_DEG = 25;
+const CAMERA_AZIMUTH_RAD = (CAMERA_AZIMUTH_DEG * Math.PI) / 180;
+
+// Rotate a base (x, z) camera offset onto the fixed azimuth, keeping its
+// original distance from the pool center (y untouched by caller).
+function withAzimuth(x, z) {
+  const r = Math.hypot(x, z);
+  return { x: r * Math.cos(CAMERA_AZIMUTH_RAD), z: r * Math.sin(CAMERA_AZIMUTH_RAD) };
+}
+
 // Impact timeline constants (seconds / timeScale units).
 const HITSTOP_DUR = 0.07;
 const HITSTOP_SCALE = 0.02;
@@ -116,11 +134,13 @@ export class CameraFX {
     const a = smoothstep(t);
     this._portraitAmount = a;
 
-    // Landscape: closer, cinematic, slight 3/4 angle from +X.
-    const lp = { x: 9.0, y: 3.8, z: 3.0, fov: 44, lx: -1.0, ly: 1.6, lz: 0 };
+    // Landscape: closer, cinematic, 3/4 angle from +X (see CAMERA_AZIMUTH_DEG).
+    const lpAz = withAzimuth(9.0, 3.0);
+    const lp = { x: lpAz.x, y: 3.8, z: lpAz.z, fov: 44, lx: -1.0, ly: 1.6, lz: 0 };
     // Portrait: pulled back & higher/steeper so tower + pool both fit and
-    // the water surface fills the lower ~2/3 of the frame.
-    const pp = { x: 10.5, y: 7.6, z: 1.8, fov: 60, lx: -1.3, ly: 0.4, lz: 0 };
+    // the water surface fills the lower ~2/3 of the frame; same fixed azimuth.
+    const ppAz = withAzimuth(10.5, 1.8);
+    const pp = { x: ppAz.x, y: 7.6, z: ppAz.z, fov: 60, lx: -1.3, ly: 0.4, lz: 0 };
 
     this._basePos.set(lerp(lp.x, pp.x, a), lerp(lp.y, pp.y, a), lerp(lp.z, pp.z, a));
     this._baseLookAt.set(lerp(lp.lx, pp.lx, a), lerp(lp.ly, pp.ly, a), lerp(lp.lz, pp.lz, a));

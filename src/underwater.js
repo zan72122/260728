@@ -91,11 +91,17 @@ class CavityInstance {
     this.material = new THREE.MeshPhysicalMaterial({
       color: WATER_WHITE,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.55,
       roughness: 0.15,
       metalness: 0,
       side: THREE.DoubleSide,
       depthWrite: false,
+      // A touch of self-glow so the cavity still reads clearly at the new
+      // low, close camera angle (cameraFX's underwater dip) even where the
+      // scene's directional light doesn't hit its walls directly — keeps
+      // it bright/toy-like rather than a dark hole in the water.
+      emissive: WATER_WHITE,
+      emissiveIntensity: 0.35,
     });
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.visible = false;
@@ -178,7 +184,7 @@ class CavityInstance {
 
     // Fade near end of life.
     const fadeOut = t > 0.8 ? 1 - (t - 0.8) / 0.2 : 1;
-    this.material.opacity = 0.35 * fadeOut;
+    this.material.opacity = 0.55 * fadeOut;
   }
 }
 

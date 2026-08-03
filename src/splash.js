@@ -6,7 +6,7 @@
 // stretches the curves below — no wall-clock dependence anywhere.
 
 import * as THREE from 'three';
-import { G } from './constants.js';
+import { G, POOL } from './constants.js';
 import { mulberry32 } from './rng.js';
 
 // ---- tunables -------------------------------------------------------
@@ -90,7 +90,10 @@ function buildCrownGeometry() {
 // Called once at trigger() time (shape is deterministic from seed) and
 // re-derived each frame only via a uniform-driven vertex transform done
 // on the CPU in update() (cheap: 24 cols × 4 rings = 96 verts).
-function layoutCrown(slot, spec) {
+// `cap` is the max outer flare radius allowed (containment clamp, see
+// trigger()) — the whole rim is scaled uniformly so shape/energy ordering
+// survives (seeded values first, clamped after).
+function layoutCrown(slot, spec, cap) {
   const rng = mulberry32(spec.seed);
   const cols = CROWN_COLUMNS;
   const energy = spec.energy;
@@ -135,6 +138,24 @@ function layoutCrown(slot, spec) {
   smoothCircular(heights, 2);
   smoothCircular(outerR, 2);
   smoothCircular(tipStretch, 2);
+
+  // Containment clamp: the runtime flare (writeCrownPositions, peak flareK=1)
+  // multiplies outerR[i] by up to (1 + 0.5 * tipStretch[i]). Find that
+  // worst-case projected radius and, if it would exceed the room available
+  // to the pool edge, scale the whole (already-seeded) rim down uniformly —
+  // preserves relative shape & energy ordering, just saturates at the cap.
+  let maxProjected = 0;
+  for (let i = 0; i < cols; i++) {
+    const proj = outerR[i] * (1 + 0.5 * tipStretch[i]);
+    if (proj > maxProjected) maxProjected = proj;
+  }
+  let radiusScale = 1;
+  if (cap && maxProjected > cap && maxProjected > 1e-4) {
+    radiusScale = cap / maxProjected;
+    for (let i = 0; i < cols; i++) outerR[i] *= radiusScale;
+  }
+  slot.crownRadiusScale = radiusScale;
+
   for (let i = 0; i < cols; i++) {
     innerR[i] = Math.max(0.05, outerR[i] - wallThickness * (0.8 + rng() * 0.4));
   }
@@ -270,7 +291,7 @@ export class SplashFX {
         mistSprites,
         // per-column jitter arrays populated in layoutCrown()
         crownHeights: null, crownOuterR: null, crownInnerR: null, crownTipStretch: null,
-        crownBaseHeight: 1, crownWallThickness: 0.05,
+        crownBaseHeight: 1, crownWallThickness: 0.05, crownRadiusScale: 1,
         sheetBaseRadius: 1, sheetScaleX: 1, sheetScaleZ: 1,
         mistBaseScale: 0.5,
       });
@@ -323,7 +344,15 @@ export class SplashFX {
     slot.age = 0;
     slot.spec = spec;
 
-    layoutCrown(slot, spec);
+    // Containment clamp: don't let the splash visually spill past the pool
+    // edge onto the dry deck. Room = distance from the impact point out to
+    // the water's edge; cap the sheet/crown/droplet extents to a fraction
+    // of it (never below 1.1m so small splashes near the rim still read).
+    const distFromCenter = Math.hypot(spec.point.x, spec.point.z);
+    const room = POOL.WATER_RADIUS - distFromCenter;
+    const cap = Math.max(1.1, room * 0.95);
+
+    layoutCrown(slot, spec, cap);
     writeCrownColors(slot.crownGeo);
     slot.crownMesh.position.set(spec.point.x, 0, spec.point.z);
     slot.crownMesh.rotation.y = 0;
@@ -333,7 +362,7 @@ export class SplashFX {
     const flat = spec.flatness;
     const energy = spec.energy;
     slot.sheetBaseRadius = 0.15 + spec.size + energy * (0.5 + flat * 1.6);
-    slot.sheetBaseRadius = Math.min(2.6, slot.sheetBaseRadius);
+    slot.sheetBaseRadius = Math.min(2.6, slot.sheetBaseRadius, cap);
     const obliqueAmt = spec.oblique > 0.3 ? (spec.oblique - 0.3) / 0.7 : 0;
     slot.sheetScaleX = 1 + obliqueAmt * 0.9;
     slot.sheetScaleZ = 1 - obliqueAmt * 0.35;
@@ -357,7 +386,7 @@ export class SplashFX {
       spr.scale.setScalar(slot.mistBaseScale * (m === 0 ? 1 : 0.6));
     }
 
-    this._spawnDroplets(spec);
+    this._spawnDroplets(spec, slot.crownRadiusScale);
   }
 
   // ---------------------------------------------------------- droplets
@@ -372,7 +401,8 @@ export class SplashFX {
     return idx;
   }
 
-  _spawnDroplets(spec) {
+  _spawnDroplets(spec, radiusScale) {
+    const hScale = radiusScale || 1; // containment clamp on horizontal launch speed only
     const rng = mulberry32(spec.seed ^ 0x9e3779b9);
     const energy = spec.energy;
     const flat = spec.flatness;
@@ -395,15 +425,16 @@ export class SplashFX {
       }
       const rimR = (spec.size * 0.9 + energy * (0.55 + flat * 1.15)) * (0.7 + 0.3 * dirWeight) * (0.7 + rng() * 0.5);
       const speed = (2.2 + energy * 6.5) * (0.7 + rng() * 0.6) * dirWeight * (1 - soft * 0.25);
+      const speedH = speed * hScale; // containment: horizontal launch clamped, vertical pop kept
       const upBias = (0.55 + rng() * 0.45) * (1 - flat * 0.35);
       const idx = this._allocDroplet();
       const b = idx * 3;
       this.dPos[b + 0] = px + cx * rimR * 0.4;
       this.dPos[b + 1] = 0.05 + rng() * 0.1;
       this.dPos[b + 2] = pz + cz * rimR * 0.4;
-      this.dVel[b + 0] = cx * speed;
+      this.dVel[b + 0] = cx * speedH;
       this.dVel[b + 1] = speed * upBias * 1.3;
-      this.dVel[b + 2] = cz * speed;
+      this.dVel[b + 2] = cz * speedH;
       this.dLife[idx] = 1.0 + rng() * 0.6 + soft * 0.3;
       this.dAge[idx] = 0;
       this.dSize[idx] = (0.045 + rng() * 0.05 + soft * 0.025) * (0.7 + energy * 0.6);
@@ -420,6 +451,7 @@ export class SplashFX {
         dirWeight = Math.max(0.15, 1 + obliqueAmt * (dot * 1.4));
       }
       const speed = (2.5 + energy * 8) * (0.6 + Math.random() * 0.8) * dirWeight;
+      const speedH = speed * hScale; // containment: horizontal launch clamped, vertical pop kept
       const upBias = 0.4 + Math.random() * 0.8;
       const idx = this._allocDroplet();
       const b = idx * 3;
@@ -427,9 +459,9 @@ export class SplashFX {
       this.dPos[b + 0] = px + cx * r0;
       this.dPos[b + 1] = 0.03 + Math.random() * 0.08;
       this.dPos[b + 2] = pz + cz * r0;
-      this.dVel[b + 0] = cx * speed;
+      this.dVel[b + 0] = cx * speedH;
       this.dVel[b + 1] = speed * upBias;
-      this.dVel[b + 2] = cz * speed;
+      this.dVel[b + 2] = cz * speedH;
       this.dLife[idx] = 0.5 + Math.random() * 0.5;
       this.dAge[idx] = 0;
       this.dSize[idx] = 0.015 + Math.random() * 0.02 + soft * 0.01;
