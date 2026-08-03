@@ -332,3 +332,179 @@ body{
   .hud-oven{ width:88px; height:88px; font-size:34px; }
   .hud-place-btn{ width:80px; height:80px; min-width:80px; min-height:80px; }
 }
+
+/* =====================================================================
+   Agent P: js/ui/guide.js — 進行バー（GuideBar）
+   「今ここ・次はこれ」が一目で分かる誘導UI。既存HUD（左上パン/右列/右下
+   オーブン）と重ならないよう、トップ行の下に独立した帯として配置する。
+   ===================================================================== */
+.gd-bar{
+  position:fixed;
+  top: calc(96px + var(--safe-t));
+  left:50%;
+  transform: translateX(-50%);
+  z-index:12;
+  pointer-events:none;
+  display:flex;
+  justify-content:center;
+  max-width: calc(100vw - 20px);
+}
+
+.gd-track{
+  position:relative;
+  display:flex;
+  align-items:center;
+  pointer-events:none;
+  background: rgba(255,255,255,0.62);
+  border-radius:999px;
+  padding: 10px 18px;
+  box-shadow: var(--shadow);
+}
+
+.gd-line{
+  position:absolute;
+  left:34px; right:34px; top:50%;
+  height:6px;
+  transform: translateY(-50%);
+  border-radius:3px;
+  background: rgba(140,110,85,0.18);
+}
+
+.gd-line-fill{
+  position:absolute;
+  left:34px; right:34px; top:50%;
+  height:6px;
+  border-radius:3px;
+  background: linear-gradient(90deg, var(--pink-deep), var(--cream));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.55);
+  transform: translateY(-50%) scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform .5s cubic-bezier(.3,1.4,.4,1);
+}
+
+.gd-steps{
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:16px;
+  pointer-events:none;
+}
+
+.gd-step{
+  pointer-events:auto;
+  position:relative;
+  width:56px; height:56px; min-width:56px; min-height:56px;
+  border-radius:50%;
+  border:none;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:28px;
+  line-height:1;
+  background:#fff;
+  box-shadow: var(--shadow);
+  cursor:pointer;
+  touch-action:none;
+  -webkit-user-select:none;
+  user-select:none;
+  transform: scale(1);
+  transition: filter .3s ease, opacity .3s ease, background .3s ease, box-shadow .3s ease;
+}
+
+.gd-step-glow{
+  position:absolute;
+  inset:-11px;
+  border-radius:50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.95), rgba(255,236,190,0) 70%);
+  opacity:0;
+  transform:scale(0.8);
+  pointer-events:none;
+  z-index:-1;
+}
+
+.gd-step-icon{
+  position:relative;
+  z-index:1;
+  filter: drop-shadow(0 1px 1px rgba(120,90,60,0.25));
+}
+
+/* ---- 状態: 未解禁 = グレー半透明 ---- */
+.gd-step.is-locked{
+  filter: grayscale(1);
+  opacity:0.45;
+}
+
+/* ---- 状態: 解禁済み次ステップ = ゆっくり脈動 + 彩色 ---- */
+.gd-step.is-ready{
+  filter:none;
+  opacity:1;
+  animation: gd-pulse 1.5s ease-in-out infinite;
+}
+@keyframes gd-pulse{
+  0%,100%{ transform: scale(1); }
+  50%{ transform: scale(1.12); }
+}
+
+/* ---- 状態: 現在ステップ = 柔らかい光 ---- */
+.gd-step.is-current{
+  filter:none;
+  opacity:1;
+  transform: scale(1.05);
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.85), var(--shadow);
+}
+.gd-step.is-current .gd-step-glow{
+  animation: gd-glow 1.8s ease-in-out infinite;
+}
+@keyframes gd-glow{
+  0%,100%{ opacity:0.35; transform:scale(0.85); }
+  50%{ opacity:0.9; transform:scale(1.15); }
+}
+
+/* ---- 状態: 完了ずみ（現在より前）= 落ち着いた彩色 + チェック ---- */
+.gd-step.is-done{
+  filter:none;
+  opacity:1;
+}
+.gd-step.is-done::after{
+  content:'✓';
+  position:absolute;
+  top:-4px; right:-4px;
+  width:18px; height:18px;
+  border-radius:50%;
+  background: var(--green-deep);
+  color:#fff;
+  font-size:11px;
+  font-weight:700;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  box-shadow: 0 1px 3px rgba(120,90,60,0.35);
+}
+
+/* ---- ステップごとの色分け（パステル基調、既存HUD配色と統一） ---- */
+.gd-step[data-step="knead"]{ background: var(--pink); }
+.gd-step[data-step="rest"]{ background: var(--blue); }
+.gd-step[data-step="cook"]{ background: linear-gradient(160deg,#FFE6C2,#F4C08A); }
+.gd-step[data-step="cook"][data-method="fry"]{ background: linear-gradient(160deg,#FFE9A6,#F0C24C); }
+.gd-step[data-step="cook"][data-method="steam"]{ background: linear-gradient(160deg,#E4F3F6,#B9DEE6); }
+.gd-step[data-step="forest"]{ background: var(--green); }
+
+/* ---- ぷるぷる拒否アニメ「ダメじゃなくて、まだだよ」（怒り表現・×は禁止） ---- */
+.gd-step.gd-wiggle{
+  animation: gd-wiggle .5s ease;
+}
+@keyframes gd-wiggle{
+  0%,100%{ transform: rotate(0deg) scale(1); }
+  20%{ transform: rotate(-9deg) scale(0.94); }
+  40%{ transform: rotate(8deg) scale(1.05); }
+  60%{ transform: rotate(-6deg) scale(0.97); }
+  80%{ transform: rotate(3deg) scale(1.02); }
+}
+
+@media (max-width: 380px){
+  .gd-bar{ top: calc(84px + var(--safe-t)); }
+  .gd-track{ padding:8px 12px; }
+  .gd-steps{ gap:10px; }
+  .gd-step{ width:52px; height:52px; min-width:52px; min-height:52px; font-size:24px; }
+  .gd-line, .gd-line-fill{ left:26px; right:26px; }
+}
