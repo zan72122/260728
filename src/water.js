@@ -28,6 +28,52 @@ const AMB3_F = 0.6, AMB3_FT = 0.33, AMB3_AMP = 0.01;
 
 const MAX_DISPLACEMENT = 0.4; // clamp for both GPU and CPU height
 
+// --- Mega extensions (M3: wall wave, sloshing, overflow ring, foam field) --
+// Strict no-op design: every mega term is gated by a *StrengthUniform that
+// defaults to 0, so `0 * (anything finite)` is exactly 0 regardless of the
+// sentinel start-times below (which push their own exp()/sin() terms toward
+// tiny-but-finite values, never NaN/Infinity) — normal play is bit-identical
+// to pre-mega behavior without needing an extra "active" branch, mirroring
+// the existing ripple-slot convention (strength 0 => contributes nothing).
+
+// (b) WALL WAVE — one dedicated large-amplitude solitary ring, separate from
+// the 12 ripple slots. Asymmetric profile: sharp leading face, long trailing
+// slope, decaying with distance traveled.
+const WALL_SPEED = 2.2;                 // m/s outward
+const WALL_AMP_MAX = 0.9;               // meters, at strength = 1
+const WALL_FRONT_WIDTH = 0.18;          // meters — steep leading face
+const WALL_TRAIL_WIDTH = 1.2;           // meters — long trailing slope ("width ~1.2m")
+const WALL_DECAY_PER_METER = 0.35;      // ~35% amplitude loss per meter traveled
+const WALL_DECAY_K = -Math.log(1 - WALL_DECAY_PER_METER);
+const WALL_DT_CLAMP = 8.0;              // seconds — matches ripple's own dt clamp style
+
+// (c) SLOSHING — first-mode standing wave / whole-pool tilt.
+const SLOSH_PERIOD = 1.8;               // seconds
+const SLOSH_OMEGA = (Math.PI * 2) / SLOSH_PERIOD;
+const SLOSH_LAMBDA = 0.7;               // decay rate -> ~3 visible periods over ~4-6s
+const SLOSH_AMP_MAX = 0.15;             // meters, at strength = 1, r = R
+const SLOSH_DELAY = (POOL.WATER_RADIUS / 2) / WALL_SPEED; // starts when wall is ~halfway out
+const SLOSH_DT_CLAMP = 20.0;
+
+// Mega terms (wall + slosh) are clamped separately from the untouched
+// ambient+ripple clamp above, then summed — so normal play's clamp path is
+// byte-for-byte the same code as before this change (regression-safe) while
+// the wall wave can still reach its full ~0.9m amplitude.
+const MEGA_MAX_DISPLACEMENT = 1.1;
+
+// (d) SURFACE FOAM FIELD — fragment-only radial whitening mask.
+const FOAM_MAX_RADIUS = 3.5;            // meters
+const FOAM_GROW_TIME = 1.4;             // seconds to reach full radius
+const FOAM_FADE_TIME = 11.0;            // seconds, ~10-12s total decay
+
+// (b2) DECK OVERFLOW RING — separate mesh, the +1 allowed draw call.
+const OVERFLOW_DURATION = 1.5;          // seconds, expand-then-retreat total
+const OVERFLOW_REACH = 0.8;             // meters past the rim at peak
+const OVERFLOW_BAND_WIDTH = 0.45;       // meters, soft band width
+const OVERFLOW_INNER = POOL.WATER_RADIUS - 0.35;
+const OVERFLOW_OUTER = POOL.WATER_RADIUS + OVERFLOW_REACH + OVERFLOW_BAND_WIDTH;
+const OVERFLOW_SEGMENTS = 64;
+
 function hexToVec3(hex) {
   return new THREE.Vector3(
     ((hex >> 16) & 255) / 255,
@@ -111,6 +157,37 @@ function buildWaterGeometry(radius, radialSegments, angularSegments) {
   return geometry;
 }
 
+// Flat annulus (inner ring + outer ring of vertices) in the XZ plane for the
+// deck-overflow ring mesh — same polar-grid spirit as buildWaterGeometry but
+// without a center fan, since the middle is empty (it hugs the rim only).
+function buildOverflowRingGeometry(innerRadius, outerRadius, segments) {
+  const positions = [];
+  for (let ring = 0; ring < 2; ring++) {
+    const r = ring === 0 ? innerRadius : outerRadius;
+    for (let j = 0; j <= segments; j++) {
+      const theta = (j / segments) * Math.PI * 2;
+      positions.push(Math.cos(theta) * r, 0, Math.sin(theta) * r);
+    }
+  }
+
+  const indices = [];
+  const segW = segments + 1;
+  for (let j = 0; j < segments; j++) {
+    const a = j;          // inner ring
+    const b = j + 1;
+    const c = segW + j;   // outer ring
+    const d = segW + j + 1;
+    indices.push(a, c, b);
+    indices.push(b, c, d);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
 const VERTEX_SHADER = /* glsl */ `
 varying vec3 vWorldPos;
 varying vec3 vNormal;
@@ -121,6 +198,16 @@ uniform vec2 uRippleCenter[${RIPPLE_COUNT}];
 uniform float uRippleStart[${RIPPLE_COUNT}];
 uniform float uRippleStrength[${RIPPLE_COUNT}];
 
+// MEGA: wall wave — one dedicated slot, separate from the 12 ripples above.
+uniform vec2 uWallCenter;
+uniform float uWallStart;
+uniform float uWallStrength;
+
+// MEGA: sloshing — first-mode standing tilt toward the impact direction.
+uniform vec2 uSloshDir;      // unit vector, pool-center -> impact point
+uniform float uSloshStart;
+uniform float uSloshStrength;
+
 const float RIPPLE_WAVELENGTH = ${RIPPLE_WAVELENGTH.toFixed(6)};
 const float RIPPLE_SPEED = ${RIPPLE_SPEED.toFixed(6)};
 const float RIPPLE_AMP_MAX = ${RIPPLE_AMP_MAX.toFixed(6)};
@@ -128,6 +215,20 @@ const float RIPPLE_DECAY = ${RIPPLE_DECAY.toFixed(6)};
 const float RIPPLE_BAND = ${RIPPLE_BAND.toFixed(6)};
 const float RIPPLE_K = ${RIPPLE_K.toFixed(6)};
 const float MAX_DISPLACEMENT = ${MAX_DISPLACEMENT.toFixed(6)};
+
+const float WALL_SPEED = ${WALL_SPEED.toFixed(6)};
+const float WALL_AMP_MAX = ${WALL_AMP_MAX.toFixed(6)};
+const float WALL_FRONT_WIDTH = ${WALL_FRONT_WIDTH.toFixed(6)};
+const float WALL_TRAIL_WIDTH = ${WALL_TRAIL_WIDTH.toFixed(6)};
+const float WALL_DECAY_K = ${WALL_DECAY_K.toFixed(6)};
+const float WALL_DT_CLAMP = ${WALL_DT_CLAMP.toFixed(6)};
+
+const float SLOSH_OMEGA = ${SLOSH_OMEGA.toFixed(6)};
+const float SLOSH_LAMBDA = ${SLOSH_LAMBDA.toFixed(6)};
+const float SLOSH_AMP_MAX = ${SLOSH_AMP_MAX.toFixed(6)};
+const float SLOSH_DT_CLAMP = ${SLOSH_DT_CLAMP.toFixed(6)};
+const float POOL_WATER_RADIUS = ${POOL.WATER_RADIUS.toFixed(6)};
+const float MEGA_MAX_DISPLACEMENT = ${MEGA_MAX_DISPLACEMENT.toFixed(6)};
 
 void main() {
   vec3 pos = position;
@@ -177,7 +278,47 @@ void main() {
     dhz += -dWaveDBehind * envelope * RIPPLE_AMP_MAX * dz * invDist;
   }
 
-  h = clamp(h, -MAX_DISPLACEMENT, MAX_DISPLACEMENT);
+  // --- MEGA: wall wave — asymmetric solitary pulse (sharp front, long tail) ---
+  float wallH = 0.0;
+  {
+    float wdx = x - uWallCenter.x;
+    float wdz = z - uWallCenter.y;
+    float wdist = sqrt(wdx * wdx + wdz * wdz + 1e-5);
+    float dtw = clamp(uTime - uWallStart, 0.0, WALL_DT_CLAMP);
+    float front = dtw * WALL_SPEED;
+    float behind = front - wdist; // >0 once the wall has passed this point
+    float shape = behind < 0.0
+      ? exp(behind / WALL_FRONT_WIDTH)
+      : exp(-behind / WALL_TRAIL_WIDTH);
+    float travelDecay = exp(-front * WALL_DECAY_K);
+    float wallEnv = uWallStrength * travelDecay * shape;
+    wallH = wallEnv * WALL_AMP_MAX;
+    foam += wallEnv * 1.4; // crest gets strong foam brightening
+
+    // analytic slope (approximate, envelope treated as locally constant)
+    float invWDist = 1.0 / wdist;
+    float dShapeDBehind = behind < 0.0 ? shape / WALL_FRONT_WIDTH : -shape / WALL_TRAIL_WIDTH;
+    float dWallDBehind = uWallStrength * travelDecay * dShapeDBehind * WALL_AMP_MAX;
+    dhx += -dWallDBehind * wdx * invWDist;
+    dhz += -dWallDBehind * wdz * invWDist;
+  }
+
+  // --- MEGA: sloshing — first-mode standing tilt toward the impact dir ---
+  float sloshH = 0.0;
+  {
+    float r = sqrt(x * x + z * z);
+    float dts = clamp(uTime - uSloshStart, 0.0, SLOSH_DT_CLAMP);
+    float cosRel = (r > 1e-4) ? (x * uSloshDir.x + z * uSloshDir.y) / r : 0.0;
+    float sloshEnv = uSloshStrength * SLOSH_AMP_MAX * sin(dts * SLOSH_OMEGA) * exp(-dts * SLOSH_LAMBDA);
+    sloshH = sloshEnv * (r / POOL_WATER_RADIUS) * cosRel;
+    // slope omitted: subtle whole-pool tilt, not worth the per-vertex cost
+  }
+
+  // Ambient+ripple clamp is untouched (byte-identical to pre-mega code) so
+  // normal play cannot change; mega terms are clamped separately, then added.
+  float hBase = clamp(h, -MAX_DISPLACEMENT, MAX_DISPLACEMENT);
+  float hMega = clamp(wallH + sloshH, -MEGA_MAX_DISPLACEMENT, MEGA_MAX_DISPLACEMENT);
+  h = hBase + hMega;
   pos.y += h;
 
   vNormal = normalize(mat3(modelMatrix) * normalize(vec3(-dhx, 1.0, -dhz)));
@@ -199,6 +340,15 @@ uniform vec3 uColorShallow;
 uniform vec3 uColorDeep;
 uniform float uRadius;
 uniform float uTime;
+
+// MEGA: surface foam field (radial whitening mask around the impact point).
+uniform vec2 uFoamCenter;
+uniform float uFoamStart;
+uniform float uFoamStrength;
+
+const float FOAM_MAX_RADIUS = ${FOAM_MAX_RADIUS.toFixed(6)};
+const float FOAM_GROW_TIME = ${FOAM_GROW_TIME.toFixed(6)};
+const float FOAM_FADE_TIME = ${FOAM_FADE_TIME.toFixed(6)};
 
 void main() {
   vec3 N = normalize(vNormal);
@@ -224,9 +374,73 @@ void main() {
   vec3 foamColor = vec3(0.92, 1.0, 1.0);
   baseColor = mix(baseColor, foamColor, clamp(vFoam * 1.6, 0.0, 0.65));
 
-  float alpha = clamp(uOpacity + fresnel * 0.1 + vFoam * 0.12, 0.0, 1.0);
+  // MEGA: surface foam field — grows to FOAM_MAX_RADIUS, fades over
+  // FOAM_FADE_TIME, with cheap animated bubbly noise so it reads as churned
+  // water slowly clearing. uFoamStrength defaults to 0 so this is an exact
+  // no-op (0 * finite = 0) until megaImpact() is called.
+  float distFoam = length(vWorldPos.xz - uFoamCenter);
+  float dtf = max(uTime - uFoamStart, 0.0);
+  float growT = clamp(dtf / FOAM_GROW_TIME, 0.0, 1.0);
+  float foamRadiusNow = growT * FOAM_MAX_RADIUS;
+  float fadeT = clamp(1.0 - dtf / FOAM_FADE_TIME, 0.0, 1.0);
+  float foamMask = (1.0 - smoothstep(foamRadiusNow * 0.55, max(foamRadiusNow, 0.001), distFoam));
+  foamMask *= fadeT * uFoamStrength;
+  float bubn = sin(vWorldPos.x * 12.0 + uTime * 3.1) * sin(vWorldPos.z * 9.0 - uTime * 2.3)
+             + 0.5 * sin(vWorldPos.x * 23.0 - uTime * 4.7) * sin(vWorldPos.z * 19.0 + uTime * 3.9);
+  bubn = clamp(bubn * 0.25 + 0.75, 0.0, 1.0);
+  foamMask = clamp(foamMask * bubn, 0.0, 1.0);
+  baseColor = mix(baseColor, foamColor, foamMask * 0.85);
+
+  float alpha = clamp(uOpacity + fresnel * 0.1 + vFoam * 0.12 + foamMask * 0.15, 0.0, 1.0);
 
   gl_FragColor = vec4(baseColor, alpha);
+}
+`;
+
+// --- Deck overflow ring (the +1 allowed draw call) -------------------------
+// A thin ring mesh hugging the deck just above the rim; a soft bright band
+// sweeps outward past the rim then retreats, driven by a single sine arc so
+// "expand" and "retreat" share one continuous envelope. Strict no-op: mesh
+// starts invisible (0 draw calls) and its material zeroes out via
+// uOverflowStrength = 0 as a second safety net.
+const OVERFLOW_VERTEX = /* glsl */ `
+varying float vR;
+varying vec2 vWorldXZ;
+
+void main() {
+  vR = length(position.xz);
+  vec4 worldPos = modelMatrix * vec4(position, 1.0);
+  vWorldXZ = worldPos.xz;
+  gl_Position = projectionMatrix * viewMatrix * worldPos;
+}
+`;
+
+const OVERFLOW_FRAGMENT = /* glsl */ `
+varying float vR;
+varying vec2 vWorldXZ;
+
+uniform float uTime;
+uniform float uOverflowStart;
+uniform float uOverflowStrength;
+
+const float RIM_RADIUS = ${POOL.WATER_RADIUS.toFixed(6)};
+const float REACH = ${OVERFLOW_REACH.toFixed(6)};
+const float DURATION = ${OVERFLOW_DURATION.toFixed(6)};
+const float BAND_WIDTH = ${OVERFLOW_BAND_WIDTH.toFixed(6)};
+
+void main() {
+  float t = clamp(uTime - uOverflowStart, 0.0, DURATION);
+  float lifeEnv = sin(clamp(t / DURATION, 0.0, 1.0) * 3.14159265); // 0 -> 1 -> 0
+  float bandR = RIM_RADIUS + REACH * lifeEnv;
+  float d = abs(vR - bandR);
+  float band = 1.0 - smoothstep(0.0, BAND_WIDTH, d);
+  // fade the innermost sliver so the band reads as washing over the rim,
+  // not as a hard-edged disc appearing out of nowhere
+  float innerFade = smoothstep(RIM_RADIUS - 0.35, RIM_RADIUS, vR);
+  float bubn = sin(vWorldXZ.x * 14.0 + uTime * 5.0) * sin(vWorldXZ.y * 11.0 - uTime * 4.2);
+  bubn = clamp(bubn * 0.3 + 0.7, 0.0, 1.0);
+  float alpha = band * lifeEnv * innerFade * bubn * uOverflowStrength * 0.9;
+  gl_FragColor = vec4(0.95, 1.0, 1.0, clamp(alpha, 0.0, 1.0));
 }
 `;
 
@@ -247,6 +461,17 @@ export class WaterSurface {
         uColorShallow: { value: hexToVec3(0x4dd0e6) },
         uColorDeep: { value: hexToVec3(0x1a7ac4) },
         uRadius: { value: POOL.WATER_RADIUS },
+        // MEGA — all default to strength 0 / sentinel start times, an exact
+        // no-op (see shader comments) until megaImpact() is called.
+        uWallCenter: { value: new THREE.Vector2(0, 0) },
+        uWallStart: { value: -9999 },
+        uWallStrength: { value: 0 },
+        uSloshDir: { value: new THREE.Vector2(1, 0) },
+        uSloshStart: { value: -9999 },
+        uSloshStrength: { value: 0 },
+        uFoamCenter: { value: new THREE.Vector2(0, 0) },
+        uFoamStart: { value: -9999 },
+        uFoamStrength: { value: 0 },
       },
       vertexShader: VERTEX_SHADER,
       fragmentShader: FRAGMENT_SHADER,
@@ -263,6 +488,114 @@ export class WaterSurface {
     // ring-buffer slot cursor: addRipple always recycles the oldest slot
     this._rippleCursor = 0;
     this._time = 0;
+
+    // --- MEGA state (CPU mirror of the uniforms above, plus overflow ring) --
+    this._wallCenter = { x: 0, z: 0 };
+    this._wallStart = -9999;
+    this._wallStrength = 0;
+    this._sloshDir = { x: 1, z: 0 };
+    this._sloshStart = -9999;
+    this._sloshStrength = 0;
+    this._overflowTriggered = true; // nothing to trigger until megaImpact() runs
+    this._overflowStartTime = -9999;
+
+    // Deck overflow ring: separate mesh/material, the +1 allowed draw call.
+    // Starts invisible (0 draw calls, 0 visual change) until the wall wave
+    // reaches POOL.WATER_RADIUS.
+    const overflowGeometry = buildOverflowRingGeometry(OVERFLOW_INNER, OVERFLOW_OUTER, OVERFLOW_SEGMENTS);
+    this.overflowMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uOverflowStart: { value: -9999 },
+        uOverflowStrength: { value: 0 },
+      },
+      vertexShader: OVERFLOW_VERTEX,
+      fragmentShader: OVERFLOW_FRAGMENT,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    this.overflowMesh = new THREE.Mesh(overflowGeometry, this.overflowMaterial);
+    this.overflowMesh.position.set(0, 0.06, 0);
+    this.overflowMesh.renderOrder = 2;
+    this.overflowMesh.visible = false;
+    scene.add(this.overflowMesh);
+  }
+
+  // Launches the mega-splash wall wave, deck overflow (triggered once the
+  // wall reaches the rim, see update()), sloshing, and surface foam field.
+  // strength01: 0..1. Strict no-op for anything already in flight from a
+  // normal (non-mega) ripple — this only touches the dedicated mega uniforms.
+  megaImpact(x, z, strength01) {
+    const strength = clamp(strength01, 0, 1);
+    const t = this._time;
+
+    // (b) wall wave — one dedicated ring, separate from the 12 ripple slots.
+    this.material.uniforms.uWallCenter.value.set(x, z);
+    this.material.uniforms.uWallStart.value = t;
+    this.material.uniforms.uWallStrength.value = strength;
+    this._wallCenter.x = x;
+    this._wallCenter.z = z;
+    this._wallStart = t;
+    this._wallStrength = strength;
+    this._overflowTriggered = false; // allow this wave to fire the overflow ring once
+
+    // (c) sloshing — first-mode tilt, phased toward the impact direction,
+    // kicking in once the wall wave is roughly halfway to the rim.
+    const dist = Math.sqrt(x * x + z * z) || 1e-5;
+    const dirX = x / dist;
+    const dirZ = z / dist;
+    this.material.uniforms.uSloshDir.value.set(dirX, dirZ);
+    this.material.uniforms.uSloshStart.value = t + SLOSH_DELAY;
+    this.material.uniforms.uSloshStrength.value = strength;
+    this._sloshDir.x = dirX;
+    this._sloshDir.z = dirZ;
+    this._sloshStart = t + SLOSH_DELAY;
+    this._sloshStrength = strength;
+
+    // (d) surface foam field, centered at the impact point.
+    this.material.uniforms.uFoamCenter.value.set(x, z);
+    this.material.uniforms.uFoamStart.value = t;
+    this.material.uniforms.uFoamStrength.value = strength;
+  }
+
+  // CPU mirror of the wall-wave height at (x, z) — see the vertex shader's
+  // matching block for the annotated version of this same formula.
+  _wallHeightAt(x, z) {
+    if (this._wallStrength <= 0) return 0;
+    const t = this._time;
+    const dx = x - this._wallCenter.x;
+    const dz = z - this._wallCenter.z;
+    const dist = Math.sqrt(dx * dx + dz * dz + 1e-5);
+    const dtw = clamp(t - this._wallStart, 0, WALL_DT_CLAMP);
+    const front = dtw * WALL_SPEED;
+    const behind = front - dist;
+    const shape = behind < 0
+      ? Math.exp(behind / WALL_FRONT_WIDTH)
+      : Math.exp(-behind / WALL_TRAIL_WIDTH);
+    const travelDecay = Math.exp(-front * WALL_DECAY_K);
+    return this._wallStrength * travelDecay * shape * WALL_AMP_MAX;
+  }
+
+  // Just the sloshing (first-mode standing wave) term, exposed so physics
+  // can rock floating bodies with the same tilt the surface renders.
+  sloshOffsetAt(x, z) {
+    if (this._sloshStrength <= 0) return 0;
+    const t = this._time;
+    const dts = clamp(t - this._sloshStart, 0, SLOSH_DT_CLAMP);
+    const r = Math.sqrt(x * x + z * z);
+    const cosRel = r > 1e-4 ? (x * this._sloshDir.x + z * this._sloshDir.z) / r : 0;
+    const env = this._sloshStrength * SLOSH_AMP_MAX * Math.sin(dts * SLOSH_OMEGA) * Math.exp(-dts * SLOSH_LAMBDA);
+    return env * (r / POOL.WATER_RADIUS) * cosRel;
+  }
+
+  // Starts the deck-overflow ring's expand-then-retreat animation. Called
+  // once per mega impact, when the wall wave's radius reaches WATER_RADIUS.
+  _triggerOverflow(time) {
+    this.overflowMaterial.uniforms.uOverflowStart.value = time;
+    this.overflowMaterial.uniforms.uOverflowStrength.value = this._wallStrength;
+    this.overflowMesh.visible = true;
+    this._overflowStartTime = time;
   }
 
   // strength 0..1; expanding ring ripple, recycles the oldest slot
@@ -305,7 +638,13 @@ export class WaterSurface {
       h += Math.sin(phase) * envelope * RIPPLE_AMP_MAX;
     }
 
-    return clamp(h, -MAX_DISPLACEMENT, MAX_DISPLACEMENT);
+    // Ambient+ripple clamp is untouched (byte-identical to pre-mega code),
+    // so normal play (mega terms always 0) returns exactly what it did
+    // before this change. Mega terms (wall + slosh) are clamped separately
+    // then added — matches the vertex shader's hBase/hMega split exactly.
+    const hBase = clamp(h, -MAX_DISPLACEMENT, MAX_DISPLACEMENT);
+    const hMega = clamp(this._wallHeightAt(x, z) + this.sloshOffsetAt(x, z), -MEGA_MAX_DISPLACEMENT, MEGA_MAX_DISPLACEMENT);
+    return hBase + hMega;
   }
 
   // dt is unused here (no CPU-side integration needed) but kept for the
@@ -314,5 +653,22 @@ export class WaterSurface {
   update(dt, time) {
     this._time = time;
     this.material.uniforms.uTime.value = time;
+
+    // MEGA: once the wall wave's radius reaches the pool edge, fire the deck
+    // overflow ring exactly once per megaImpact() call.
+    if (this._wallStrength > 0 && !this._overflowTriggered) {
+      const front = (time - this._wallStart) * WALL_SPEED;
+      if (front >= POOL.WATER_RADIUS) {
+        this._overflowTriggered = true;
+        this._triggerOverflow(time);
+      }
+    }
+
+    if (this.overflowMesh.visible) {
+      this.overflowMaterial.uniforms.uTime.value = time;
+      if (time - this._overflowStartTime > OVERFLOW_DURATION) {
+        this.overflowMesh.visible = false;
+      }
+    }
   }
 }
