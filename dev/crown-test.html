@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SplashFX crown/finger shape+motion test (R2 standalone harness)</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #123; }
+  #canvas { display: block; width: 960px; height: 720px; }
+  #hud {
+    position: fixed; top: 4px; left: 4px; color: #fff; font: 12px monospace;
+    background: rgba(0,0,0,0.5); padding: 4px 8px; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="hud">loading…</div>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three.module.js"
+    }
+  }
+  </script>
+  <script type="module" src="./crown-test.js"></script>
+</body>
+</html>
