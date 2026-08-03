@@ -360,14 +360,21 @@ function heldScreenPos() {
 }
 window.__lab.heldScreenPos = heldScreenPos;
 
-// QA helper (final acceptance pass): expose renderer.info.render so headless
-// perf checks can read draw calls / triangles without instrumenting the
-// render loop. Read-only snapshot, no behavior change.
+// QA helper (final acceptance pass): expose combined draw-call / triangle
+// counts for the WHOLE frame. IMPORTANT: renderer.info.autoReset defaults to
+// true, and the two-pass loop below (R1, CONTRACTS-SPLASH2) calls
+// renderer.render() TWICE in a single frame when a splash is active — the
+// second call resets renderer.info.render before accumulating, so reading
+// renderer.info.render directly here would silently report ONLY pass 2's
+// (WATER_LAYER-only) stats and drop pass 1's opaque-scene draw calls
+// entirely. The render loop below snapshots pass 1's stats immediately after
+// it renders and adds pass 2's on top into `lastFrameStats`, which is what
+// this getter returns — an accurate whole-frame total either way.
+let lastFrameStats = { calls: 0, triangles: 0 };
 function renderInfo() {
   try {
     if (!renderer || !renderer.info || !renderer.info.render) return null;
-    const r = renderer.info.render;
-    return { calls: r.calls, triangles: r.triangles };
+    return { calls: lastFrameStats.calls, triangles: lastFrameStats.triangles };
   } catch (err) {
     recordError(err);
     return null;
@@ -582,6 +589,15 @@ function animate(now) {
     if (renderer && camera) {
       camera.layers.disable(WATER_LAYER);
       renderer.render(scene, camera);
+      // Snapshot pass 1's stats NOW: renderer.info.autoReset defaults to
+      // true, so the next renderer.render() call (pass 2) will zero these
+      // out again before it accumulates its own — see renderInfo() above.
+      let pass1Calls = 0;
+      let pass1Tris = 0;
+      if (renderer.info && renderer.info.render) {
+        pass1Calls = renderer.info.render.calls;
+        pass1Tris = renderer.info.render.triangles;
+      }
 
       const pass2Active = splashSystemsActive();
       lastPass2Active = pass2Active;
@@ -591,16 +607,46 @@ function animate(now) {
         renderer.autoClear = false;
         camera.layers.enable(WATER_LAYER);
         camera.layers.disable(0);
+        // scene.background is a plain THREE.Color (see src/scene.js) — and
+        // three.js's WebGLBackground.render() forces a FULL clear whenever
+        // `scene.background.isColor` is true, UNCONDITIONALLY, ignoring
+        // `renderer.autoClear` (see vendor/three.module.js WebGLBackground
+        // render(): `forceClear = true` on the isColor branch, then
+        // `if (renderer.autoClear || forceClear) renderer.clear(...)`).
+        // That means this second render() call would silently wipe pass 1's
+        // already-drawn opaque scene (tower/pool/water surface) the instant
+        // it starts, leaving only this frame's WATER_LAYER objects on a
+        // blank canvas — confirmed by A/B testing every other variable
+        // (camera layers mask, shadow maps, antialiasing, grab-pass
+        // capture, even using a wholly separate camera instance) with no
+        // effect, while nulling scene.background for just this call fixes
+        // it outright. Null it for pass 2 only (background===null takes the
+        // non-forcing branch) and restore the real Color right after so
+        // pass 1 next frame still clears to it normally.
+        const bg = scene.background;
+        scene.background = null;
         try {
           renderer.render(scene, camera);
         } finally {
           // Always restore, even if pass 2 itself throws mid-render, so a
           // broken splash frame can't leave every subsequent frame dark
-          // (layer 0 disabled) or smeared (autoClear left off).
+          // (layer 0 disabled), smeared (autoClear left off), or without a
+          // sky (background left null).
           camera.layers.enable(0);
           camera.layers.disable(WATER_LAYER);
           renderer.autoClear = true;
+          scene.background = bg;
         }
+        if (renderer.info && renderer.info.render) {
+          lastFrameStats = {
+            calls: pass1Calls + renderer.info.render.calls,
+            triangles: pass1Tris + renderer.info.render.triangles,
+          };
+        } else {
+          lastFrameStats = { calls: pass1Calls, triangles: pass1Tris };
+        }
+      } else {
+        lastFrameStats = { calls: pass1Calls, triangles: pass1Tris };
       }
     }
   } catch (err) {
