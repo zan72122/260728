@@ -5,6 +5,7 @@
 import { DOUGH_PRESETS } from './presets.js';
 
 const N = 48; // 制御点数(固定)
+const MAX_DENTS = 16; // dents リングバッファの最大数 (SPEC-GL 1)
 
 function clamp(v, lo, hi) {
   if (typeof v !== 'number' || !isFinite(v)) return lo;
@@ -13,6 +14,12 @@ function clamp(v, lo, hi) {
 function clamp01(v) {
   return clamp(v, 0, 1);
 }
+// index から安定した 0..1 の疑似乱数 (dents のわずかなばらつき用。呼び出し毎にちらつかない)
+function hash01Local(i) {
+  const s = Math.sin(i * 12.9898 + 78.233) * 43758.5453;
+  return s - Math.floor(s);
+}
+
 // 角度差を [-PI, PI] に正規化
 function angularDiff(a, b) {
   let d = (a - b) % (Math.PI * 2);
@@ -32,6 +39,13 @@ export class DoughModel {
     this._twistAccum = 0;
     this.wobble = 0.5;
     this.bubbles = [];
+    // dents: 指のへこみ表現 (SPEC-GL 1)。固定長リングバッファ。
+    // オブジェクトはここで一度だけ生成し、以後は使い回す (割り当てゼロ原則)。
+    this.dents = new Array(MAX_DENTS);
+    for (let i = 0; i < MAX_DENTS; i++) {
+      this.dents[i] = { x: 0, y: 0, r: 0, depth: 0, age: 0 };
+    }
+    this._dentHead = 0;
     this._init(presetId);
   }
 
@@ -72,10 +86,33 @@ export class DoughModel {
     this._grabBaseRestR = null;
     this._wobblePhase = Math.random() * Math.PI * 2;
     this.wobble = 0.5;
+
+    // dents クリア (配列/オブジェクトは再割り当てせず中身だけ初期化)
+    if (this.dents) {
+      for (let i = 0; i < this.dents.length; i++) {
+        const d = this.dents[i];
+        d.x = 0; d.y = 0; d.r = 0; d.depth = 0; d.age = 0;
+      }
+    }
+    this._dentHead = 0;
   }
 
   reset(presetId) {
     this._init(presetId);
+  }
+
+  // dents リングバッファへ中心相対座標でへこみを1つ書き込む (新規割り当てなし)
+  _pushDent(xRel, yRel, r, depth) {
+    const dents = this.dents;
+    if (!dents || dents.length === 0) return;
+    if (!isFinite(xRel) || !isFinite(yRel) || !isFinite(depth) || depth <= 0) return;
+    const d = dents[this._dentHead];
+    d.x = xRel;
+    d.y = yRel;
+    d.r = isFinite(r) && r > 0 ? r : this.R0 * 0.15;
+    d.depth = depth;
+    d.age = 0;
+    this._dentHead = (this._dentHead + 1) % dents.length;
   }
 
   _maxRestR() {
@@ -168,6 +205,28 @@ export class DoughModel {
       pt.y = isFinite(ny) ? ny : this.center.y;
       pt.th = clamp(pt.th, 0.3, 3.0);
     }
+
+    // 7. dents (指のへこみ) の減衰 — SPEC-GL 1。
+    //    減衰速度は p.elasticity と behavior.reboundRate に比例(弾力のある生地ほど早く戻る)。
+    //    liquid はほぼ減衰しない。焼成後(bakeColor>0.5)はへこみがほぼ残らない硬さになる。
+    {
+      const reboundFactor = 0.2 + 1.8 * clamp01(beh.reboundRate);
+      const elasticFactor = 0.2 + 1.8 * clamp01(p.elasticity);
+      let decayRate = 0.12 * reboundFactor * elasticFactor; // 1/秒 (指数減衰)
+      if (clamp01(p.bakeColor) > 0.5) decayRate *= 8;
+      if (!isFinite(decayRate) || decayRate < 0) decayRate = 0;
+      const decayMul = Math.exp(-decayRate * dt);
+      const dents = this.dents;
+      if (dents) {
+        for (let i = 0; i < dents.length; i++) {
+          const d = dents[i];
+          if (d.depth <= 0) continue;
+          d.age += dt;
+          d.depth *= decayMul;
+          if (d.depth < 0.02) d.depth = 0;
+        }
+      }
+    }
   }
 
   // ==== ジェスチャ操作 ================================================
@@ -200,6 +259,9 @@ export class DoughModel {
     if (crumble > 0) {
       this.crackAmount = clamp01(this.crackAmount + strength * crumble * 0.03);
     }
+
+    // dents: 指で押した深いへこみ (SPEC-GL 1)。strength に比例。
+    this._pushDent(x - this.center.x, y - this.center.y, R0 * 0.32, strength * R0 * 0.5 * soft);
   }
 
   grabStart(x, y) {
@@ -246,6 +308,12 @@ export class DoughModel {
       const over = Math.max(0, stretchAmt / R0 - stretchLimit);
       if (over > 0) this.crackAmount = clamp01(this.crackAmount + over * crack * 0.05);
     }
+
+    // dents: 引きずり方向に浅い溝状のへこみ (SPEC-GL 1)。
+    // grabMove は連続発火するため、毎フレーム少しずつ位置をずらして書き込むと
+    // リングバッファ上で自然に「溝」の軌跡になる。
+    const grooveDepth = clamp(dist * 0.12 * (0.3 + 0.9 * clamp01(this.p.stretchiness)), 0, R0 * 0.1);
+    this._pushDent(x - this.center.x, y - this.center.y, R0 * 0.14, grooveDepth);
   }
 
   grabEnd() {
@@ -295,6 +363,18 @@ export class DoughModel {
     if (crack > 0 || crumble > 0) {
       this.crackAmount = clamp01(this.crackAmount + intensity * (crack * 0.015 + crumble * 0.02));
     }
+
+    // dents: こねる指の浅いへこみを複数 (SPEC-GL 1)。中心点 + 少しずらした点。
+    const shallowR = R0 * 0.16;
+    const shallowDepth = intensity * R0 * 0.09;
+    this._pushDent(x - this.center.x, y - this.center.y, shallowR, shallowDepth);
+    const off = R0 * 0.1;
+    this._pushDent(
+      x - this.center.x + (hash01Local(this._dentHead) - 0.5) * off,
+      y - this.center.y + (hash01Local(this._dentHead + 7) - 0.5) * off,
+      shallowR * 0.75,
+      shallowDepth * 0.65
+    );
   }
 
   fold(angleRad) {
