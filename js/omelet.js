@@ -61,6 +61,7 @@
             }
           }
           ctx.restore();
+          bowlFront(ctx, b.x, b.y, b.r, '#f2c96b');
           F.eggs.forEach((e, i) => {
             if (e.crack >= 3) return;
             const p = eggPos(i);
@@ -141,6 +142,7 @@
             circle(ctx, bi.x + Math.cos(a) * rd, bi.y + Math.sin(a) * rd * 0.55, (3 + n1(i) * 4.5) * S);
           }
           ctx.restore();
+          bowlFront(ctx, b.x, b.y, b.r, '#f2c96b');
           const p = App.pointer;
           if (p.down) drawWhisk(ctx, p.x, p.y, App.S * 1.1, Math.sin(App.time * 8) * 0.2);
           else drawWhisk(ctx, b.x + b.r * 1.15, b.y - 30 * App.S, App.S, 0.4);
@@ -255,12 +257,15 @@
             ctx.globalAlpha = 1;
           }
           ctx.restore();
-          /* curds */
+          /* curds — plump little mounds with a visible underside */
           for (const c of F.curds) {
             ctx.save();
             ctx.translate(c.x, c.y); ctx.scale(1, 0.8);
+            const cc = mixc('#f7cf5f', '#eda93c', c.born);
+            blobPath(ctx, 0, c.r * 0.32, c.r, 0.22, c.seed);
+            ctx.fillStyle = mixc(cc, '#8a4a14', 0.3); ctx.fill();
             blobPath(ctx, 0, 0, c.r, 0.22, c.seed);
-            ctx.fillStyle = mixc('#f7cf5f', '#eda93c', c.born); ctx.fill();
+            ctx.fillStyle = cc; ctx.fill();
             ell(ctx, -c.r * 0.25, -c.r * 0.3, c.r * 0.3, c.r * 0.2, 'rgba(255,255,255,0.45)');
             ctx.restore();
           }
@@ -305,11 +310,23 @@
           const plump = 1 + F.foam * 0.35;
           const rx = R * lerp(1, 0.68, f), ry = R * lerp(1, 0.42 * plump, f);
           const avg = (rx + ry) / 2;
+          const bodyC = mixc('#f7cf5f', '#eda93c', 0.3 + F.cookT * 0.3);
+          /* underside layer gives the fold real thickness */
+          const thick = lerp(4, 14, f) * S * plump;
+          ctx.save();
+          ctx.scale(rx / avg, ry / avg);
+          blobPath(ctx, 0, thick * avg / ry, avg, 0.06, 2.2);
+          ctx.restore();
+          ctx.fillStyle = mixc(bodyC, '#8a4a14', 0.35);
+          ctx.fill();
           ctx.save();
           ctx.scale(rx / avg, ry / avg);
           blobPath(ctx, 0, 0, avg, 0.06, 2.2);
           ctx.restore();
-          ctx.fillStyle = mixc('#f7cf5f', '#eda93c', 0.3 + F.cookT * 0.3);
+          const bg2 = ctx.createLinearGradient(0, -ry, 0, ry);
+          bg2.addColorStop(0, mixc(bodyC, '#ffffff', 0.22));
+          bg2.addColorStop(1, bodyC);
+          ctx.fillStyle = bg2;
           ctx.fill();
           /* seam line while folding */
           if (f > 0.1) {
@@ -368,13 +385,24 @@
           const ry = Math.min(72 * S * plump, rx * 0.6);
           ctx.save();
           ctx.translate(cx, cy);
-          ell(ctx, 0, 14 * S, rx * 1.02, ry * 0.8, 'rgba(140,90,20,0.2)');
+          ell(ctx, 0, 18 * S, rx * 1.02, ry * 0.8, 'rgba(140,90,20,0.22)');
           const avg = (rx + ry) / 2;
+          const bodyC = mixc('#f7cf5f', '#eda93c', 0.25 + F.cookT * 0.35);
+          /* plump body with a visible underside */
+          ctx.save();
+          ctx.scale(rx / avg, ry / avg);
+          blobPath(ctx, 0, 13 * S * avg / ry, avg, 0.05, 2.2);
+          ctx.restore();
+          ctx.fillStyle = mixc(bodyC, '#8a4a14', 0.35);
+          ctx.fill();
           ctx.save();
           ctx.scale(rx / avg, ry / avg);
           blobPath(ctx, 0, 0, avg, 0.05, 2.2);
           ctx.restore();
-          ctx.fillStyle = mixc('#f7cf5f', '#eda93c', 0.25 + F.cookT * 0.35);
+          const bg3 = ctx.createLinearGradient(0, -ry, 0, ry);
+          bg3.addColorStop(0, mixc(bodyC, '#ffffff', 0.25));
+          bg3.addColorStop(1, mixc(bodyC, '#b06010', 0.12));
+          ctx.fillStyle = bg3;
           ctx.fill();
           ell(ctx, -rx * 0.3, -ry * 0.4, rx * 0.25, ry * 0.2, 'rgba(255,255,255,0.5)');
           /* curd texture along the seam */

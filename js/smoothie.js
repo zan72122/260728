@@ -55,13 +55,18 @@
         ctx.translate(c.x, c.y);
         ctx.rotate(c.seed);
         if (c.kind === 0) {
+          blobPath(ctx, 0, c.r * 0.18, c.r, 0.2, c.seed * 5);
+          ctx.fillStyle = '#b82c42'; ctx.fill();
           blobPath(ctx, 0, 0, c.r, 0.2, c.seed * 5);
           ctx.fillStyle = '#e8465c'; ctx.fill();
           ctx.fillStyle = '#ffdfe6';
           for (let i = 0; i < 3; i++) circle(ctx, (n1(i + c.seed) - 0.5) * c.r, (n1(i * 3 + c.seed) - 0.5) * c.r, Math.min(1.6 * S, c.r * 0.2));
+          ell(ctx, -c.r * 0.3, -c.r * 0.35, c.r * 0.22, c.r * 0.14, 'rgba(255,255,255,0.5)');
         } else {
+          ell(ctx, 0, c.r * 0.15, c.r, c.r * 0.8, '#d9bc6a');
           ell(ctx, 0, 0, c.r, c.r * 0.8, '#f7e6a8');
           ell(ctx, 0, 0, c.r * 0.55, c.r * 0.42, '#f2d98a');
+          ell(ctx, -c.r * 0.3, -c.r * 0.3, c.r * 0.2, c.r * 0.12, 'rgba(255,255,255,0.55)');
         }
         ctx.restore();
       }
@@ -70,6 +75,7 @@
         const S = App.S, g = glassAt();
         const lv = level();
         const topY = g.y + g.h / 2 - lv * g.h;
+        softShadow(ctx, g.x, g.y + g.h / 2 + 6 * S, g.w * 0.62, 13 * S, 0.22);
         /* liquid */
         ctx.save();
         ctx.beginPath();
@@ -80,9 +86,15 @@
         ctx.closePath();
         ctx.clip();
         if (lv > 0.06) {
-          ctx.fillStyle = liqColor();
+          const lc = liqColor();
+          const lg = ctx.createLinearGradient(0, topY, 0, g.y + g.h / 2);
+          lg.addColorStop(0, lc);
+          lg.addColorStop(1, mixc(lc, '#5a2030', 0.22));
+          ctx.fillStyle = lg;
           ctx.fillRect(g.x - g.w * 0.5, topY, g.w, g.h);
-          ell(ctx, g.x, topY, g.w * 0.46, 8 * S, mixc(liqColor(), '#ffffff', 0.25));
+          /* liquid surface: dark back edge + bright front */
+          ell(ctx, g.x, topY, g.w * 0.46, 8 * S, mixc(lc, '#5a2030', 0.3));
+          ell(ctx, g.x, topY + 2.5 * S, g.w * 0.44, 6 * S, mixc(lc, '#ffffff', 0.3));
           /* marble streaks until fully swirled */
           if (F.milk > 0.05 && F.swirl < 0.95) {
             ctx.globalAlpha = (1 - F.swirl) * 0.8;
@@ -131,6 +143,16 @@
         ctx.lineTo(g.x - g.w * 0.38, g.y + g.h * 0.4);
         ctx.stroke();
         ctx.globalAlpha = 1;
+        /* open rim ellipse */
+        ctx.strokeStyle = 'rgba(185,205,222,0.9)';
+        ctx.lineWidth = 3 * S;
+        ctx.beginPath();
+        ctx.ellipse(g.x, g.y - g.h / 2, g.w * 0.42, 8 * S, 0, 0, TAU);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(160,185,205,0.13)';
+        ctx.beginPath();
+        ctx.ellipse(g.x, g.y - g.h / 2, g.w * 0.42, 8 * S, 0, 0, TAU);
+        ctx.fill();
         /* condensation after ice */
         if (F.ice.length > 0) {
           ctx.fillStyle = 'rgba(200,230,250,0.8)';
@@ -248,7 +270,7 @@
       /* ================= step 3 : milk & swirl ================= */
       const stir = new Stir();
       let prevRevs = 0, pouringMilk = false, stirPhase = 0;
-      const milkBtn = () => ({ x: App.W * 0.82, y: App.H * 0.2, r: 60 * App.S });
+      const milkBtn = () => ({ x: App.W * 0.82, y: App.H * 0.28, r: 60 * App.S });
       const s3 = {
         hint: 'hold',
         hintAt() {
@@ -316,7 +338,7 @@
 
       /* ================= step 4 : ice, straw, drink! (final) ================= */
       let strawT = 0;
-      const iceBtn = () => ({ x: App.W * 0.18, y: App.H * 0.2, r: 58 * App.S });
+      const iceBtn = () => ({ x: App.W * 0.18, y: App.H * 0.28, r: 58 * App.S });
       const strawTop = () => {
         const g = glassAt();
         return { x: g.x + g.w * 0.28, y: g.y - g.h * 0.72 };

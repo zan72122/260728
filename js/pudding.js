@@ -185,6 +185,7 @@
       const cupAt = i => ({ x: App.W * (0.35 + i * 0.3), y: App.H * 0.55 });
       function drawCup(ctx, x, y, fillT, caramelT, setT) {
         const S = App.S, w = 110 * S, h = 120 * S;
+        softShadow(ctx, x, y + h * 0.52 + 4 * S, w * 0.6, 12 * S, 0.2);
         ctx.fillStyle = 'rgba(200,215,230,0.55)';
         ctx.beginPath();
         ctx.moveTo(x - w * 0.42, y - h * 0.5);
@@ -192,6 +193,10 @@
         ctx.lineTo(x + w * 0.5, y + h * 0.5);
         ctx.lineTo(x + w * 0.42, y - h * 0.5);
         ctx.closePath(); ctx.fill();
+        /* glass base thickness */
+        ctx.fillStyle = 'rgba(170,190,210,0.5)';
+        rr(ctx, x - w * 0.5, y + h * 0.42, w, h * 0.08, 3 * S);
+        ctx.fill();
         /* caramel layer at bottom keeps the chosen color */
         ctx.fillStyle = caramelColor(caramelT);
         ctx.beginPath();
@@ -210,6 +215,9 @@
           ctx.lineTo(x + w * 0.47, y + h * 0.28);
           ctx.lineTo(x + w * 0.46, top);
           ctx.closePath(); ctx.fill();
+          /* liquid surface ellipse: back edge dark, front edge light */
+          ell(ctx, x, top, w * 0.45, 6 * S, mixc(mixc('#f9e2a0', '#f7d58a', setT), '#9c6a20', 0.25));
+          ell(ctx, x, top + 2 * S, w * 0.43, 4.5 * S, mixc(mixc('#fbeec4', '#f9e2a8', setT), '#ffffff', 0.2));
           ctx.globalAlpha = 1;
         }
         ctx.strokeStyle = 'rgba(160,180,200,0.8)'; ctx.lineWidth = 3 * S;
@@ -219,6 +227,22 @@
         ctx.lineTo(x + w * 0.5, y + h * 0.5);
         ctx.lineTo(x + w * 0.42, y - h * 0.5);
         ctx.closePath(); ctx.stroke();
+        /* open rim ellipse */
+        ctx.strokeStyle = 'rgba(190,208,224,0.9)';
+        ctx.lineWidth = 2.5 * S;
+        ctx.beginPath();
+        ctx.ellipse(x, y - h * 0.5, w * 0.42, 6.5 * S, 0, 0, TAU);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(150,175,195,0.16)';
+        ctx.beginPath();
+        ctx.ellipse(x, y - h * 0.5, w * 0.42, 6.5 * S, 0, 0, TAU);
+        ctx.fill();
+        /* side gloss */
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = '#ffffff';
+        rr(ctx, x - w * 0.36, y - h * 0.36, 6 * S, h * 0.68, 3 * S);
+        ctx.fill();
+        ctx.globalAlpha = 1;
       }
       let pourI = -1;
       const s3 = {
@@ -402,7 +426,11 @@
           ctx.save();
           ctx.translate(pp.x, pp.y + 8 * S);
           ctx.scale(1 + w * 0.14, 1 - w * 0.14);
-          ctx.fillStyle = mixc('#f7cf5f', '#f2c035', 0.5);
+          const fg = ctx.createLinearGradient(0, -bh * 1.15, 0, 14 * S);
+          fg.addColorStop(0, '#fbdf85');
+          fg.addColorStop(0.55, mixc('#f7cf5f', '#f2c035', 0.5));
+          fg.addColorStop(1, '#d9a028');
+          ctx.fillStyle = fg;
           ctx.beginPath();
           ctx.moveTo(-bw * 0.72, 0);
           ctx.lineTo(-bw * 0.5, -bh);
@@ -410,6 +438,12 @@
           ctx.lineTo(bw * 0.72, 0);
           ctx.quadraticCurveTo(0, 14 * S, -bw * 0.72, 0);
           ctx.fill();
+          /* front-edge bloom where the flan meets the plate */
+          ctx.globalAlpha = 0.35;
+          ctx.beginPath();
+          ctx.ellipse(0, 2 * S, bw * 0.68, 9 * S, 0, 0, TAU);
+          ctx.fillStyle = '#fbe9b0'; ctx.fill();
+          ctx.globalAlpha = 1;
           /* caramel keeps the color chosen at step 1, drips down */
           ctx.fillStyle = caramelColor(F.caramel);
           ctx.beginPath();

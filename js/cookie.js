@@ -169,8 +169,11 @@
         draw(ctx) {
           const S = App.S, d = doughAt();
           ell(ctx, d.x, d.y + 14 * S, d.rx * 1.12, d.ry * 1.12, '#fbf0da');
-          /* dough with per-cell thickness shading */
-          ell(ctx, d.x, d.y + 6 * S, d.rx, d.ry, '#d9b57a');
+          /* dough slab: side wall height follows the remaining thickness */
+          const hSide = (3 + avgTh() * 15) * S;
+          for (let i = 3; i >= 1; i--) {
+            ell(ctx, d.x, d.y + hSide * i / 3, d.rx, d.ry, mixc('#d9b57a', '#9c7038', i / 3 * 0.6));
+          }
           ell(ctx, d.x, d.y, d.rx, d.ry, '#eccf95');
           ctx.save();
           ctx.beginPath(); ctx.ellipse(d.x, d.y, d.rx, d.ry, 0, 0, TAU); ctx.clip();
@@ -220,7 +223,10 @@
         draw(ctx) {
           const S = App.S, d = doughAt();
           ell(ctx, d.x, d.y + 14 * S, d.rx * 1.12, d.ry * 1.12, '#fbf0da');
-          ell(ctx, d.x, d.y + 6 * S, d.rx, d.ry, '#d9b57a');
+          const hSide = (3 + avgTh() * 15) * S;
+          for (let i = 3; i >= 1; i--) {
+            ell(ctx, d.x, d.y + hSide * i / 3, d.rx, d.ry, mixc('#d9b57a', '#9c7038', i / 3 * 0.6));
+          }
           ell(ctx, d.x, d.y, d.rx, d.ry, '#eccf95');
           /* punched holes */
           ctx.fillStyle = '#fbf0da';
@@ -336,10 +342,16 @@
             if (c.eaten) return;
             const pp = platePos[i];
             ctx.save();
-            /* shadow shows the thickness the cookie kept */
-            shapePath(ctx, c.shape, pp.x, pp.y + (3 + c.th * 8) * S, c.r);
-            ctx.fillStyle = 'rgba(120,70,20,0.25)'; ctx.fill();
-            /* cookie */
+            /* extruded side wall: the thickness each cookie kept is visible */
+            const hC = (2 + c.th * 11) * S;
+            softShadow(ctx, pp.x, pp.y + hC + 8 * S, c.r * 1.05, c.r * 0.4, 0.2);
+            const bcSide = bakeColor(clamp(c.brown * 1.1, 0, 1));
+            for (let k = 3; k >= 1; k--) {
+              shapePath(ctx, c.shape, pp.x, pp.y + hC * k / 3, c.r);
+              ctx.fillStyle = mixc(bcSide, '#3a1c08', 0.15 + 0.2 * k / 3);
+              ctx.fill();
+            }
+            /* cookie top */
             shapePath(ctx, c.shape, pp.x, pp.y, c.r);
             const g = ctx.createRadialGradient(pp.x, pp.y, c.r * 0.2, pp.x, pp.y, c.r);
             g.addColorStop(0, bakeColor(clamp(c.brown * 0.8, 0, 1)));

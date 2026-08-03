@@ -150,10 +150,17 @@
           ctx.scale(1 + sq * 0.5, 1 - sq * 0.35);
           ctx.rotate(-Math.atan2(oy, ox));
           const irr = 0.05 + 0.15 * (1 - F.gluten);
-          blobPath(ctx, 0, 8 * S, 118 * S, irr, 3.3);
-          ctx.fillStyle = mixc('#ecd7a8', '#f8ecd0', F.gluten); ctx.fill();
-          blobPath(ctx, 0, 0, 112 * S, irr, 3.3);
-          ctx.fillStyle = mixc('#f2dfb4', '#fdf3dc', F.gluten); ctx.fill();
+          /* thick 2.5D dough ball — the side wall is always visible */
+          const doughH = 46 * S;
+          extrudeBlob(ctx, 0, -doughH * 0.4, 106 * S, irr, 3.3, 0.8, doughH,
+            mixc('#e2cc9c', '#f2e4c2', F.gluten), mixc('#bfa06a', '#d4bc90', F.gluten),
+            mt => {
+              mt();
+              const g = ctx.createLinearGradient(0, -doughH * 0.4 - 88 * S, 0, -doughH * 0.4 + 80 * S);
+              g.addColorStop(0, mixc('#f8ebc8', '#fffaf0', F.gluten));
+              g.addColorStop(1, mixc('#ecd8ac', '#f6e9cc', F.gluten));
+              ctx.fillStyle = g; ctx.fill();
+            });
           /* rough lumpy shading fades away as gluten builds */
           ctx.globalAlpha = (1 - F.gluten) * 0.5;
           ctx.fillStyle = '#dcc28c';
@@ -223,10 +230,14 @@
             ctx.translate(bx, by);
             ctx.rotate(Math.sin(b.spin) * 0.12);
             const irr = 0.04 + 0.2 * (1 - b.round);
-            blobPath(ctx, 0, 6 * S, 62 * S, irr, b.seed);
-            ctx.fillStyle = '#e8d3a4'; ctx.fill();
-            blobPath(ctx, 0, 0, 58 * S, irr, b.seed);
-            ctx.fillStyle = '#f8ecd0'; ctx.fill();
+            extrudeBlob(ctx, 0, -14 * S, 55 * S, irr, b.seed, 0.85, 27 * S,
+              '#ecd9ac', '#c6a874',
+              mt => {
+                mt();
+                const g = ctx.createLinearGradient(0, -60 * S, 0, 32 * S);
+                g.addColorStop(0, '#fdf5e0'); g.addColorStop(1, '#f0dfb8');
+                ctx.fillStyle = g; ctx.fill();
+              });
             ctx.globalAlpha = b.round * 0.5;
             ell(ctx, -18 * S, -22 * S, 16 * S, 10 * S, '#ffffff');
             ctx.globalAlpha = 1;
@@ -269,10 +280,14 @@
             ctx.save();
             ctx.translate(bx, by); ctx.scale(sc2, sc2 * 0.92);
             const irr = 0.04 + 0.18 * (1 - b.round);
-            blobPath(ctx, 0, 5 * S, 56 * S, irr, b.seed);
-            ctx.fillStyle = '#e8d3a4'; ctx.fill();
-            blobPath(ctx, 0, 0, 53 * S, irr, b.seed);
-            ctx.fillStyle = '#fdf3dc'; ctx.fill();
+            extrudeBlob(ctx, 0, -12 * S, 51 * S, irr, b.seed, 0.85, 24 * S,
+              '#eedcae', '#c9ab78',
+              mt => {
+                mt();
+                const g = ctx.createLinearGradient(0, -56 * S, 0, 30 * S);
+                g.addColorStop(0, '#fef8e8'); g.addColorStop(1, '#f2e2bc');
+                ctx.fillStyle = g; ctx.fill();
+              });
             ctx.globalAlpha = 0.4;
             ell(ctx, -16 * S, -18 * S, 14 * S, 9 * S, '#ffffff');
             ctx.globalAlpha = 1;
@@ -317,8 +332,10 @@
               ctx.save();
               ctx.translate(bx, by); ctx.scale(sc2, sc2 * 0.9);
               const irr = 0.03 + 0.14 * (1 - b.round);
-              blobPath(ctx, 0, 0, 46 * S, irr, b.seed);
-              ctx.fillStyle = bakeColor(clamp(F.brown, 0, 1)); ctx.fill();
+              const bc = bakeColor(clamp(F.brown, 0, 1));
+              extrudeBlob(ctx, 0, -8 * S, 44 * S, irr, b.seed, 0.85, 16 * S,
+                mixc(bc, '#000000', 0.1), mixc(bc, '#000000', 0.3),
+                mt => { mt(); ctx.fillStyle = bc; ctx.fill(); });
               ctx.globalAlpha = 0.35;
               ell(ctx, -14 * S, -16 * S, 13 * S, 8 * S, '#ffffff');
               ctx.globalAlpha = 1;
@@ -370,10 +387,16 @@
             ctx.scale(sx, sy);
             ctx.translate(0, -size * 0.5);
             const irr = 0.03 + 0.12 * (1 - b.round);
-            blobPath(ctx, 0, 4 * S, size, irr, b.seed);
-            ctx.fillStyle = mixc(bakeColor(clamp(F.brown, 0, 1)), '#000', 0.15); ctx.fill();
-            blobPath(ctx, 0, 0, size * 0.96, irr, b.seed);
-            ctx.fillStyle = bakeColor(clamp(F.brown, 0, 1)); ctx.fill();
+            const bc = bakeColor(clamp(F.brown, 0, 1));
+            extrudeBlob(ctx, 0, -size * 0.3, size * 0.9, irr, b.seed, 0.85, size * 0.55,
+              mixc(bc, '#ffffff', 0.05), mixc(bc, '#3a1c08', 0.35),
+              mt => {
+                mt();
+                const g = ctx.createLinearGradient(0, -size * 1.15, 0, size * 0.5);
+                g.addColorStop(0, mixc(bc, '#ffffff', 0.28));
+                g.addColorStop(1, bc);
+                ctx.fillStyle = g; ctx.fill();
+              });
             ctx.globalAlpha = 0.5;
             ell(ctx, -size * 0.3, -size * 0.35, size * 0.26, size * 0.16, '#ffffff');
             ctx.globalAlpha = 1;
