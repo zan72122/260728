@@ -102,8 +102,8 @@ function genMap(variant) {
 
   // 奥の山なみ(画面いちばん奥の頂点 (0,0) まわり、d が小さいところ)
   addMound(h, 3, 4, 4.2, 2.2);
-  addMound(h, 9, 2, 5.0, 2.8);
-  addMound(h, 2, 11, 4.5, 2.3);
+  addMound(h, 9, 2, 5.0, 2.5);
+  addMound(h, 2, 11, 4.5, 2.1);
   addMound(h, 13, 4, 3.6, 1.7);
 
   World.springs = [];
@@ -142,7 +142,7 @@ function genMap(variant) {
 
   // 山の頂上は岩、たかい所は色をかえる
   for (let i = 0; i < N; i++) {
-    if (type[i] === T_GRASS && h[i] > 4.2) type[i] = T_ROCK;
+    if (type[i] === T_GRASS && h[i] > 4.6) type[i] = T_ROCK;
   }
 
   World.h = h;
@@ -220,6 +220,27 @@ function buildingAt(x, y) {
   }
   return null;
 }
+// 建物の2x2フットプリント(b.x..b.x+1, b.y..b.y+1)ちょうどに乗っているか
+function inBuildingFootprint(x, y) {
+  for (const b of World.buildings) {
+    if (x >= b.x && x <= b.x + 1 && y >= b.y && y <= b.y + 1) return true;
+  }
+  return false;
+}
+// 地形ツール適用後、建物の下がふたたび平らになるよう整える(次善策)
+function flattenBuildings() {
+  for (const b of World.buildings) flattenUnder(b.x, b.y);
+}
+// (x,y) まわり3x3の baseH の最小値。掘削の床をこれで決めると、
+// セルごとの初期ノイズに引きずられず溝の底がなめらかにつながる。
+function localBaseFloor(x, y) {
+  let m = Infinity;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const nx = x + dx, ny = y + dy;
+    if (inGrid(nx, ny)) m = Math.min(m, World.baseH[idx(nx, ny)]);
+  }
+  return m;
+}
 
 // ---------- undo ----------
 function pushUndo() {
@@ -247,17 +268,19 @@ function toolMountain(fx, fy, dt) {
   const r = 2.8;
   for (let y = Math.max(0, Math.floor(fy - r - 1)); y <= Math.min(CFG.GH - 1, Math.ceil(fy + r + 1)); y++) {
     for (let x = Math.max(0, Math.floor(fx - r - 1)); x <= Math.min(CFG.GW - 1, Math.ceil(fx + r + 1)); x++) {
+      if (inBuildingFootprint(x, y)) continue; // 建物の下は地形を変えない
       const i = idx(x, y);
       if (World.seaMask[i]) continue;
       const d2 = (x - fx) * (x - fx) + (y - fy) * (y - fy);
       const add = 3.0 * dt * Math.exp(-d2 / (r * r * 0.55));
       if (add < 0.002) continue;
       World.h[i] = Math.min(5.8, World.h[i] + add);
-      if (World.h[i] > 4.2 && (World.type[i] === T_GRASS || World.type[i] === T_SAND)) World.type[i] = T_ROCK;
+      if (World.h[i] > 4.6 && (World.type[i] === T_GRASS || World.type[i] === T_SAND)) World.type[i] = T_ROCK;
       else if (World.h[i] > 1.4 && World.type[i] === T_SAND) World.type[i] = T_GRASS;
       if (World.type[i] === T_RIVER || World.type[i] === T_DITCH) World.type[i] = T_GRASS;
     }
   }
+  flattenBuildings();
 }
 
 // みぞ: 指でなぞって ほそいへこみ
@@ -265,16 +288,18 @@ function toolDitch(fx, fy) {
   const r = 1.1;
   for (let y = Math.max(0, Math.floor(fy - 2)); y <= Math.min(CFG.GH - 1, Math.ceil(fy + 2)); y++) {
     for (let x = Math.max(0, Math.floor(fx - 2)); x <= Math.min(CFG.GW - 1, Math.ceil(fx + 2)); x++) {
+      if (inBuildingFootprint(x, y)) continue; // 建物の下は地形を変えない
       const i = idx(x, y);
       if (World.seaMask[i]) continue;
       const d = Math.hypot(x - fx, y - fy);
       if (d > r) continue;
       const dig = 0.9 * (1 - d / r);
-      const floor = Math.max(0.35, World.baseH[i] - 1.1);
+      const floor = Math.max(0.35, localBaseFloor(x, y) - 1.1);
       World.h[i] = Math.max(floor, World.h[i] - dig * 0.55);
       if (d < 0.9 && World.type[i] !== T_RIVER) World.type[i] = T_DITCH;
     }
   }
+  flattenBuildings();
 }
 
 // かわ: ひろめに ほって みずいろの かわらに
@@ -282,28 +307,32 @@ function toolRiver(fx, fy) {
   const r = 1.5;
   for (let y = Math.max(0, Math.floor(fy - 2)); y <= Math.min(CFG.GH - 1, Math.ceil(fy + 2)); y++) {
     for (let x = Math.max(0, Math.floor(fx - 2)); x <= Math.min(CFG.GW - 1, Math.ceil(fx + 2)); x++) {
+      if (inBuildingFootprint(x, y)) continue; // 建物の下は地形を変えない
       const i = idx(x, y);
       if (World.seaMask[i]) continue;
       const d = Math.hypot(x - fx, y - fy);
       if (d > r) continue;
       const dig = 1.15 * (1 - d / r);
-      const floor = Math.max(0.4, World.baseH[i] - 1.35);
+      const floor = Math.max(0.4, localBaseFloor(x, y) - 1.35);
       World.h[i] = Math.max(floor, World.h[i] - dig * 0.6);
       if (d < 1.15) World.type[i] = T_RIVER;
     }
   }
+  flattenBuildings();
 }
 
 // ていぼう: ほそくて たかい かべ
 function toolLevee(fx, fy) {
   const x = Math.round(fx), y = Math.round(fy);
   if (!inGrid(x, y)) return;
+  if (inBuildingFootprint(x, y)) return; // 建物の下は地形を変えない
   const i = idx(x, y);
   if (World.seaMask[i] && World.baseH[i] < 0.5) return; // 沖には作れない
   if (World.type[i] === T_LEVEE) return;                // 二重に高くしない
   // ひとなぞりで しっかりした かべが立つ (いちばん大きな波より高く)
   World.h[i] = Math.min(CFG.MAX_H, Math.max(CFG.SEA_LEVEL + 2.0, Math.max(World.baseH[i], World.h[i]) + 2.2));
   World.type[i] = T_LEVEE;
+  flattenBuildings();
 }
 
 // たかだい: たいらな おか + かいだん
@@ -311,6 +340,7 @@ function toolPlateau(fx, fy) {
   const r = 2.1, top = 3.3;
   for (let y = Math.max(0, Math.floor(fy - 4)); y <= Math.min(CFG.GH - 1, Math.ceil(fy + 4)); y++) {
     for (let x = Math.max(0, Math.floor(fx - 4)); x <= Math.min(CFG.GW - 1, Math.ceil(fx + 4)); x++) {
+      if (inBuildingFootprint(x, y)) continue; // 建物の下は地形を変えない
       const i = idx(x, y);
       if (World.seaMask[i]) continue;
       const d = Math.hypot(x - fx, (y - fy) * 1.15);
@@ -328,6 +358,7 @@ function toolPlateau(fx, fy) {
       World.stairs[idx(sx, y)] = 1;
     }
   }
+  flattenBuildings();
 }
 
 // けしゴム: さいしょの じめんに もどす + ものを けす
