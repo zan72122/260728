@@ -19,8 +19,12 @@ function idx(x, y) { return y * CFG.GW + x; }
 function inGrid(x, y) { return x >= 0 && x < CFG.GW && y >= 0 && y < CFG.GH; }
 
 // ---------- マップ生成 ----------
-function coastY(x) {
-  return 21.5 + Math.sin(x * 0.31) * 1.4 + Math.sin(x * 0.13 + 2.1) * 1.2;
+// 真アイソメの対角線構図: d = x + y (0〜GW+GH-2) が「おくゆき」、
+// d が小さい (0,0) がわが画面いちばん奥=山、d が大きいがわが画面手前=海。
+// u = x - y は横断方向(海岸線をこの向きに sin で波打たせる)。
+const D_COAST_BASE = 42; // 海岸線の基準対角線値(海のわりあいが25〜40%になるよう調整ずみ)
+function coastD(u) {
+  return D_COAST_BASE + Math.sin(u * 0.31) * 1.4 + Math.sin(u * 0.13 + 2.1) * 1.2;
 }
 
 function addMound(h, cx, cy, r, amp) {
@@ -77,57 +81,63 @@ function genMap(variant) {
   const type = new Uint8Array(N);
   const stairs = new Uint8Array(N);
 
-  // 基本地形: 手前が海、奥へむかってゆるく高くなる
+  // 基本地形: d = x+y の対角線ぞいに、奥(d小)から手前(d大)へ
+  // 山ふもと→草地→浜→海、とゆるく高さが変わる。海岸線は u=x-y でうねる。
   for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
     const i = idx(x, y);
-    const cy = coastY(x);
+    const d = x + y, u = x - y;
+    const dc = coastD(u);
     const noise = Math.sin(x * 0.55 + y * 0.75) * 0.03 + Math.sin(x * 1.3 - y * 0.6) * 0.02;
-    if (y > cy) {
-      // 海: 沖へむかって深くなる
-      h[i] = clamp(0.82 - (y - cy) * 0.16, 0.08, 0.82);
+    if (d > dc) {
+      // 海: 沖(dが大きい)へむかって深くなる
+      h[i] = clamp(0.82 - (d - dc) * 0.16, 0.08, 0.82);
       type[i] = T_SEA;
     } else {
-      const inland = cy - y;
+      const inland = dc - d;
       h[i] = 1.18 + inland * 0.062 + noise;
       if (inland < 2.6) { type[i] = T_SAND; h[i] = Math.min(h[i], 1.18 + inland * 0.11); }
       else type[i] = T_GRASS;
     }
   }
 
-  // 奥の山なみ
-  addMound(h, 7, 1, 6.0, 2.3);
-  addMound(h, 16, 0, 7.0, 3.1);
-  addMound(h, 30, 2, 5.5, 2.1);
-  addMound(h, 37, 0, 4.5, 1.7);
+  // 奥の山なみ(画面いちばん奥の頂点 (0,0) まわり、d が小さいところ)
+  addMound(h, 3, 4, 4.2, 2.2);
+  addMound(h, 9, 2, 5.0, 2.8);
+  addMound(h, 2, 11, 4.5, 2.3);
+  addMound(h, 13, 4, 3.6, 1.7);
 
   World.springs = [];
   World.buildings = [];
   World.trees = [];
   World.flowers = [];
 
-  // 川: 山から海へ
+  // 川: 山のふもと(d小)から海(d大)へ、u をsinで振りながら d にそって下る
+  const RIVER_U = 8, RIVER_AMP = 2.6, RIVER_FREQ = 0.35;
+  function riverU(d) { return RIVER_U + RIVER_AMP * Math.sin(d * RIVER_FREQ); }
+  function riverPoint(d) { const u = riverU(d); return [(d + u) / 2, (d - u) / 2]; }
+
   if (variant !== "c3") {
     const pts = [];
-    for (let y = 3; y <= coastY(28) + 2; y += 0.5) {
-      pts.push([28 + Math.sin(y * 0.42) * 2.2, y]);
-    }
+    for (let d = 12; d <= coastD(riverU(d)) + 3 && d < 60; d += 0.5) pts.push(riverPoint(d));
     carveRiver(h, type, pts, 0.9, 2.6, 0.7);
-    World.springs.push({ x: 28, y: 3.5, rate: 0.026 });
+    const sp = riverPoint(12);
+    World.springs.push({ x: sp[0], y: sp[1], rate: 0.026 });
   } else {
-    // おだい3: とちゅうで切れた川。みぞでつなぐと海までとどく
+    // おだい3: とちゅうで切れた川(d 24〜34 のあいだは陸地のまま)。みぞでつなぐと海までとどく
     const pts1 = [], pts2 = [];
-    for (let y = 3; y <= 11; y += 0.5) pts1.push([28 + Math.sin(y * 0.42) * 2.2, y]);
-    for (let y = 16; y <= coastY(28) + 2; y += 0.5) pts2.push([28 + Math.sin(y * 0.42) * 2.2, y]);
+    for (let d = 12; d <= 24; d += 0.5) pts1.push(riverPoint(d));
+    for (let d = 34; d <= coastD(riverU(d)) + 3 && d < 60; d += 0.5) pts2.push(riverPoint(d));
     carveRiver(h, type, pts1, 0.9, 2.6, 1.9);
     carveRiver(h, type, pts2, 0.9, 1.4, 0.7);
-    World.springs.push({ x: 28, y: 3.5, rate: 0.07 });
+    const sp = riverPoint(12);
+    World.springs.push({ x: sp[0], y: sp[1], rate: 0.07 });
   }
 
   // たかだい
   if (variant === "c2") {
-    addPlateau(h, type, 10, 18, 2.6, 2.6, stairs);   // 海のちかくの ひくい たかだい
+    addPlateau(h, type, 15, 24, 2.6, 2.6, stairs);   // 海のちかくの ひくい たかだい
   } else {
-    addPlateau(h, type, 8, 11, 2.8, 3.9, stairs);
+    addPlateau(h, type, 11, 21, 2.8, 3.9, stairs);
   }
 
   // 山の頂上は岩、たかい所は色をかえる
@@ -148,19 +158,19 @@ function genMap(variant) {
   for (let i = 0; i < N; i++) sm[i] = (type[i] === T_SEA) ? 1 : 0;
   World.seaMask = sm;
 
-  // 建物
+  // 建物(海と山のあいだの低地に)
   if (variant === "free") {
-    addBuilding("house", 16, 16);
-    addBuilding("house", 21, 14);
-    addBuilding("shop", 12, 18);
-    addBuilding("school", 6, 8);
+    addBuilding("house", 9, 15);
+    addBuilding("house", 15, 19);
+    addBuilding("shop", 6, 20);
+    addBuilding("school", 11, 10);
   } else if (variant === "c1") {
-    addBuilding("house", 18, 18);
-    addBuilding("house", 14, 17);
+    addBuilding("house", 19, 21);  // 海岸のすぐそば(波でぬれやすい)
+    addBuilding("house", 22, 19);
   } else if (variant === "c2") {
-    addBuilding("school", 9, 17);
+    addBuilding("school", 14, 23); // 海ちかくの ひくいたかだいの上
   } else if (variant === "c3") {
-    addBuilding("house", 18, 15);
+    addBuilding("house", 17, 15);
   }
 
   // 木と花
