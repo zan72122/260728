@@ -1,0 +1,229 @@
+* {
+  margin: 0; padding: 0; box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none; user-select: none;
+}
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden; position: fixed;
+  background: #f6e7c9;
+  font-family: "Hiragino Maru Gothic ProN", "BIZ UDGothic", "Rounded Mplus 1c", "M PLUS Rounded 1c", sans-serif;
+  touch-action: none;
+}
+#app {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ---------- top bar ---------- */
+#topbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px 2px;
+  flex: 0 0 auto;
+}
+#mascot { width: 60px; height: 60px; }
+#modeButtons { display: flex; gap: 8px; }
+.spacer { flex: 1; }
+.modeBtn, .cmdBtn {
+  border: none; background: #fffdf6;
+  border-radius: 18px;
+  box-shadow: 0 3px 0 #dcc9a5, 0 5px 10px rgba(150,110,60,.15);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 4px 6px 3px;
+  min-width: 58px; min-height: 54px;
+  transition: transform .08s;
+}
+.modeBtn canvas { width: 34px; height: 34px; }
+.cmdBtn canvas { width: 36px; height: 36px; }
+.modeBtn span {
+  font-size: 10px; color: #8a6d4a; font-weight: bold; letter-spacing: .05em;
+}
+.modeBtn.active {
+  background: #ffe9a8;
+  box-shadow: 0 3px 0 #e0b452, 0 5px 10px rgba(150,110,60,.2);
+}
+.modeBtn:active, .cmdBtn:active, .tool:active, .subBtn:active, .compareBtn:active { transform: scale(.92); }
+
+/* せまい画面 (iPhone) では上部バーをつめる */
+@media (max-width: 480px) {
+  #topbar { gap: 4px; padding: 4px 6px 2px; }
+  #mascot { width: 46px; height: 46px; }
+  #modeButtons { gap: 4px; }
+  .modeBtn, .cmdBtn { min-width: 48px; min-height: 46px; border-radius: 14px; padding: 3px 4px 2px; }
+  .modeBtn canvas { width: 26px; height: 26px; }
+  .cmdBtn canvas { width: 28px; height: 28px; }
+  .modeBtn span { font-size: 8px; }
+}
+
+/* ---------- stage ---------- */
+#stage { position: relative; flex: 1 1 auto; min-height: 0; }
+#game { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+
+/* ---------- toolbar ---------- */
+#toolbar {
+  flex: 0 0 auto;
+  display: flex; gap: 8px;
+  padding: 8px 10px calc(8px);
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  justify-content: flex-start;
+  touch-action: pan-x;
+}
+#toolbar::-webkit-scrollbar { display: none; }
+@media (min-width: 760px) { #toolbar { justify-content: center; } }
+.tool {
+  border: none; background: #fffdf6;
+  border-radius: 20px;
+  box-shadow: 0 4px 0 #dcc9a5, 0 6px 12px rgba(150,110,60,.15);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 7px 8px 5px;
+  min-width: 68px;
+  flex: 0 0 auto;
+  transition: transform .08s, background .15s;
+}
+.tool canvas { width: 46px; height: 46px; pointer-events: none; }
+.tool span { font-size: 11px; color: #8a6d4a; font-weight: bold; pointer-events: none; }
+.tool.active {
+  background: #d3f3ff;
+  box-shadow: 0 4px 0 #79c6e0, 0 6px 12px rgba(60,140,180,.25);
+  transform: translateY(-4px);
+}
+.tool.active span { color: #2b7a99; }
+
+/* ---------- sub palette (building kinds) ---------- */
+#subPalette {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: 108px;
+  display: flex; gap: 10px;
+  background: rgba(255,253,246,.95);
+  padding: 8px 12px; border-radius: 24px;
+  box-shadow: 0 6px 16px rgba(120,80,30,.25);
+  z-index: 30;
+}
+.subBtn {
+  border: none; background: #fef3f5; border-radius: 18px;
+  box-shadow: 0 3px 0 #e8c0c8;
+  padding: 6px;
+  transition: transform .08s;
+}
+.subBtn canvas { width: 52px; height: 52px; pointer-events: none; }
+.subBtn.active { background: #ffe0ea; box-shadow: 0 3px 0 #ef93ad; transform: translateY(-3px); }
+
+/* ---------- quest hud ---------- */
+#questHud { position: absolute; inset: 0; pointer-events: none; }
+#questChip {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  background: rgba(255,253,246,.95);
+  border-radius: 999px; padding: 6px 18px;
+  font-size: 20px;
+  box-shadow: 0 4px 10px rgba(120,80,30,.2);
+  white-space: nowrap;
+}
+#btnGo {
+  position: absolute; right: 14px; bottom: 14px;
+  pointer-events: auto;
+  border: none; background: #ffd93b;
+  width: 84px; height: 84px; border-radius: 50%;
+  box-shadow: 0 5px 0 #e0a72e, 0 8px 16px rgba(160,110,20,.3);
+  transition: transform .1s;
+}
+#btnGo canvas { width: 62px; height: 62px; }
+#btnGo:active { transform: scale(.9); }
+#btnGo.busy { opacity: .45; pointer-events: none; }
+
+/* ---------- compare hud ---------- */
+#compareHud {
+  position: absolute; right: 12px; top: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+  pointer-events: none;
+}
+.compareBtn {
+  pointer-events: auto;
+  border: none; background: #fffdf6;
+  border-radius: 20px;
+  box-shadow: 0 4px 0 #dcc9a5, 0 6px 12px rgba(150,110,60,.2);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 8px 10px 6px;
+  transition: transform .08s;
+}
+.compareBtn canvas { width: 44px; height: 44px; }
+.compareBtn span { font-size: 11px; color: #8a6d4a; font-weight: bold; }
+
+/* ---------- title ---------- */
+#title {
+  position: absolute; inset: 0; z-index: 100;
+  background: linear-gradient(180deg, #aee6f5 0%, #d8f4f0 55%, #ffeec7 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  transition: opacity .5s;
+}
+#title.fadeout { opacity: 0; pointer-events: none; }
+#titleArt { width: min(88vw, 60vh); height: auto; }
+#btnPlay {
+  border: none; background: #ff9db8;
+  width: 110px; height: 110px; border-radius: 50%;
+  margin-top: 10px;
+  box-shadow: 0 6px 0 #e0678c, 0 10px 20px rgba(200,80,120,.35);
+  animation: bounce 1.6s infinite ease-in-out;
+  transition: transform .1s;
+}
+#btnPlay canvas { width: 80px; height: 80px; }
+#btnPlay:active { transform: scale(.9); animation: none; }
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+/* ---------- cards ---------- */
+#card, #result {
+  position: absolute; inset: 0; z-index: 90;
+  background: rgba(90, 70, 40, .35);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+#card.hidden, #result.hidden, .hidden { display: none !important; }
+.cardBody {
+  background: #fffdf6;
+  border-radius: 32px;
+  padding: 24px 26px;
+  max-width: 420px; width: 100%;
+  box-shadow: 0 14px 40px rgba(90,60,20,.35);
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  animation: pop .3s ease-out;
+}
+@keyframes pop {
+  0% { transform: scale(.7); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.cardIcons { font-size: 52px; line-height: 1.1; text-align: center; letter-spacing: .06em; }
+.cardText { font-size: 19px; color: #6b5233; font-weight: bold; text-align: center; line-height: 1.5; }
+.cardRow { display: flex; gap: 14px; margin-top: 4px; }
+.cardBtn {
+  border: none; border-radius: 22px;
+  padding: 12px 20px;
+  font-size: 17px; font-weight: bold;
+  color: #6b5233;
+  background: #ffe9a8;
+  box-shadow: 0 4px 0 #e0b452;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  font-family: inherit;
+  transition: transform .08s;
+}
+.cardBtn:active { transform: scale(.93); }
+.cardBtn .big { font-size: 34px; }
+.cardBtn.blue { background: #cdeffc; box-shadow: 0 4px 0 #7cc3de; color: #2b7a99; }
+.cardBtn.pink { background: #ffd9e4; box-shadow: 0 4px 0 #ec9cb4; color: #b0446c; }
+.questPick {
+  border: none; border-radius: 24px;
+  width: 100%; padding: 12px;
+  display: flex; align-items: center; gap: 14px;
+  background: #f4f9ee; box-shadow: 0 4px 0 #cfe0b8;
+  font-family: inherit;
+  transition: transform .08s;
+}
+.questPick:active { transform: scale(.96); }
+.questPick .qicon { font-size: 38px; }
+.questPick .qtext { font-size: 16px; font-weight: bold; color: #5b7a3a; text-align: left; line-height: 1.4; }
+.questPick.done { background: #fdf3d9; box-shadow: 0 4px 0 #e5cf92; }
