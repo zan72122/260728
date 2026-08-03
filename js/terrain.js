@@ -79,7 +79,45 @@ function genMap(variant) {
   const type = new Uint8Array(N);
   const stairs = new Uint8Array(N);
 
-  // 基本地形: d = x+y の対角線ぞいに、奥(d小)から手前(d大)へ
+  // Render.view はグローバル(main.js が Render.init → genMap の順でブートすることを保証)。
+  const view = Render.view;
+  const sw = view.w, sh = view.h;
+  // もとのチューニング(GW=GH=34)からの拡大率。グリッド単位の「量」(半径・振幅など)は
+  // これを掛け、「割合」(高さの傾き・波の周波数)はこれで割って、物理(画面)サイズを保つ。
+  const SCALE = GW / 34;
+
+  // 画面の上端(y=0)・下端(y=sh)に対応する対角線値
+  const d0 = Iso.gridDiagAtY(view, 0);
+  const d1 = Iso.gridDiagAtY(view, sh);
+  const dSpan = d1 - d0;
+
+  // 海岸線: 画面の高さ72%の位置を基準に、よこはば(u=x-y)でうねらせる
+  const dCoastBase = Iso.gridDiagAtY(view, sh * 0.72);
+  function coastD(u) {
+    const un = u / SCALE;
+    return dCoastBase + Math.sin(un * 0.31) * 1.4 * SCALE + Math.sin(un * 0.13 + 2.1) * 1.2 * SCALE;
+  }
+
+  // 山なみの帯(画面上端 20%)
+  const mountainD = d0 + dSpan * 0.20;
+
+  // 画面座標(sw*fx, sh*fy)→グリッド座標。中央寄りにクランプして、はしっこにはみ出ないようにする。
+  function screenPt(fx, fy, margin) {
+    const p = Iso.gridAtScreen(view, sw * fx, sh * fy);
+    return [clamp(p.x, margin, GW - 1 - margin), clamp(p.y, margin, GH - 1 - margin)];
+  }
+  // 海に食い込みそうなら、d(おくゆき)を小さくして画面奥へ押し戻す(海のうえに建物・たかだいを置かない)
+  function pullInland(cx, cy, margin) {
+    const d = cx + cy, u = cx - cy;
+    const limit = coastD(u) - margin;
+    if (d > limit) {
+      const shift = (d - limit) / 2;
+      cx -= shift; cy -= shift;
+    }
+    return [clamp(cx, 1, GW - 2), clamp(cy, 1, GH - 2)];
+  }
+
+  // 基本地形: d=x+y の対角線ぞいに、奥(d小)から手前(d大)へ
   // 山ふもと→草地→浜→海、とゆるく高さが変わる。海岸線は u=x-y でうねる。
   for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
     const i = idx(x, y);
@@ -87,55 +125,76 @@ function genMap(variant) {
     const dc = coastD(u);
     const noise = Math.sin(x * 0.55 + y * 0.75) * 0.03 + Math.sin(x * 1.3 - y * 0.6) * 0.02;
     if (d > dc) {
-      // 海: 沖(dが大きい)へむかって深くなる
-      h[i] = clamp(0.82 - (d - dc) * 0.16, 0.08, 0.82);
+      // 海: 沖(dが大きい)へむかって深くなる。画面下端の全はばが海の帯になる
+      const off = (d - dc) / SCALE;
+      h[i] = clamp(0.82 - off * 0.16, 0.08, 0.82);
       type[i] = T_SEA;
     } else {
-      const inland = dc - d;
+      const inland = (dc - d) / SCALE;
       h[i] = 1.18 + inland * 0.062 + noise;
       if (inland < 2.6) { type[i] = T_SAND; h[i] = Math.min(h[i], 1.18 + inland * 0.11); }
       else type[i] = T_GRASS;
     }
   }
 
-  // 奥の山なみ(画面いちばん奥の頂点 (0,0) まわり、d が小さいところ)
-  addMound(h, 3, 4, 4.2, 2.2);
-  addMound(h, 9, 2, 5.0, 2.5);
-  addMound(h, 2, 11, 4.5, 2.1);
-  addMound(h, 13, 4, 3.6, 1.7);
-
   World.springs = [];
   World.buildings = [];
   World.trees = [];
   World.flowers = [];
 
-  // 川: 山のふもと(d小)から海(d大)へ、u をsinで振りながら d にそって下る
-  const RIVER_U = 8, RIVER_AMP = 2.6, RIVER_FREQ = 0.35;
-  function riverU(d) { return RIVER_U + RIVER_AMP * Math.sin(d * RIVER_FREQ); }
+  // 山なみ: 画面上端の帯に3〜5個、よこ方向(u)にばらけさせて置く
+  const mtCount = 3 + Math.floor(rand() * 3);
+  for (let m = 0; m < mtCount; m++) {
+    const fx = 0.10 + (m + 0.5) / mtCount * 0.80 + (rand() - 0.5) * 0.06;
+    const fy = 0.02 + rand() * 0.15;
+    const [cx, cy] = screenPt(fx, fy, 6);
+    const r = (3.6 + rand() * 1.6) * SCALE;
+    const amp = 1.7 + rand() * 1.0;
+    addMound(h, cx, cy, r, amp);
+  }
+
+  // 川: 山の帯から海岸へ。u ≈ 画面右寄り1/3を基準に sin で蛇行しながら d を下る
+  const riverBase = Iso.gridAtScreen(view, sw * 0.67, sh * 0.5);
+  const RIVER_U0 = clamp(riverBase.x - riverBase.y, -GW * 0.45, GW * 0.45);
+  const RIVER_AMP = 2.6 * SCALE, RIVER_FREQ = 0.35 / SCALE;
+  function riverU(d) { return RIVER_U0 + RIVER_AMP * Math.sin(d * RIVER_FREQ); }
   function riverPoint(d) { const u = riverU(d); return [(d + u) / 2, (d - u) / 2]; }
+
+  const dRiverStart = Math.max(3 * SCALE, mountainD + 2 * SCALE);
+  const dMaxLimit = GW + GH;
 
   if (variant !== "c3") {
     const pts = [];
-    for (let d = 12; d <= coastD(riverU(d)) + 3 && d < 60; d += 0.5) pts.push(riverPoint(d));
-    carveRiver(h, type, pts, 0.9, 2.6, 0.7);
-    const sp = riverPoint(12);
+    for (let d = dRiverStart; d <= coastD(riverU(d)) + 3 * SCALE && d < dMaxLimit; d += 0.5) pts.push(riverPoint(d));
+    carveRiver(h, type, pts, 0.9 * SCALE, 2.6, 0.7);
+    const sp = riverPoint(dRiverStart);
     World.springs.push({ x: sp[0], y: sp[1], rate: 0.026 });
   } else {
-    // おだい3: とちゅうで切れた川(d 24〜34 のあいだは陸地のまま)。みぞでつなぐと海までとどく
+    // おだい3: とちゅうで切れた川(川の道のりのまんなかあたりが陸地のまま)。みぞでつなぐと海までとどく
+    const dCoastNear = coastD(riverU(dRiverStart));
+    const riverSpan = Math.max(4, dCoastNear - dRiverStart);
+    const dMid = dRiverStart + riverSpan * 0.42;
+    const breakLen = Math.max(3 * SCALE, riverSpan * 0.26);
     const pts1 = [], pts2 = [];
-    for (let d = 12; d <= 24; d += 0.5) pts1.push(riverPoint(d));
-    for (let d = 34; d <= coastD(riverU(d)) + 3 && d < 60; d += 0.5) pts2.push(riverPoint(d));
-    carveRiver(h, type, pts1, 0.9, 2.6, 1.9);
-    carveRiver(h, type, pts2, 0.9, 1.4, 0.7);
-    const sp = riverPoint(12);
+    for (let d = dRiverStart; d <= dMid; d += 0.5) pts1.push(riverPoint(d));
+    for (let d = dMid + breakLen; d <= coastD(riverU(d)) + 3 * SCALE && d < dMaxLimit; d += 0.5) pts2.push(riverPoint(d));
+    carveRiver(h, type, pts1, 0.9 * SCALE, 2.6, 1.9);
+    carveRiver(h, type, pts2, 0.9 * SCALE, 1.4, 0.7);
+    const sp = riverPoint(dRiverStart);
     World.springs.push({ x: sp[0], y: sp[1], rate: 0.07 });
   }
 
-  // たかだい
+  // たかだい: 画面左寄り中段。c2 は海のちかくに低くつくる(おだい2: 波がくると水がくる高さ)
   if (variant === "c2") {
-    addPlateau(h, type, 15, 24, 2.6, 2.6, stairs);   // 海のちかくの ひくい たかだい
+    const rHigh = 2.6 * SCALE;
+    const [hx, hy] = screenPt(0.42, 0.62, 6);
+    const [px, py] = pullInland(hx, hy, rHigh + 2.6 * SCALE);
+    addPlateau(h, type, px, py, rHigh, 2.6, stairs);
   } else {
-    addPlateau(h, type, 11, 21, 2.8, 3.9, stairs);
+    const rHigh = 2.8 * SCALE;
+    const [hx, hy] = screenPt(0.30, 0.52, 6);
+    const [px, py] = pullInland(hx, hy, rHigh + 2.6 * SCALE);
+    addPlateau(h, type, px, py, rHigh, 3.9, stairs);
   }
 
   // 山の頂上は岩、たかい所は色をかえる
@@ -146,45 +205,63 @@ function genMap(variant) {
   World.h = h;
   World.type = type;
   World.stairs = stairs;
-  World.baseH = h.slice();
-  World.baseType = type.slice();
   World.variant = variant;
   World.undoStack = [];
 
-  // 海マスク(生成時の海タイプ)
-  const sm = new Uint8Array(N);
-  for (let i = 0; i < N; i++) sm[i] = (type[i] === T_SEA) ? 1 : 0;
-  World.seaMask = sm;
-
-  // 建物(海と山のあいだの低地に)
-  if (variant === "free") {
-    addBuilding("house", 9, 15);
-    addBuilding("house", 15, 19);
-    addBuilding("shop", 6, 20);
-    addBuilding("school", 11, 10);
-  } else if (variant === "c1") {
-    addBuilding("house", 19, 21);  // 海岸のすぐそば(波でぬれやすい)
-    addBuilding("house", 22, 19);
-  } else if (variant === "c2") {
-    addBuilding("school", 14, 23); // 海ちかくの ひくいたかだいの上
-  } else if (variant === "c3") {
-    addBuilding("house", 17, 15);
+  // 建物: 画面座標の割合(fx,fy)から置き場所を決める。海の上になったら陸に直す
+  function placeBuilding(kind, fx, fy, margin) {
+    const [bx, by] = screenPt(fx, fy, 4);
+    const [x, y] = pullInland(bx, by, margin);
+    const rx = clamp(Math.round(x), 1, GW - 3), ry = clamp(Math.round(y), 1, GH - 3);
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+      const gx = rx + dx, gy = ry + dy;
+      if (!inGrid(gx, gy)) continue;
+      const gi = idx(gx, gy);
+      if (type[gi] === T_SEA) { type[gi] = T_SAND; h[gi] = Math.max(h[gi], CFG.SEA_LEVEL + 0.55); }
+    }
+    addBuilding(kind, rx, ry);
   }
 
+  if (variant === "free") {
+    // 家2・おみせ1・ほいくえん1 を町の中段に
+    placeBuilding("house", 0.38, 0.44, 2.0 * SCALE);
+    placeBuilding("house", 0.55, 0.50, 2.0 * SCALE);
+    placeBuilding("shop", 0.30, 0.40, 2.0 * SCALE);
+    placeBuilding("school", 0.62, 0.42, 2.0 * SCALE);
+  } else if (variant === "c1") {
+    // 家2軒を海岸近く(画面高さ60〜65%): 波でぬれやすい・堤防で守れる
+    placeBuilding("house", 0.42, 0.60, 0.8 * SCALE);
+    placeBuilding("house", 0.58, 0.645, 0.8 * SCALE);
+  } else if (variant === "c2") {
+    // ほいくえんを海ちかくの ひくいたかだいの上に
+    placeBuilding("school", 0.42, 0.60, 2.0 * SCALE);
+  } else if (variant === "c3") {
+    placeBuilding("house", 0.46, 0.46, 2.0 * SCALE);
+  }
+
+  World.baseH = World.h.slice();
+  World.baseType = World.type.slice();
+
+  // 海マスク(建物ぶんの海→陸なおしを反映したあとの、生成時の海タイプ)
+  const sm = new Uint8Array(N);
+  for (let i = 0; i < N; i++) sm[i] = (World.type[i] === T_SEA) ? 1 : 0;
+  World.seaMask = sm;
+
   // 木と花
+  const treeSpacing = 2.2 * SCALE;
   let guard = 0;
-  while (World.trees.length < 15 && guard++ < 500) {
+  while (World.trees.length < 20 && guard++ < 800) {
     const x = 1 + Math.floor(rand() * (GW - 2));
     const y = 1 + Math.floor(rand() * (GH - 2));
     const i = idx(x, y);
     if (type[i] !== T_GRASS && type[i] !== T_PLAT) continue;
     if (h[i] < 1.5 || h[i] > 4.6) continue;
     if (buildingAt(x, y)) continue;
-    if (World.trees.some(t => Math.hypot(t.x - x, t.y - y) < 2.2)) continue;
+    if (World.trees.some(t => Math.hypot(t.x - x, t.y - y) < treeSpacing)) continue;
     World.trees.push({ x: x + rand() * 0.6 - 0.3, y: y + rand() * 0.6 - 0.3, s: 0.8 + rand() * 0.5, ph: rand() * 6.28 });
   }
   guard = 0;
-  while (World.flowers.length < 22 && guard++ < 500) {
+  while (World.flowers.length < 30 && guard++ < 800) {
     const x = 1 + Math.floor(rand() * (GW - 2));
     const y = 1 + Math.floor(rand() * (GH - 2));
     const i = idx(x, y);

@@ -60,34 +60,38 @@ function waterStep(dt, now) {
     if (Water.surgeT > 8.4) { Water.surgeT = -1; Water.surge = 0; }
   }
 
-  // 海面を固定(波のときは高くなる)
+  // 海面を固定(波のときは高くなる)。アクティブ(画面に映る)セルだけ処理して負荷を抑える。
   const seaLv = CFG.SEA_LEVEL + Water.surge + Math.sin(now * 0.0016) * 0.03;
   for (let i = 0; i < N; i++) {
+    if (!Iso.isActive(i)) continue; // 画面外は存在しない扱い
     if (sea[i]) w[i] = Math.max(0, seaLv - h[i]);
   }
 
-  // 湧き水
+  // 湧き水(アクティブなセルのみ)
   for (const s of World.springs) {
     const i = idx(Math.round(s.x), Math.round(s.y));
-    if (i >= 0 && i < N && !sea[i]) w[i] += s.rate;
+    if (i < 0 || i >= N) continue;
+    if (!Iso.isActive(i)) continue;
+    if (!sea[i]) w[i] += s.rate;
   }
 
-  // 流れ: 表面高が低いほうへ
+  // 流れ: 表面高が低いほうへ。自セルか相手セルが非アクティブなペアは流さない(画面外は無いもの扱い)。
   const k = CFG.FLOW;
   for (let iter = 0; iter < CFG.WATER_ITER; iter++) {
     for (let y = 0; y < GH; y++) {
       const yo = y * GW;
       for (let x = 0; x < GW; x++) {
         const i = yo + x;
+        if (!Iso.isActive(i)) continue; // 画面外セルは早期continueで負荷を抑える
         const wi = w[i];
         if (wi <= 0.0005) continue;
         const si = h[i] + wi;
-        // 4近傍との差
+        // 4近傍との差(近傍も非アクティブなら相手にしない)
         let d0 = 0, d1 = 0, d2 = 0, d3 = 0, total = 0;
-        if (x > 0)      { const j = i - 1;  const d = si - (h[j] + w[j]); if (d > 0) { d0 = d; total += d; } }
-        if (x < GW - 1) { const j = i + 1;  const d = si - (h[j] + w[j]); if (d > 0) { d1 = d; total += d; } }
-        if (y > 0)      { const j = i - GW; const d = si - (h[j] + w[j]); if (d > 0) { d2 = d; total += d; } }
-        if (y < GH - 1) { const j = i + GW; const d = si - (h[j] + w[j]); if (d > 0) { d3 = d; total += d; } }
+        if (x > 0)      { const j = i - 1;  if (Iso.isActive(j)) { const d = si - (h[j] + w[j]); if (d > 0) { d0 = d; total += d; } } }
+        if (x < GW - 1) { const j = i + 1;  if (Iso.isActive(j)) { const d = si - (h[j] + w[j]); if (d > 0) { d1 = d; total += d; } } }
+        if (y > 0)      { const j = i - GW; if (Iso.isActive(j)) { const d = si - (h[j] + w[j]); if (d > 0) { d2 = d; total += d; } } }
+        if (y < GH - 1) { const j = i + GW; if (Iso.isActive(j)) { const d = si - (h[j] + w[j]); if (d > 0) { d3 = d; total += d; } } }
         if (total <= 0) continue;
         let move = Math.min(wi, total * 0.5) * k;
         if (move > wi) move = wi;
@@ -101,9 +105,10 @@ function waterStep(dt, now) {
     }
   }
 
-  // 蒸発・ぬれ記録・きらきら減衰
+  // 蒸発・ぬれ記録・きらきら減衰(アクティブなセルのみ)
   const wet = Water.wet, glow = Water.flowGlow;
   for (let i = 0; i < N; i++) {
+    if (!Iso.isActive(i)) continue;
     if (!sea[i]) {
       if (w[i] > 0) {
         w[i] -= CFG.EVAP;
@@ -115,11 +120,14 @@ function waterStep(dt, now) {
     glow[i] *= 0.94;
   }
 
-  // 建物のぬれ判定
+  // 建物のぬれ判定(足もとのアクティブなセルだけ見る。建物は通常つねにアクティブ領域の中)
   for (const b of World.buildings) {
     let d = 0;
     for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
-      if (inGrid(b.x + dx, b.y + dy)) d = Math.max(d, w[idx(b.x + dx, b.y + dy)]);
+      if (!inGrid(b.x + dx, b.y + dy)) continue;
+      const i = idx(b.x + dx, b.y + dy);
+      if (!Iso.isActive(i)) continue;
+      d = Math.max(d, w[i]);
     }
     const wetNow = d > 0.12;
     if (wetNow && b.wet < 0.5) Sound.boing();
