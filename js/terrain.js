@@ -19,13 +19,11 @@ function idx(x, y) { return y * CFG.GW + x; }
 function inGrid(x, y) { return x >= 0 && x < CFG.GW && y >= 0 && y < CFG.GH; }
 
 // ---------- マップ生成 ----------
-// 真アイソメの対角線構図: d = x + y (0〜GW+GH-2) が「おくゆき」、
-// d が小さい (0,0) がわが画面いちばん奥=山、d が大きいがわが画面手前=海。
-// u = x - y は横断方向(海岸線をこの向きに sin で波打たせる)。
-const D_COAST_BASE = 42; // 海岸線の基準対角線値(海のわりあいが25〜40%になるよう調整ずみ)
-function coastD(u) {
-  return D_COAST_BASE + Math.sin(u * 0.31) * 1.4 + Math.sin(u * 0.13 + 2.1) * 1.2;
-}
+// FULLSCREEN_SPEC §2: 構図は Render.view(スクリーン空間)を基準に決める。
+// d = x + y は「おくゆき」(0に近いほど画面いちばん奥=山なみ、大きいほど画面手前=海)、
+// u = x - y は「よこはば」(画面横方向。u が同じセルはだいたい同じ画面x)。
+// 画面の高さに対する割合で各地形帯の位置を決めるので、画面の縦横比が変わっても
+// 構図(海岸線の高さ・山の帯など)の見た目の比率が保たれる。
 
 function addMound(h, cx, cy, r, amp) {
   for (let y = 0; y < CFG.GH; y++) for (let x = 0; x < CFG.GW; x++) {
