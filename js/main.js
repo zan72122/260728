@@ -86,6 +86,48 @@
     });
   }
 
+  // ゲーム開始から少し後に、#toolbar が横スクロール可能なとき(はみ出るボタンが
+  // あるとき)だけ、そっと右へ~60pxなめらかにスクロールして戻す「ちら見せ」演出。
+  // ユーザーがすでに toolbar を操作していたら即中断する。iPad 等スクロール不要な
+  // 画面では scrollWidth <= clientWidth なので何も起きない。
+  function peekToolbar() {
+    const el = document.getElementById("toolbar");
+    if (!el) return;
+    if (el.scrollWidth <= el.clientWidth + 1) return; // スクロール不要 = 何もしない
+
+    const dist = Math.min(60, el.scrollWidth - el.clientWidth);
+    if (dist <= 0) return;
+
+    const ac = new AbortController();
+    let cancelled = false;
+    const cancel = () => { cancelled = true; };
+    const opts = { once: true, passive: true, signal: ac.signal };
+    el.addEventListener("pointerdown", cancel, opts);
+    el.addEventListener("wheel", cancel, opts);
+    el.addEventListener("touchstart", cancel, opts);
+
+    const startLeft = el.scrollLeft;
+    const dur = 1000; // ms (往復で約1秒)
+    const start = performance.now();
+
+    // easeInOutSine: なめらかな加減速
+    const ease = (t) => -(Math.cos(Math.PI * t) - 1) / 2;
+
+    function frame(now) {
+      if (cancelled) { ac.abort(); return; }
+      const t = Math.min(1, (now - start) / dur);
+      // 0->0.5 で右へ、0.5->1 で元へ戻る三角波(イージング付き)
+      const phase = t < 0.5 ? ease(t / 0.5) : ease(1 - (t - 0.5) / 0.5);
+      el.scrollLeft = startLeft + dist * phase;
+      if (t < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        ac.abort();
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
   function wireUI() {
     document.querySelectorAll("#toolbar .tool").forEach(b => {
       b.addEventListener("pointerdown", () => Input.setTool(b.dataset.tool));
@@ -126,6 +168,7 @@
       Sound.speak("みずみちラボへ ようこそ! すきなところに みずを ながしてみてね");
       document.getElementById("title").classList.add("fadeout");
       Mascot.react("happy");
+      setTimeout(peekToolbar, 1000);
     });
 
     window.addEventListener("resize", () => Render.resize());

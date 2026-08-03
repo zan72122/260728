@@ -123,10 +123,13 @@ html, body {
 
 /* せまい画面 (iPhone) ではツールバー(9個のツールボタン)もコンパクト化し、
    390px幅でより多くのボタンが一度に見えるようにする。全部は入りきらないが、
-   次のボタンが少し見切れることで「続きがある」ことがわかるようにする。
+   末尾のボタンが「ちょうど半分」見切れるように max-width を調整することで、
+   一目で「まだ続きがある(横スクロールできる)」と読み取れるようにする
+   (実測値: iPhone390pxで tool 56px/gap 6px のとき、末尾ボタンの中央が
+   ぴったり見えるのは max-width: calc(100vw - 48px) 相当)。
    タッチ領域は44px角以上を維持する。 */
 @media (max-width: 480px) {
-  #toolbar { gap: 6px; bottom: calc(env(safe-area-inset-bottom) + 8px); padding: 0 4px; }
+  #toolbar { gap: 6px; bottom: calc(env(safe-area-inset-bottom) + 8px); padding: 0 4px; max-width: calc(100vw - 48px); }
   .tool {
     min-width: 56px;
     min-height: 44px;
