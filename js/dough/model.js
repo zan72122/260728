@@ -134,8 +134,15 @@ export class DoughModel {
     const beh = this.behavior;
 
     // 1. 発酵によるゆっくりとした成長 (restR が目標へ緩やかに近づく)
+    // バグ修正(監督QA): 以前は発酵だけで最大 R0*1.9 まで狙ってしまい、焼成後に
+    // 生地が画面からはみ出す破綻の主因になっていた。見た目の最大平均半径が
+    // 概ね 1.5〜1.6×R0 に収まるよう、発酵由来の成長上限を下げ、代わりに
+    // p.temperature (オーブンスプリング。CookStage が焼成前半で立ち上げる)
+    // による控えめな追加成長を新設した。どちらも growTarget へ漸近するだけで
+    // ハードクランプ(2.6*R0、下の安全下限/上限として維持)には通常到達しない。
     const fermentBoost = clamp01(p.ferment) * clamp01(beh.fermentPower);
-    const growTarget = R0 * (1 + fermentBoost * 0.9);
+    const springBoost = clamp01(p.temperature) * clamp01(beh.fermentPower);
+    const growTarget = R0 * (1 + fermentBoost * 0.5 + springBoost * 0.18);
     const growLerp = Math.min(1, 0.5 * dt);
     for (let i = 0; i < N2; i++) {
       const pt = this.points[i];

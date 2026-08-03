@@ -45,6 +45,18 @@ function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
+// バグ修正(監督QA バグ3b): 以前は snapshot.imageW/imageH (キャプチャした実寸 CSS px) に
+// zone.scale を掛けるだけで表示していたため、生地が大きく育った(または大きく伸ばされた)
+// 状態で焼くと、森の画面幅を優に超える「クリーム色の巨大矩形」になっていた。
+// 表示幅は元の生地サイズに関係なく、常にゾーンごとの適正サイズ(画面幅の 10〜16%程度)へ
+// 正規化する。zone.scale (0.32〜0.85) を目安に 10%〜16% の範囲へ線形マップする。
+const ZONE_SCALE_MIN = 0.32;
+const ZONE_SCALE_MAX = 0.85;
+function zoneSizeFrac(zoneScale) {
+  const t = clamp((zoneScale - ZONE_SCALE_MIN) / (ZONE_SCALE_MAX - ZONE_SCALE_MIN), 0, 1);
+  return 0.10 + t * 0.06;
+}
+
 function safeSfx(name, opts) {
   try {
     Sound && Sound.sfx && Sound.sfx(name, opts);
@@ -294,18 +306,23 @@ export class Forest {
     const bob = Math.sin(t * 1.3 + seed) * 2 * fallProgress;
 
     const scale = baseScale * (0.9 + 0.2 * ((i * 0.37) % 1)) * (0.85 + 0.15 * fallProgress);
+    // 表示幅の正規化 (SPEC-GUIDE バグ3b): 生地の実際の大きさに関わらず、
+    // ゾーンごとの適正サイズ(画面幅の10〜16%程度)へ揃える。variety/fallProgress の
+    // 演出味は維持するため scale と同じ変動係数(0.9〜1.1 × 出現アニメ)を乗せる。
+    const variety = (0.9 + 0.2 * ((i * 0.37) % 1)) * (0.85 + 0.15 * fallProgress);
+    const targetW = Math.max(12, W * zoneSizeFrac(baseScale) * variety);
 
     // snapshot.image があり decode 済みなら drawImage、無ければ従来の renderSnapshot。
     const img = this._ensureImage(entry);
     if (img && img.complete && img.naturalWidth > 0) {
       try {
-        this._drawSnapshotImage(ctx, entry.snapshot, img, x, y, scale, t);
+        this._drawSnapshotImage(ctx, entry.snapshot, img, x, y, targetW, t);
       } catch (e) {
-        try { renderSnapshot(ctx, entry.snapshot, x, y, scale, t); } catch (e2) { /* noop */ }
+        try { this._drawVectorNormalized(ctx, entry, x, y, targetW, t); } catch (e2) { /* noop */ }
       }
     } else {
       try {
-        renderSnapshot(ctx, entry.snapshot, x, y, scale, t);
+        this._drawVectorNormalized(ctx, entry, x, y, targetW, t);
       } catch (e) {
         // render.js 未実装/エラー時も森全体は落ちない
       }
@@ -317,17 +334,51 @@ export class Forest {
   }
 
   // snap.image (GL キャプチャの PNG dataURL) を drawImage で描く。
-  // snap.imageW/imageH は実寸(CSS px)で保存されているため、renderSnapshot と同じく
-  // scale だけ掛けて縮小する。呼吸の微スケールも renderSnapshot と同じ式で適用する。
-  _drawSnapshotImage(ctx, snap, img, x, y, scale, t) {
+  // バグ修正(監督QA バグ3b): 以前は snap.imageW/imageH (実寸 CSS px) に scale を
+  // 掛けるだけだったため、キャプチャ時の生地の実際の大きさがそのまま画面占有率に
+  // 直結し、大きく育った生地を置くと森を覆う巨大な矩形になっていた。
+  // ここでは呼び出し側 (_drawPlaced) が計算した「ゾーンの適正表示幅(targetW)」に
+  // 正規化して描く。アスペクト比(bh/bw、通常は正方形キャプチャなので1)だけ保つ。
+  _drawSnapshotImage(ctx, snap, img, x, y, targetW, t) {
     const bw = (typeof snap.imageW === 'number' && snap.imageW > 0) ? snap.imageW : (img.naturalWidth || 64);
     const bh = (typeof snap.imageH === 'number' && snap.imageH > 0) ? snap.imageH : (img.naturalHeight || 64);
+    const aspect = bw > 0 ? (bh / bw) : 1;
     const air = typeof snap.air === 'number' ? clamp(snap.air, 0, 1) : 0.3;
     const seed = ((Math.abs(x) * 13 + Math.abs(y) * 7) % 1000) / 1000;
     const breathe = 1 + Math.sin(t * 1.1 + seed * Math.PI * 2) * 0.006 * (0.3 + air);
-    const dw = Math.max(1, bw * scale * breathe);
-    const dh = Math.max(1, bh * scale * breathe);
+    const dw = Math.max(1, targetW * breathe);
+    const dh = Math.max(1, dw * aspect);
     ctx.drawImage(img, x - dw / 2, y - dh / 2, dw, dh);
+  }
+
+  // renderSnapshot(ベクター描画)版の正規化ラッパー。snap.outline (中心相対 CSS px)
+  // から生地本来の平均半径を見積もり、目標表示幅(targetW)に一致する scale を逆算する。
+  // outline は書き込み専用に一度だけ見積もってエントリへキャッシュする (JSON化されないよう非enumerable)。
+  _drawVectorNormalized(ctx, entry, x, y, targetW, t) {
+    const rawR = this._estimateRawRadius(entry);
+    const s = rawR > 1 ? (targetW / 2) / rawR : 1;
+    renderSnapshot(ctx, entry.snapshot, x, y, s, t);
+  }
+
+  _estimateRawRadius(entry) {
+    if (entry && typeof entry._rawR === 'number') return entry._rawR;
+    let r = 0;
+    const outline = entry && entry.snapshot && entry.snapshot.outline;
+    if (Array.isArray(outline) && outline.length) {
+      let sum = 0;
+      for (let i = 0; i < outline.length; i++) {
+        const pt = outline[i];
+        sum += Math.hypot((pt && pt.x) || 0, (pt && pt.y) || 0);
+      }
+      r = sum / outline.length;
+    }
+    if (!(r > 1)) r = 100; // outline が無い/壊れている場合の保険値
+    try {
+      Object.defineProperty(entry, '_rawR', { value: r, enumerable: false, configurable: true, writable: true });
+    } catch (e) {
+      entry._rawR = r; // defineProperty 不可環境向けの保険 (保存時は snapshot 側だけを見るため無害)
+    }
+    return r;
   }
 
   _drawSparkle(ctx, x, y, r, amount, t, seed) {

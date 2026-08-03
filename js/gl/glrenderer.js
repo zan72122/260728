@@ -644,13 +644,68 @@ export class GLDoughRenderer {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
+  // バグ修正(監督QA バグ3): 以前は ctx.drawImage(this.canvas, ...) で WebGL canvas を
+  // 直接 2D canvas へコピーしていたが、この環境(SwiftShader/一部ブラウザ実装)では
+  // WebGL canvas→2D canvas の drawImage 経由コピーがアルファチャンネルを失い、
+  // 森に「不透明のクリーム色矩形」として焼き付く破綻の原因になっていた。
+  // gl.readPixels() でフレームバッファを直接読み、alpha を保ったまま PNG を作る。
+  // このコンテキストは premultipliedAlpha:true で、シェーダも premultiplied な
+  // 値を出力しているため (`vec4(lit*holeAlpha, holeAlpha)`)、そのままでは
+  // ふちが暗くにじむ。straight alpha (rgb を alpha で割り戻す) に変換してから
+  // ImageData として書き出す。readPixels は左下原点のため上下反転も行う。
   captureRegion(cx, cy, w, h) {
     const gl = this.gl;
     const dpr = this.dpr || 1;
     const sx = Math.max(0, Math.round((cx - w / 2) * dpr));
-    const sy = Math.max(0, Math.round((cy - h / 2) * dpr));
+    const syTop = Math.max(0, Math.round((cy - h / 2) * dpr)); // CSS(top-left)座標系のy
     const sw = Math.max(1, Math.min(this.w - sx, Math.round(w * dpr)));
-    const sh = Math.max(1, Math.min(this.h - sy, Math.round(h * dpr)));
+    const sh = Math.max(1, Math.min(this.h - syTop, Math.round(h * dpr)));
+    // readPixels の原点は左下。top-left 基準の syTop から GL 座標へ変換する。
+    const glY = Math.max(0, this.h - syTop - sh);
+
+    let raw;
+    try {
+      raw = new Uint8Array(sw * sh * 4);
+      gl.readPixels(sx, glY, sw, sh, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+    } catch (e) {
+      return null; // 呼び出し側 (main.js) は image 無しの従来動作へフォールバックする
+    }
+
+    // premultiplied → straight alpha へ変換 + 上下反転して ImageData へ
+    const straight = new Uint8ClampedArray(sw * sh * 4);
+    for (let row = 0; row < sh; row++) {
+      const srcRow = sh - 1 - row; // 上下反転 (readPixels は下から)
+      const srcRowOff = srcRow * sw * 4;
+      const dstRowOff = row * sw * 4;
+      for (let col = 0; col < sw; col++) {
+        const si = srcRowOff + col * 4;
+        const di = dstRowOff + col * 4;
+        const a = raw[si + 3];
+        if (a > 0) {
+          straight[di] = Math.min(255, Math.round((raw[si] * 255) / a));
+          straight[di + 1] = Math.min(255, Math.round((raw[si + 1] * 255) / a));
+          straight[di + 2] = Math.min(255, Math.round((raw[si + 2] * 255) / a));
+        } else {
+          straight[di] = 0;
+          straight[di + 1] = 0;
+          straight[di + 2] = 0;
+        }
+        straight[di + 3] = a;
+      }
+    }
+
+    const full = document.createElement('canvas');
+    full.width = sw;
+    full.height = sh;
+    const fctx = full.getContext('2d');
+    let imgData;
+    try {
+      imgData = fctx.createImageData(sw, sh);
+    } catch (e) {
+      return null;
+    }
+    imgData.data.set(straight);
+    fctx.putImageData(imgData, 0, 0);
 
     const maxSide = 192;
     const scale = Math.min(1, maxSide / Math.max(sw, sh));
@@ -662,7 +717,8 @@ export class GLDoughRenderer {
     out.height = dh;
     const octx = out.getContext('2d');
     octx.imageSmoothingEnabled = true;
-    octx.drawImage(this.canvas, sx, sy, sw, sh, 0, 0, dw, dh);
+    octx.clearRect(0, 0, dw, dh);
+    octx.drawImage(full, 0, 0, sw, sh, 0, 0, dw, dh);
     return { url: out.toDataURL('image/png'), w: dw, h: dh };
   }
 

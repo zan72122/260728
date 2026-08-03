@@ -310,6 +310,15 @@ export class HUD {
     return { x: r.left, y: r.top, w: r.width, h: r.height };
   }
 
+  // 「もりにおく」ボタンの画面上の矩形 (SPEC-GUIDE: ゴーストハンドの done 時タップ実演先)。
+  // done パネルが非表示中は w=0 の矩形を返す (呼び出し側は w をチェックして無視する)。
+  getPlaceButtonRect() {
+    const el = this.el.placeBtn;
+    if (!el || (this.el.donePanel && this.el.donePanel.hidden)) return { x: 0, y: 0, w: 0, h: 0 };
+    const r = el.getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height };
+  }
+
   // ---- main.js 専用の拡張メソッド ---------------------------------------
 
   setCurrentBread(breadId) {

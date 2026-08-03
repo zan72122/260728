@@ -174,7 +174,10 @@ export class CookStage {
 
   _updateBake(dt, p, frac) {
     // 前半にオーブンスプリング: temperature を素早く立ち上げ、model.js 側の
-    // restR 追加成長(ferment×temperature)を誘発する。
+    // restR 追加成長(ferment×temperature、控えめな係数で漸近)を誘発する。
+    // バグ修正(監督QA): 従来 model.js は p.temperature を読んでおらず
+    // オーブンスプリングが実質無効だった。model.js 側の係数調整と合わせて
+    // ここで立ち上げる値自体は変更していない(0→1、焼成前半45%で到達)。
     const springFrac = clamp01(this.t / (this.duration * 0.45));
     p.temperature = springFrac;
 
