@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Rabbit animation test harness (S1)</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1a2b38; }
+  #canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #hud {
+    position: fixed; top: 8px; left: 8px; z-index: 10;
+    font: 12px/1.5 monospace; color: #fff; background: rgba(0,0,0,0.5);
+    padding: 6px 10px; border-radius: 6px; pointer-events: none;
+    white-space: pre;
+    max-width: 40vw;
+  }
+  #buttons {
+    position: fixed; bottom: 8px; left: 8px; z-index: 10;
+    display: flex; flex-wrap: wrap; gap: 6px; max-width: 96vw;
+  }
+  #buttons button {
+    font: 12px/1 monospace; padding: 8px 10px; border-radius: 6px; border: none;
+    background: #ffd23f; color: #1a2b38; cursor: pointer;
+  }
+  #buttons button:active { background: #ffb703; }
+</style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="hud">loading…</div>
+  <div id="buttons">
+    <button data-act="idle">idle</button>
+    <button data-act="climbLow">climb→low</button>
+    <button data-act="climbMid">climb→mid</button>
+    <button data-act="climbHigh">climb→high</button>
+    <button data-act="fetch">fetchToy</button>
+    <button data-act="stow">stowToy</button>
+    <button data-act="aimSweep">aimLean sweep</button>
+    <button data-act="throw">windupAndThrow</button>
+    <button data-act="cheer">cheer</button>
+    <button data-act="watch">watchPoint</button>
+    <button data-act="cycle">run full cycle</button>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "../vendor/three.module.js"
+    }
+  }
+  </script>
+  <script type="module" src="./rabbit-test.js"></script>
+</body>
+</html>
