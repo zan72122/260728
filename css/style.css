@@ -21,6 +21,10 @@
 
 *{ box-sizing: border-box; }
 
+/* [hidden] は多くの要素で display:flex 等の author style と同specificityで
+   衝突し無効化されるため、常に最優先で非表示にする（HUDのshow/hide全般の前提）。*/
+[hidden]{ display:none !important; }
+
 html, body{
   margin:0; padding:0;
   width:100%; height:100%;

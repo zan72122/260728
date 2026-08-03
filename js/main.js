@@ -520,6 +520,9 @@ function boot() {
 
   gestures = new GestureController(canvas, onGesture);
   canvas.addEventListener('pointerdown', onCanvasPointerDown);
+  // HUDボタン等、canvas以外への最初のタップでも音を初期化できるようにする
+  // （SPEC: 「最初のユーザー操作で呼ばれる」。1度発火したら自動で外れる）。
+  document.addEventListener('pointerdown', ensureSoundInit, { once: true, capture: true });
 
   selectBread('shokupan');
 
@@ -530,6 +533,17 @@ function boot() {
   lastTime = performance.now();
   running = true;
   rafId = requestAnimationFrame(loop);
+
+  // デバッグ/統合テスト用フック（本番挙動には影響しない）
+  window.__game = {
+    get dough() { return dough; },
+    get mode() { return mode; },
+    get stage() { return stage; },
+    get tool() { return tool; },
+    get currentBreadId() { return currentBreadId; },
+    get forest() { return forest; },
+    get hud() { return hud; },
+  };
 }
 
 boot();
